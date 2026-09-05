@@ -50,6 +50,10 @@ The shared world continues while a player's menu is open. Sound and graphics set
 
 The ship cruises above the island for 28 seconds. Jump when ready, steer while gliding, and land safely. Pirates still aboard at the end are automatically dropped above Sunwake Strand. Explore Sunwake Strand, Palmheart Wilds, Emberpeak Caldera, Moonbloom Grove, and central Tideglass Haven. The map and colored shrine markers guide the crew.
 
+Branching footpaths lead to eight places with their own daily bustle: Saltwind Harbor's tavern and fishing boats, the striped awnings of Tideglass Market, Windward Farm's turning windmill, the ruins of Old Watch, Palmheart Camp, the caldera forge at Cinderworks, Moonwatch's observatory, and the hull under repair at Driftwood Yard. Friendly fishers, merchants, farmers, a smith, a lookout, a scholar, and shipwrights tend their work sites. These ambient locals add life to the island; the buildings are exterior landmarks.
+
+Visit each place on foot to add it to your voyage journal. Press M for named destinations, building footprints, walking paths, and your personal discovery count. Discoveries begin afresh each voyage. Treasure tucked around the settlements still belongs to the whole crew, and the three shrines remain your shared objective.
+
 Open chests for shared pearls and nearby healing. Visit the three compass shrines in any order, press E to awaken each one, defeat its crab guards, then stand near it for five seconds. A restored shrine grants a shard, heals nearby pirates, and becomes the automatic rescue checkpoint. There are no endless shrine waves.
 
 With all three shards, return to the lighthouse and press E to begin the final encounter. Move away from the Tempest Crab's warning circles and keep firing together. Defeating it produces shared results and individual contributions. The captain can start another voyage from the results screen.
@@ -80,6 +84,17 @@ $env:PORT = '3401'
 $env:DATA_DIR = '.qa/data'
 npm start
 ```
+
+The island expansion is included in the normal Docker game on port 3400. For an isolated development preview, the local expansion worktree can also run on port 3402 with separate saves:
+
+```powershell
+Set-Location C:/repos/skywake-isles/.qa/worktrees/island-expansion
+$env:PORT = '3402'
+$env:DATA_DIR = '.qa/data-3402'
+npm start
+```
+
+Open **http://localhost:3402** for that development preview. It has its own crew and voyage; use **http://localhost:3400** for the Docker game.
 
 ```powershell
 npm run test:unit

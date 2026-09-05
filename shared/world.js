@@ -1,3 +1,5 @@
+import { BUILDINGS, EXPLORATION_CHESTS } from './exploration.js';
+
 // Original designed island. These values are shared by rendering and authority.
 export const MAX_PLAYERS = 5;
 export const WORLD_RADIUS = 138;
@@ -28,7 +30,7 @@ export const CHESTS = [
   [0, 88], [-8, 97], [9, 100], [-16, 66], [18, 52], [-32, 36],
   [-56, 26], [-83, -1], [-93, 31], [-25, -26], [17, -38], [39, -52],
   [61, -83], [79, -49], [87, 18], [64, 50], [97, 53], [13, 15],
-].map(([x, z], i) => ({ id: `chest-${i + 1}`, x, z }));
+].map(([x, z], i) => ({ id: `chest-${i + 1}`, x, z })).concat(EXPLORATION_CHESTS);
 const obstacleLayout = [
   [-24, 101, 2.5, 5, 'rock'], [27, 93, 2.2, 7, 'tree'], [-35, 81, 2, 8, 'tree'],
   [31, 70, 2.2, 7, 'tree'], [-30, 60, 2.2, 7, 'tree'], [20, 76, 2, 3, 'rock'],
@@ -43,7 +45,8 @@ const obstacleLayout = [
   [51, 18, 2.5, 8, 'tree'], [69, 5, 2.5, 9, 'tree'], [109, 57, 2.2, 4, 'rock'],
   [0, -20, 4.5, 31, 'landmark'],
 ];
-export const OBSTACLES = obstacleLayout.map(([x, z, radius, height, type], i) => ({ id: `prop-${i + 1}`, x, z, radius, height, type }));
+export const OBSTACLES = obstacleLayout.map(([x, z, radius, height, type], i) => ({ id: `prop-${i + 1}`, x, z, radius, height, type }))
+  .concat(BUILDINGS.map(({ id, x, z, radius, height }) => ({ id: `building-${id}`, type: 'building', x, z, radius, height, buildingId: id })));
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };

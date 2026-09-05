@@ -123,3 +123,49 @@ physical device on the household network was not available for verification.
 Desktop keyboard and mouse are required. This is a complete, small cooperative
 island adventure, not a recreation of Fortnite's scale, building, matchmaking,
 or competitive modes.
+
+## Island expansion worktree
+
+The `island-expansion` branch lives at
+`C:/repos/skywake-isles/.qa/worktrees/island-expansion`. Existing uncommitted
+gameplay improvements were copied into this checkout before the expansion.
+The finished expansion is integrated into `main` for the Docker game at
+http://localhost:3400. The development preview at http://localhost:3402 uses
+isolated saves.
+
+The expansion adds eight named places, 14 buildings, 10 ambient residents,
+eight treasure chests, two fishing skiffs, and 27 clusters of work-site props.
+Buildings and paths use shared layout data for rendering, movement, combat
+collision, and the map. Residents and their work pauses are decorative;
+buildings are exterior landmarks. Discovery progress is local to the current
+page/voyage and clears on a new voyage or page refresh.
+
+After integration into `main`, `npm.cmd test` passed all 51 tests with no skips
+or failures in 91.65 seconds.
+The five-client network test completed all three shrines and the final boss,
+then verified replay, reconnect behavior, and persisted aggregate statistics.
+Six new tests exercise the real movement implementation along each destination
+and treasure approach in both directions, across both edges of the five-meter
+paths, around resident loops, and against every building's collision boundary.
+The original 44 unit checks still pass. Final JavaScript syntax and whitespace
+checks also pass.
+
+An isolated Microsoft Edge browser on this host visited all eight places with
+normal networked movement, completed the discovery journal, and opened a new
+camp chest for 12 shared pearls. Discovery waited while the map was open and
+registered on closing it on foot. The 1280-by-720 map was visually checked for
+labels, legend, journal layout, and keyboard closing. Harbor, market, farm and
+observatory scenery was reviewed with ground-level and inspection-camera
+captures. The final browser reported no runtime or console errors. All 14
+measured building meshes fit inside their shared footprints and collision
+heights; all 180,570 settlement geometry vertices were finite.
+
+Frame sampling confirmed rotating windmill sails, bobbing skiffs, drifting
+smoke and resident motion/work pauses. The new ambient poses remained identical
+over 60 frames with reduced motion enabled. Low graphics hid smoke while
+retaining all buildings and all 10 residents. At 1920 by 1080 on this host, the
+warmed high-quality preview averaged about 60 fps over 240 frames, with a
+16.8 ms 95th percentile and 293 draw calls. The comparable pre-architecture
+preview used 266 calls. These are short measurements on this machine, not a
+performance guarantee for other hardware. No additional physical LAN device
+was tested for this expansion.

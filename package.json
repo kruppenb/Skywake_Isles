@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
-    "test:unit": "node --test test/movement.test.js test/game.test.js test/input.test.js test/prediction.test.js test/presentation.test.js",
+    "test:unit": "node --test test/movement.test.js test/game.test.js test/input.test.js test/prediction.test.js test/presentation.test.js test/exploration.test.js",
     "test:e2e": "node --test test/network.test.js"
   },
   "engines": { "node": ">=22" },

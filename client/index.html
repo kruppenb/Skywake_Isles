@@ -85,12 +85,14 @@
       <div id="interact-hint" class="interact-hint" hidden><kbd>E</kbd><span></span></div>
       <div id="look-hint" class="look-hint">Click to aim · Hold right mouse to look · <kbd>Esc</kbd> menu</div>
       <div id="nameplates" class="nameplates" aria-hidden="true"></div>
+      <aside id="discovery-notice" class="discovery-notice" role="status" aria-live="polite" aria-atomic="true" hidden><span class="discovery-kicker">A new place on your chart</span><strong id="discovery-name"></strong><p id="discovery-description"></p><span class="discovery-map-hint">Your discoveries are on the map <kbd>M</kbd></span></aside>
     </section>
     <div id="toast-stack" class="toast-stack" role="status" aria-live="polite" aria-atomic="false"></div>
-    <section id="map-overlay" class="modal map-modal" aria-labelledby="map-title" hidden>
+    <section id="map-overlay" class="modal map-modal" role="dialog" aria-modal="true" aria-labelledby="map-title" hidden>
       <div class="map-panel"><div class="map-heading"><div><span class="panel-kicker">Your shared adventure</span><h2 id="map-title">Chart the isles.</h2></div><button id="close-map" class="icon-button" type="button" aria-label="Close island map">✕</button></div>
-      <canvas id="large-map" width="750" height="650" aria-label="Map showing the five regions, compass shrines, lighthouse, and every crew member"></canvas>
-      <div class="map-legend"><span><b class="legend-diamond">◆</b> Compass shard</span><span><b>✦</b> Lighthouse</span><span><b>●</b> Your crew</span><span><kbd>G</kbd> Share your location</span></div><p>Collect the three shards in any order. Gold beams guide you to each shrine.</p></div>
+      <div class="map-content"><canvas id="large-map" width="750" height="650" aria-label="Island chart showing regions, walking paths, buildings, eight named places, compass shrines, lighthouse, and your crew" aria-describedby="places-count"></canvas>
+      <aside class="map-places" aria-labelledby="places-count"><span class="map-journal-kicker">Your voyage journal</span><h3 id="places-count">Places discovered 0 / 8</h3><p>Follow the paths and visit on foot.</p><ul id="places-list" aria-label="Your discovered places this voyage"></ul><p class="map-journal-note">A fresh chart for every voyage.</p></aside></div>
+      <div class="map-legend"><span><b class="legend-diamond">◆</b> Compass shard</span><span><b>✦</b> Lighthouse</span><span><b>●</b> Your crew</span><span><b class="legend-place">○</b> Places</span><span><b class="legend-path" aria-hidden="true"></b> Walking paths</span><span><kbd>G</kbd> Share your location</span></div><p>Collect the three shards in any order. Gold beams guide you to each shrine.</p></div>
     </section>
     <section id="pause-overlay" class="modal" aria-labelledby="pause-title" hidden>
       <div class="panel pause-panel"><span class="panel-kicker">Take a breather</span><h2 id="pause-title">Captain’s quarters</h2><p>Your crew’s adventure continues while this menu is open.</p><button id="resume-button" class="primary" type="button">Back to the adventure</button>

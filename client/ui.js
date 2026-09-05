@@ -1,4 +1,5 @@
 import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt } from '/shared/world.js';
+import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } from '/shared/exploration.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -78,6 +79,31 @@ function createMapPainter() {
       }
     }
   }
+  const basePoint = (point) => ({ x: 450 * (.5 + point.x / (extent * 2)), y: 450 * (.5 + point.z / (extent * 2)) });
+  context.lineCap = 'round'; context.lineJoin = 'round';
+  context.strokeStyle = '#efdbad'; context.lineWidth = 5 * 450 / (extent * 2);
+  const routes = [...[SPAWN, ...SHRINES].map((point) => [BEACON, point]), ...EXPLORATION_TRAILS.map((trail) => trail.points)];
+  for (const points of routes) {
+    context.beginPath();
+    points.forEach((point, index) => {
+      const position = basePoint(point);
+      if (index === 0) context.moveTo(position.x, position.y); else context.lineTo(position.x, position.y);
+    });
+    context.stroke();
+  }
+  for (const building of BUILDINGS) {
+    const position = basePoint(building); const radius = building.radius * 450 / (extent * 2);
+    context.save(); context.translate(position.x, position.y); context.rotate(-building.yaw);
+    context.fillStyle = building.roofColor; context.strokeStyle = '#725b49'; context.lineWidth = .8;
+    if (['watchtower', 'windmill', 'observatory'].includes(building.kind)) {
+      context.beginPath(); context.arc(0, 0, radius, 0, Math.PI * 2); context.fill(); context.stroke();
+    } else {
+      const side = radius * Math.SQRT2;
+      context.fillRect(-side / 2, -side / 2, side, side); context.strokeRect(-side / 2, -side / 2, side, side);
+      context.beginPath(); context.moveTo(0, -side / 2); context.lineTo(0, side / 2); context.stroke();
+    }
+    context.restore();
+  }
   context.strokeStyle = '#ffffff16'; context.lineWidth = 1;
   for (let x = 0; x <= 450; x += 45) { context.beginPath(); context.moveTo(x, 0); context.lineTo(x, 450); context.stroke(); }
   for (let y = 0; y <= 450; y += 45) { context.beginPath(); context.moveTo(0, y); context.lineTo(450, y); context.stroke(); }
@@ -87,7 +113,7 @@ function createMapPainter() {
     ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke();
   };
 
-  return function drawMap(canvas, state, player, large, elapsed) {
+  return function drawMap(canvas, state, player, large, elapsed, discoveries) {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const dpr = Math.min(devicePixelRatio || 1, 1.5);
@@ -101,6 +127,13 @@ function createMapPainter() {
     const size = Math.min(width, height) - (large ? 16 : 0);
     const ox = (width - size) / 2; const oy = (height - size) / 2;
     const mapPoint = (point) => ({ x: ox + size * (.5 + point.x / (extent * 2)), y: oy + size * (.5 + point.z / (extent * 2)) });
+    const occupied = [];
+    if (large) {
+      for (const point of [...SHRINES, BEACON, ...POINTS_OF_INTEREST]) {
+        const position = mapPoint(point); const radius = point === BEACON ? 17 : point.radius ? 7 : 15;
+        occupied.push({ x: position.x - radius, y: position.y - radius, width: radius * 2, height: radius * 2 });
+      }
+    }
     ctx.fillStyle = large ? '#e4f0e6' : '#499fae'; ctx.fillRect(0, 0, width, height);
     ctx.drawImage(base, ox, oy, size, size);
     if (large) {
@@ -146,7 +179,36 @@ function createMapPainter() {
         ctx.textAlign = 'center'; ctx.font = 'bold 12px "Trebuchet MS",sans-serif'; ctx.fillStyle = '#174555'; ctx.strokeStyle = '#ecf0d3'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
         ctx.strokeText(line1, position.x, y); ctx.fillText(line1, position.x, y);
         ctx.strokeText(line2, position.x, y + 14); ctx.fillText(line2, position.x, y + 14);
+        const labelWidth = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 8;
+        occupied.push({ x: position.x - labelWidth / 2, y: y - 13, width: labelWidth, height: 31 });
       }
+    }
+    for (const place of POINTS_OF_INTEREST) {
+      const position = mapPoint(place); const discovered = discoveries.has(place.id);
+      ctx.beginPath(); ctx.arc(position.x, position.y, large ? 4 : 2, 0, Math.PI * 2);
+      ctx.fillStyle = discovered ? '#286e67' : '#e9efda'; ctx.fill();
+      ctx.strokeStyle = '#286e67'; ctx.lineWidth = large ? 1.5 : .8; ctx.stroke();
+      if (!large) continue;
+      ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
+      const labelWidth = ctx.measureText(place.name).width + 10; const labelHeight = 18;
+      const candidates = [
+        [10, -9], [-labelWidth - 10, -9], [-labelWidth / 2, -29], [-labelWidth / 2, 12],
+        [10, -30], [-labelWidth - 10, -30], [10, 13], [-labelWidth - 10, 13],
+        [-labelWidth / 2, -49], [-labelWidth / 2, 32],
+      ];
+      // Keep destination names clear of the quest symbols, region names, and one another.
+      const labels = candidates.map(([dx, dy], index) => {
+        const box = { x: clamp(position.x + dx, 4, width - labelWidth - 4), y: clamp(position.y + dy, oy + 18, oy + size - labelHeight - 18), width: labelWidth, height: labelHeight };
+        const overlap = occupied.reduce((sum, other) => sum + Math.max(0, Math.min(box.x + box.width + 3, other.x + other.width) - Math.max(box.x - 3, other.x)) * Math.max(0, Math.min(box.y + box.height + 3, other.y + other.height) - Math.max(box.y - 3, other.y)), 0);
+        return { ...box, score: overlap * 100 + index };
+      });
+      labels.sort((a, b) => a.score - b.score); const label = labels[0]; occupied.push(label);
+      ctx.beginPath(); ctx.moveTo(position.x, position.y);
+      ctx.lineTo(clamp(position.x, label.x, label.x + label.width), clamp(position.y, label.y, label.y + label.height));
+      ctx.strokeStyle = '#315e6677'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = discovered ? '#e9f5dfed' : '#eef1e3dd'; ctx.fillRect(label.x, label.y, label.width, label.height);
+      ctx.textAlign = 'left'; ctx.fillStyle = discovered ? '#19594f' : '#3b6269';
+      ctx.fillText(place.name, label.x + 5, label.y + 12);
     }
     for (const ping of state.pings) {
       if (ping.expiresAt < elapsed) continue;
@@ -186,6 +248,10 @@ export function createUI(callbacks = {}) {
   let mapAt = 0;
   let hitUntil = 0;
   let target = null;
+  let discoveryRound = null;
+  let discoveryUntil = 0;
+  const discoveries = new Set();
+  const placeEntries = new Map();
   let settings = { quality: read('skywake-quality', 'high'), muted: false };
   const plates = new Map();
   const notices = new Map();
@@ -194,6 +260,26 @@ export function createUI(callbacks = {}) {
   const listen = (element, event, handler) => { element.addEventListener(event, handler); cleanup.push(() => element.removeEventListener(event, handler)); };
   const button = (id, callback) => listen(refs[id], 'click', callback);
   const modalChanged = () => callbacks.onModalChange?.({ paused, mapOpen });
+
+  for (const place of POINTS_OF_INTEREST) {
+    const entry = document.createElement('li');
+    const mark = document.createElement('span'); mark.setAttribute('aria-hidden', 'true'); mark.textContent = '○';
+    const name = document.createElement('span'); name.textContent = place.name;
+    entry.append(mark, name); entry.title = place.description; entry.setAttribute('aria-label', `${place.name}, not yet visited`);
+    refs['places-list'].append(entry); placeEntries.set(place.id, entry);
+  }
+  function updateDiscoveries() {
+    text(refs['places-count'], `Places discovered ${discoveries.size} / ${POINTS_OF_INTEREST.length}`);
+    for (const place of POINTS_OF_INTEREST) {
+      const entry = placeEntries.get(place.id); const discovered = discoveries.has(place.id);
+      entry.classList.toggle('discovered', discovered); text(entry.firstElementChild, discovered ? '✓' : '○');
+      entry.setAttribute('aria-label', `${place.name}, ${discovered ? 'discovered' : 'not yet visited'}`);
+    }
+  }
+  function clearDiscoveries() {
+    discoveries.clear(); discoveryUntil = 0; show(refs['discovery-notice'], false); updateDiscoveries();
+  }
+  updateDiscoveries();
 
   const colorNames = ['Sunset orange', 'Seafoam teal', 'Moonlight purple', 'Coral pink', 'Treasure gold'];
   const savedColor = read('skywake-color', COLORS[0]);
@@ -327,6 +413,7 @@ export function createUI(callbacks = {}) {
       if (!joined && value) return;
       paused = !!value;
       if (paused) { mapOpen = false; show(refs['map-overlay'], false); }
+      if (paused) show(refs['discovery-notice'], false);
       show(refs['pause-overlay'], paused); document.body.classList.toggle('paused', paused); document.body.classList.toggle('map-open', mapOpen);
       modalChanged();
       if (paused) refs['resume-button'].focus({ preventScroll: true });
@@ -334,11 +421,13 @@ export function createUI(callbacks = {}) {
     setMap(value) {
       if (!joined || paused) return;
       mapOpen = !!value; show(refs['map-overlay'], mapOpen); document.body.classList.toggle('map-open', mapOpen); mapAt = 0;
+      if (mapOpen) show(refs['discovery-notice'], false);
       modalChanged();
       if (mapOpen) refs['close-map'].focus({ preventScroll: true });
     },
     reset() {
       joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = '';
+      discoveryRound = null; clearDiscoveries();
       show(refs['pause-overlay'], false); show(refs['map-overlay'], false); show(refs['victory-overlay'], false); show(refs['join-error'], false);
       document.body.classList.remove('paused', 'map-open'); plates.forEach((plate) => plate.remove()); plates.clear(); modalChanged();
     },
@@ -361,6 +450,8 @@ export function createUI(callbacks = {}) {
       const playing = joined && state.phase !== 'lobby' && state.phase !== 'victory';
       const lobby = joined && state.phase === 'lobby';
       const won = joined && state.phase === 'victory';
+      if (joined && discoveryRound !== state.round) { discoveryRound = state.round; clearDiscoveries(); }
+      show(refs['discovery-notice'], playing && !paused && !mapOpen && player.mode === 'ground' && now < discoveryUntil);
       show(refs.welcome, !joined); show(refs['welcome-caption'], !joined); show(refs['welcome-shade'], !joined);
       show(refs.lobby, lobby); show(refs.hud, playing); show(refs['menu-button'], joined && !won);
       show(refs['victory-overlay'], won);
@@ -380,6 +471,12 @@ export function createUI(callbacks = {}) {
       if (won) { victory(state, player); return; }
       if (!playing) return;
       const region = regionAt(player.x, player.z);
+      const place = player.mode === 'ground' ? pointOfInterestAt(player.x, player.z) : null;
+      if (place && player.grounded && player.knockedUntil <= state.elapsed && !paused && !mapOpen && !discoveries.has(place.id)) {
+        discoveries.add(place.id); updateDiscoveries(); mapAt = 0;
+        text(refs['discovery-name'], place.name); text(refs['discovery-description'], place.description);
+        discoveryUntil = now + 6500; show(refs['discovery-notice'], true);
+      }
       const objective = nearestObjective(state, player);
       const objectiveDistance = objective ? Math.round(distance(player, objective)) : 0;
       let title = 'Find the three compass shards';
@@ -401,7 +498,7 @@ export function createUI(callbacks = {}) {
           detail = activeShrine.remaining > 0 ? `${activeShrine.remaining} crab${activeShrine.remaining === 1 ? '' : 's'} left. Your crew can help!` : 'Stay close together to restore this compass shard.';
         }
       }
-      text(refs['quest-region'], player.mode === 'aboard' ? 'Aboard the Skywake' : region.name);
+      text(refs['quest-region'], player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
       text(refs['quest-title'], title); text(refs['quest-detail'], detail); text(refs['pearl-count'], `${state.pearls} shared pearls`);
       refs['shard-slots'].setAttribute('aria-label', `${state.shards} of 3 compass shards`);
       [...refs['shard-slots'].children].forEach((slot, index) => slot.classList.toggle('collected', index < state.shards));
@@ -476,8 +573,8 @@ export function createUI(callbacks = {}) {
       }
       for (const [id, plate] of plates) if (!activeIds.has(id)) { plate.remove(); plates.delete(id); }
       if (now - mapAt > 130) {
-        drawMap(refs.minimap, state, player, false, state.elapsed);
-        if (mapOpen) drawMap(refs['large-map'], state, player, true, state.elapsed);
+        drawMap(refs.minimap, state, player, false, state.elapsed, discoveries);
+        if (mapOpen) drawMap(refs['large-map'], state, player, true, state.elapsed, discoveries);
         mapAt = now;
       }
     },

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBSTACLES, BEACON, SPAWN, WORLD_RADIUS, SEED } from '../shared/world.js';
+import { POINTS_OF_INTEREST, BUILDINGS, trailDistance } from '../shared/exploration.js';
 import { makePalette, GeoBatch, buildGalleon, buildPirate, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
 
 const TAU = Math.PI * 2;
@@ -16,12 +18,14 @@ function segmentDistance(x, z, a, b) {
   return Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
 }
 function routeDistance(x, z) {
-  let d = Infinity;
+  let d = trailDistance(x, z);
   for (const point of WAYPOINTS) d = Math.min(d, segmentDistance(x, z, BEACON, point));
   return d;
 }
 function reserved(x, z, padding = 0) {
   if (routeDistance(x, z) < 6 + padding) return true;
+  if (POINTS_OF_INTEREST.some(p => Math.hypot(x - p.x, z - p.z) < p.radius + padding)) return true;
+  if (BUILDINGS.some(b => Math.hypot(x - b.x, z - b.z) < b.radius + 2 + padding)) return true;
   if ([SPAWN, BEACON, ...SHRINES].some(p => Math.hypot(x - p.x, z - p.z) < 11 + padding)) return true;
   return CHESTS.some(p => Math.hypot(x - p.x, z - p.z) < 3.2 + padding);
 }
@@ -114,7 +118,7 @@ function buildOcean(palette, random) {
 function buildScenery(palette, random) {
   const group = new THREE.Group(), land = new GeoBatch(palette), luminous = new GeoBatch(palette, palette.glow);
   for (const obstacle of OBSTACLES) {
-    if (obstacle.type === 'landmark') continue;
+    if (obstacle.type === 'landmark' || obstacle.type === 'building') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
     if (obstacle.type === 'tree') {
       const size = clamp((obstacle.height || 7) / 7, .7, 1.5);
@@ -174,7 +178,11 @@ function buildScenery(palette, random) {
     land.add('pebble', [coreX + Math.sin(a) * 5.2, coreY + 1.1, coreZ + Math.cos(a) * 4.2], [1.8, 1.7, 1.8], [0, a, .2], '#816465');
   }
   const moon = SHRINES.find(s => s.id === 'moon') || { x: 76, z: 32 };
-  for (const [dx, dz, s] of [[-14, -12, 2.1], [15, -9, 2.6], [18, 11, 1.8], [-9, 16, 1.6]]) addMushroom(land, moon.x + dx, heightAt(moon.x + dx, moon.z + dz), moon.z + dz, s, random() * TAU);
+  for (const [dx, dz, s] of [[-14, -12, 2.1], [15, -9, 2.6], [18, 11, 1.8], [-9, 16, 1.6]]) {
+    const x = moon.x + dx, z = moon.z + dz;
+    if (POINTS_OF_INTEREST.some(p => Math.hypot(x - p.x, z - p.z) < p.radius + s * 1.65)) continue;
+    addMushroom(land, x, heightAt(x, z), z, s, random() * TAU);
+  }
   for (let i = 0; i < 11; i++) {
     const a = i / 11 * TAU, x = moon.x + Math.sin(a) * 13.7, z = moon.z + Math.cos(a) * 13.7;
     if (routeDistance(x, z) > 6) addCrystal(luminous, x, heightAt(x, z), z, .7 + random() * .6, a, '#a1e8e5');
@@ -210,6 +218,7 @@ function buildScenery(palette, random) {
   land.line([SPAWN.x - 7, flagY, SPAWN.z + 7], [SPAWN.x + 7, flagY, SPAWN.z + 7], .032, '#bea978');
   for (let i = 0; i < 9; i++) land.add('cone', [SPAWN.x - 5.8 + i * 1.45, flagY - .35, SPAWN.z + 7], [.40, .85, .07], [Math.PI, 0, 0], ['#ea8c69', '#f4d177', '#69b8b5'][i % 3]);
   for (const [x, z, s] of [[-13, 103, .9], [13, 101, 1], [-10, 113, .7]]) {
+    if (POINTS_OF_INTEREST.some(p => Math.hypot(x - p.x, z - p.z) < p.radius)) continue;
     const y = heightAt(x, z);
     land.add('box', [x, y + .6 * s, z], [1.4 * s, 1.2 * s, 1.3 * s], [0, .2, 0], '#a97b4b');
     for (const dy of [.12, 1.03]) land.add('box', [x, y + dy * s, z], [1.46 * s, .12 * s, 1.36 * s], [0, .2, 0], '#dab174');
@@ -277,6 +286,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   scene.add(buildTerrain(palette));
   const ocean = buildOcean(palette, random), scenery = buildScenery(palette, random), sky = buildSky(palette, random);
   scene.add(ocean.group, scenery.group, sky.group);
+  const settlements = buildSettlements(palette), reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  scene.add(settlements.group);
   const ship = buildGalleon(palette); scene.add(ship.group);
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), pingModels = new Map();
   const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
@@ -654,6 +665,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
     ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time);
     ocean.animate(time); sky.animate(time);
+    settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     updateCamera(dt, localPlayer, view, shipPose); updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
@@ -691,7 +703,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, effects: effects.length }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, effects: effects.length, settlements: { ...settlements.stats } }; }
   function dispose() {
     if (disposed) return; disposed = true;
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
