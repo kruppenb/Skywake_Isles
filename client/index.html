@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123c51">
+  <meta name="description" content="A family crew. A flying pirate ship. One island full of adventure. An original local co-op game for up to five players.">
+  <title>Skywake Isles</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
+</head>
+<body>
+  <main id="game" aria-label="Skywake Isles pirate adventure">
+    <canvas id="world" tabindex="0" aria-label="Game world. Use W A S D to move, mouse to look, Space to jump, and E to interact."></canvas>
+    <div id="welcome-shade" aria-hidden="true"></div>
+    <div id="boot" role="status" class="boot">
+      <svg class="boot-compass" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="30"/><path d="M40 6 49 31 74 40 49 49 40 74 31 49 6 40 31 31Z"/><circle cx="40" cy="40" r="5"/></svg>
+      <strong id="boot-title">Charting your adventure…</strong>
+      <p id="boot-message">Raising the sails and waking the island.</p>
+      <button id="boot-retry" class="primary" type="button" hidden>Try again</button>
+    </div>
+    <header class="topbar" id="topbar" hidden>
+      <a class="wordmark" href="/" aria-label="Skywake Isles home"><span aria-hidden="true">✦</span> Skywake Isles</a>
+      <div class="topbar-actions">
+        <span id="connection" class="connection" role="status"><i></i><span>Ready to board</span></span>
+        <button id="sound-button" class="icon-button" type="button" title="Toggle sound" aria-label="Mute sound" aria-pressed="false">♫</button>
+        <button id="menu-button" class="icon-button" type="button" title="Menu (Escape)" aria-label="Open game menu" hidden>☰</button>
+      </div>
+    </header>
+    <section id="welcome" class="welcome" aria-labelledby="game-title" hidden>
+      <div class="title-mark" aria-hidden="true">✦</div>
+      <h1 id="game-title">Skywake<br>Isles<span class="title-period">.</span></h1>
+      <p class="welcome-story">A flying ship. Three lost compass shards.<br>And a whole island to explore together.</p>
+      <form id="join-form" class="join-form">
+        <label for="pirate-name">Your pirate name</label>
+        <input id="pirate-name" name="name" maxlength="16" autocomplete="nickname" spellcheck="false" required placeholder="Sea Explorer">
+        <fieldset class="color-fieldset"><legend>Choose your crew color</legend><div id="crew-colors" class="crew-colors"></div></fieldset>
+        <p id="join-error" class="form-error" role="alert" hidden></p>
+        <button id="join-button" class="primary board-button" type="submit"><span>Board the ship</span><span aria-hidden="true">↗</span></button>
+      </form>
+      <p class="welcome-foot">1–5 players · One shared adventure · No friendly fire</p>
+      <p class="device-note">Bring a keyboard and mouse. Open this same address on another computer to join your crew.</p>
+    </section>
+    <div id="welcome-caption" class="world-caption" hidden><span class="caption-rule"></span><span>Your adventure begins above the clouds.</span></div>
+    <section id="lobby" class="panel lobby" aria-labelledby="lobby-title" hidden>
+      <span class="panel-kicker">All aboard the Skywake</span>
+      <h2 id="lobby-title">Gather your crew.</h2>
+      <p>Explore together, collect three compass shards, and bring the lighthouse back to life.</p>
+      <div class="roster-heading"><strong>The crew</strong><span id="crew-count">1 / 5</span></div>
+      <ul id="lobby-roster" class="lobby-roster" aria-label="Players aboard"></ul>
+      <p id="lobby-hint" class="subtle"></p>
+      <button id="launch-button" class="primary" type="button">Set sail</button>
+      <button id="ready-button" class="secondary" type="button">Ready for adventure</button>
+      <p class="lobby-controls"><kbd>WASD</kbd> walk the deck <span>·</span> Click the world to look around</p>
+    </section>
+    <section id="hud" class="hud" aria-label="Game information" hidden>
+      <div class="quest-panel">
+        <div class="quest-heading"><span class="quest-star" aria-hidden="true">✦</span><span id="quest-region">Sunwake Strand</span></div>
+        <h2 id="quest-title">Jump from the ship</h2>
+        <p id="quest-detail">Press Space to open your glider.</p>
+        <div class="quest-progress"><div class="shard-slots" id="shard-slots" aria-label="0 of 3 compass shards"><span>◆</span><span>◆</span><span>◆</span></div><span id="pearl-count">0 pearls</span></div>
+        <div id="shrine-progress" class="shrine-progress" hidden><div><span id="shrine-label">Restoring the compass…</span><strong id="shrine-percent">0%</strong></div><progress id="shrine-meter" max="1" value="0"></progress></div>
+      </div>
+      <ul id="crew-hud" class="crew-hud" aria-label="Crew health"></ul>
+      <div id="compass" class="compass" aria-label="Compass"><div id="compass-strip" class="compass-strip"></div><span class="compass-needle" aria-hidden="true">▼</span></div>
+      <button id="minimap-button" class="minimap-wrap" type="button" aria-label="Open island map (M)"><canvas id="minimap" width="220" height="220"></canvas><span id="minimap-caption">Island map <kbd>M</kbd></span></button>
+      <div id="objective-marker" class="objective-marker" hidden><span>◆</span><strong></strong></div>
+      <div id="reticle" class="reticle" aria-hidden="true"><i></i><b></b><i></i></div>
+      <div id="hit-marker" class="hit-marker" aria-hidden="true">✦</div>
+      <div id="target-health" class="target-health" hidden><span></span><progress max="100" value="100"></progress></div>
+      <div id="boss-health" class="boss-health" hidden><div><span>Tempest Crab</span><strong id="boss-percent"></strong></div><progress id="boss-meter" value="1" max="1"></progress></div>
+      <div id="ship-banner" class="ship-banner" hidden><span id="ship-banner-text">The island is yours to explore.</span><button id="drop-button" class="primary" type="button"><kbd>Space</kbd> Jump &amp; glide</button></div>
+      <div id="knocked-banner" class="knocked-banner" role="status" hidden><strong>A little winded!</strong><span id="knocked-text">A crewmate can help, or the island will rescue you.</span></div>
+      <div class="player-hud">
+        <div class="health-heading"><span aria-hidden="true">♥</span><strong id="health-number">100</strong><span id="health-status">Ready for adventure</span></div>
+        <progress id="health-bar" max="100" value="100" aria-label="Your health"></progress>
+        <div class="weapon-slots">
+          <button id="weapon-flintlock" class="weapon-slot selected" type="button" data-weapon="flintlock"><kbd>1</kbd><span class="weapon-icon" aria-hidden="true">╾━</span><span>Flintlock</span></button>
+          <button id="weapon-scatter" class="weapon-slot" type="button" data-weapon="scatter"><kbd>2</kbd><span class="weapon-icon scatter-icon" aria-hidden="true">╾═</span><span>Scattershot</span></button>
+          <div class="ammo"><strong id="ammo-count">8<span>/ 8</span></strong><span id="reload-label"><kbd>R</kbd> reload · ∞ reserve</span></div>
+        </div>
+        <div class="ability-row"><button id="heal-button" type="button"><kbd>Q</kbd><span id="heal-label">Healing pulse</span></button><span><kbd>F</kbd> cutlass</span><span><kbd>G</kbd> crew ping</span></div>
+      </div>
+      <div id="interact-hint" class="interact-hint" hidden><kbd>E</kbd><span></span></div>
+      <div id="look-hint" class="look-hint">Click to aim · Hold right mouse to look · <kbd>Esc</kbd> menu</div>
+      <div id="nameplates" class="nameplates" aria-hidden="true"></div>
+    </section>
+    <div id="toast-stack" class="toast-stack" role="status" aria-live="polite" aria-atomic="false"></div>
+    <section id="map-overlay" class="modal map-modal" aria-labelledby="map-title" hidden>
+      <div class="map-panel"><div class="map-heading"><div><span class="panel-kicker">Your shared adventure</span><h2 id="map-title">Chart the isles.</h2></div><button id="close-map" class="icon-button" type="button" aria-label="Close island map">✕</button></div>
+      <canvas id="large-map" width="750" height="650" aria-label="Map showing the five regions, compass shrines, lighthouse, and every crew member"></canvas>
+      <div class="map-legend"><span><b class="legend-diamond">◆</b> Compass shard</span><span><b>✦</b> Lighthouse</span><span><b>●</b> Your crew</span><span><kbd>G</kbd> Share your location</span></div><p>Collect the three shards in any order. Gold beams guide you to each shrine.</p></div>
+    </section>
+    <section id="pause-overlay" class="modal" aria-labelledby="pause-title" hidden>
+      <div class="panel pause-panel"><span class="panel-kicker">Take a breather</span><h2 id="pause-title">Captain’s quarters</h2><p>Your crew’s adventure continues while this menu is open.</p><button id="resume-button" class="primary" type="button">Back to the adventure</button>
+      <div class="settings-row"><label for="quality-select">Graphics</label><select id="quality-select"><option value="high">Bright &amp; beautiful</option><option value="low">Smooth sailing</option></select></div>
+      <div class="settings-row"><label for="sound-toggle">Island sounds</label><input id="sound-toggle" type="checkbox" checked></div>
+      <h3>Your field guide</h3><dl class="controls-grid"><div><dt><kbd>WASD</kbd> / arrows</dt><dd>Move</dd></div><div><dt>Mouse / right drag</dt><dd>Look &amp; aim</dd></div><div><dt><kbd>Shift</kbd></dt><dd>Sprint</dd></div><div><dt><kbd>Space</kbd></dt><dd>Jump / leave ship</dd></div><div><dt>Left click</dt><dd>Fire blaster</dd></div><div><dt><kbd>F</kbd></dt><dd>Cutlass sweep</dd></div><div><dt><kbd>E</kbd></dt><dd>Open / activate / revive</dd></div><div><dt><kbd>Q</kbd></dt><dd>Heal nearby crew</dd></div><div><dt><kbd>R</kbd></dt><dd>Reload</dd></div><div><dt><kbd>1</kbd> / <kbd>2</kbd></dt><dd>Change weapon</dd></div><div><dt><kbd>G</kbd></dt><dd>Share location</dd></div><div><dt><kbd>M</kbd></dt><dd>Island map</dd></div></dl>
+      <p class="safety-note">Treasure is shared. Your shots never hurt the crew. If you get knocked down, a friend or the island will help you back up.</p><button id="leave-button" class="text-button" type="button">Leave the crew</button></div>
+    </section>
+    <section id="victory-overlay" class="modal victory-modal" aria-labelledby="victory-title" hidden>
+      <div class="panel victory-panel"><span class="victory-star" aria-hidden="true">✦</span><span class="panel-kicker">The lighthouse shines again</span><h2 id="victory-title">A legendary crew.</h2><p>You recovered the compass and brought calm back to Skywake Isles. That’s what friends are for.</p>
+      <div class="victory-stats"><div><strong id="victory-pearls">0</strong><span>shared pearls</span></div><div><strong id="victory-time">0:00</strong><span>adventure time</span></div><div><strong id="victory-rescues">0</strong><span>crew rescues</span></div></div>
+      <ul id="victory-crew" class="victory-crew" aria-label="Crew contributions"></ul><p id="victory-record" class="subtle"></p><button id="restart-button" class="primary" type="button">Play another voyage</button><p id="victory-waiting" hidden>Waiting for your captain to chart the next adventure.</p><button id="victory-leave" class="text-button" type="button">Leave the crew</button></div>
+    </section>
+  </main>
+  <script type="module">
+    import('/main.js').catch((error) => {
+      document.getElementById('boot').hidden = false;
+      document.getElementById('boot-title').textContent = 'The island couldn’t load.';
+      document.getElementById('boot-message').textContent = 'Refresh this page. If that doesn’t help, check that the game server is running and your browser supports WebGL. ' + error.message;
+      const retry = document.getElementById('boot-retry'); retry.hidden = false; retry.onclick = () => location.reload();
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

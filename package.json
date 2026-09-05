@@ -1,0 +1,15 @@
+{
+  "name": "skywake-isles",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "An original cooperative sky-pirate adventure for a family LAN.",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test:unit": "node --test test/movement.test.js test/game.test.js test/input.test.js",
+    "test:e2e": "node --test test/network.test.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": { "three": "0.180.0", "ws": "8.21.3" }
+}

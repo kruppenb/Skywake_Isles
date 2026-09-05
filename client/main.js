@@ -1,0 +1,404 @@
+import { createWorld } from './world.js';
+import { createInput } from './input.js';
+import { GameNet } from './net.js';
+import { createUI, findInteractable } from './ui.js';
+import { createAudio } from './audio.js';
+import { movePlayer } from '/shared/movement.js';
+import { SEED, SHRINES, CHESTS, heightAt } from '/shared/world.js';
+
+const canvas = document.getElementById('world');
+const testMode = new URLSearchParams(location.search).get('test') === '1';
+const STEP = .05;
+const neutral = (view) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: view?.yaw || 0, pitch: view?.pitch || 0 });
+const previewState = () => ({
+  phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
+  players: [], enemies: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
+  chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), pearls: 0, shards: 0, bossId: null,
+  pings: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
+});
+let state = previewState();
+let simulationPlayer = null;
+let renderedPlayer = null;
+let pending = [];
+let sequence = 0;
+let accumulator = 0;
+let receivedAt = performance.now();
+let lastFrame = performance.now();
+let lastUIAt = 0;
+let nextShotAt = 0;
+let forcePrediction = false;
+let lastAuthoritativeMode = null;
+let lastVictoryRound = null;
+let running = true;
+let animationFrame = 0;
+let input;
+let world;
+let net;
+const correction = { x: 0, y: 0, z: 0 };
+const frameTimes = [];
+const audio = createAudio();
+
+const ui = createUI({
+  onJoin(name, color) {
+    audio.unlock();
+    ui.setJoining(true);
+    net.join(name, color);
+  },
+  onAction(action) { performAction(action); },
+  onDrop() { audio.unlock(); input.jump(); },
+  onModalChange() {
+    synchronizeInput();
+    sendNeutralInput();
+    if (!ui.menuOpen && simulationPlayer && state.phase !== 'victory') input?.focus();
+  },
+  onSound(muted) { audio.setMuted(muted); ui.setSound(audio.muted); },
+  onQuality(quality) { world?.setQuality(quality); },
+  onLeave() {
+    input.reset(); input.releasePointer();
+    net.leave();
+    resetToWelcome();
+  },
+});
+ui.setSound(audio.muted);
+
+try {
+  world = createWorld(canvas, { quality: ui.quality });
+} catch (error) {
+  ui.fatal('Your browser could not start the 3D island. Enable hardware acceleration or try a current version of Chrome, Edge, or Firefox. ' + error.message);
+  throw error;
+}
+
+input = createInput(canvas, {
+  onAction: performAction,
+  onEscape() {
+    if (ui.mapOpen) ui.setMap(false);
+    else ui.setPaused(!ui.paused);
+  },
+  onMap() { if (!ui.paused && state.phase !== 'lobby' && state.phase !== 'victory') ui.setMap(!ui.mapOpen); },
+  onGesture() { audio.unlock(); },
+  onNotice(message) { ui.toast(message); },
+  onBlur() { sendNeutralInput(); },
+}, { testMode });
+
+net = new GameNet({
+  onStatus(status) {
+    ui.setConnection(status);
+    if (status.status !== 'connected') {
+      input.reset();
+      input.setEnabled(false);
+    }
+    if (status.status === 'reconnecting' && simulationPlayer && status.attempt === 0) ui.toast('The connection drifted. Your place in the crew is saved while we reconnect.', true);
+  },
+  onWelcome(message) {
+    forcePrediction = true;
+    input.reset();
+    pending = [];
+    accumulator = 0;
+    const player = message.state.players.find((entry) => entry.id === message.id);
+    sequence = Math.max(sequence, player?.lastInputSeq || 0);
+    if (player && !message.reconnected) input.setView(player.yaw || 0, -.16);
+    if (message.reconnected) ui.toast('Back with your crew. Welcome aboard!');
+    if (!ui.menuOpen) input.focus();
+  },
+  onState: receiveState,
+  onEvent: receiveEvent,
+  onError(error) {
+    if (!simulationPlayer) ui.setError(error.message);
+    else ui.toast(error.message, true);
+  },
+  onReplaced(message) {
+    resetToWelcome();
+    ui.setError(message);
+  },
+});
+
+function resetToWelcome() {
+  simulationPlayer = null;
+  renderedPlayer = null;
+  pending = [];
+  accumulator = 0;
+  correction.x = correction.y = correction.z = 0;
+  state = previewState();
+  lastAuthoritativeMode = null;
+  ui.reset();
+  input.reset(); input.releasePointer(); input.setEnabled(false);
+  lastUIAt = 0;
+}
+
+function synchronizeInput() {
+  if (!input) return;
+  input.setEnabled(!!simulationPlayer && !!net?.connected && state.phase !== 'victory');
+  input.setSuspended(ui.menuOpen || !simulationPlayer || state.phase === 'victory');
+}
+
+function estimatedElapsed(now = performance.now()) {
+  if (state.phase === 'lobby' || state.phase === 'victory') return state.elapsed;
+  return state.elapsed + Math.min(.25, Math.max(0, (now - receivedAt) / 1000));
+}
+
+function sendInput(packet) {
+  return net?.sendInput({ seq: ++sequence, ...packet });
+}
+
+function sendNeutralInput() {
+  if (net?.connected && simulationPlayer) sendInput(neutral(input));
+}
+
+function receiveState(next) {
+  if (!next || !Array.isArray(next.players)) return;
+  const phaseChanged = next.phase !== state.phase || next.round !== state.round;
+  state = next;
+  receivedAt = performance.now();
+  const authoritative = state.players.find((entry) => entry.id === net.id);
+  if (!authoritative) { simulationPlayer = null; renderedPlayer = null; synchronizeInput(); return; }
+  if (phaseChanged) {
+    pending = [];
+    accumulator = 0;
+    input.reset();
+    nextShotAt = 0;
+    if (state.phase !== 'victory') { ui.setMap(false); ui.setPaused(false); }
+    if (state.phase === 'voyage' && state.elapsed < 1) {
+      input.setView(0, -.16);
+      ui.toast('The sails are up! Press Space to jump, then steer your glider with WASD.');
+    }
+    if (state.phase === 'finale') ui.toast('The Tempest Crab has the compass! Dodge the glowing splashes and work together.');
+  }
+  reconcile(authoritative, forcePrediction || phaseChanged || !simulationPlayer);
+  forcePrediction = false;
+  if (lastAuthoritativeMode !== authoritative.mode) {
+    if (lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding') audio.play('drop');
+    if (lastAuthoritativeMode === 'gliding' && authoritative.mode === 'ground') {
+      audio.play('land');
+      ui.toast('Boots on the island! E opens treasure and awakens compass shrines.');
+    }
+    lastAuthoritativeMode = authoritative.mode;
+  }
+  synchronizeInput();
+}
+
+function reconcile(authoritative, force) {
+  sequence = Math.max(sequence, authoritative.lastInputSeq || 0);
+  pending = pending.filter((entry) => entry.seq > authoritative.lastInputSeq);
+  const next = { ...authoritative };
+  let elapsed = state.elapsed;
+  if (next.knockedUntil > elapsed || state.phase === 'victory') pending = [];
+  for (const entry of pending) {
+    elapsed += entry.dt;
+    movePlayer(next, entry.input, entry.dt, state.phase === 'lobby' ? 0 : elapsed);
+  }
+  if (!force && simulationPlayer && simulationPlayer.mode === next.mode) {
+    const dx = simulationPlayer.x - next.x;
+    const dy = simulationPlayer.y - next.y;
+    const dz = simulationPlayer.z - next.z;
+    if (Math.hypot(dx, dy, dz) < 5) {
+      correction.x += dx; correction.y += dy; correction.z += dz;
+      const size = Math.hypot(correction.x, correction.y, correction.z);
+      if (size > 3) { correction.x *= 3 / size; correction.y *= 3 / size; correction.z *= 3 / size; }
+    } else correction.x = correction.y = correction.z = 0;
+  } else correction.x = correction.y = correction.z = 0;
+  simulationPlayer = next;
+}
+
+function receiveEvent(event) {
+  if (!event || typeof event.kind !== 'string') return;
+  world.handleEvent(event);
+  const mine = event.playerId === net.id;
+  const name = state.players.find((player) => player.id === event.playerId)?.name || 'A crewmate';
+  switch (event.kind) {
+    case 'shot':
+      if (mine || !renderedPlayer || Math.hypot((event.from?.x || 0) - renderedPlayer.x, (event.from?.z || 0) - renderedPlayer.z) < 40) audio.play('shot', { distant: !mine, weapon: event.weapon });
+      if (mine && event.hitId) { ui.hit(); audio.play('hit'); }
+      break;
+    case 'hit':
+      if (event.targetId === net.id) { ui.hurt(); audio.play('hurt'); }
+      else if (event.sourceId === net.id) { ui.hit(); audio.play('hit'); }
+      break;
+    case 'reload': if (mine) audio.play('reload'); break;
+    case 'swap': if (mine) audio.play('reload'); break;
+    case 'melee': if (mine) audio.play('melee'); break;
+    case 'chest': audio.play('collect', { distant: !mine }); ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!`); break;
+    case 'shrine': {
+      const shrine = SHRINES.find((entry) => entry.id === event.id);
+      if (event.status === 'cleared') { audio.play('shrine'); ui.toast(`${shrine?.name || 'A compass shard'} restored! Your whole crew shares the reward.`); }
+      else if (event.status === 'active') ui.toast(`${shrine?.name || 'The shrine'} is awake. Clear its cheeky crabs!`);
+      break;
+    }
+    case 'heal': audio.play('heal', { distant: !mine }); if (mine) ui.toast('Healing pulse! Nearby friends recover health too.'); break;
+    case 'revive': audio.play('heal', { distant: !mine }); ui.toast(mine ? 'Back on your feet! You have a short safety shield.' : `${name} is back on their feet!`); break;
+    case 'downed': if (mine) audio.play('downed'); else ui.toast(`${name} needs a hand. Get close and press E to help.`); break;
+    case 'ping': audio.play('ping', { distant: !mine }); ui.toast(mine ? 'Your location is marked on everyone’s map.' : `${name} marked a location on your map.`); break;
+    case 'splash': audio.play('splash', { distant: true }); break;
+    case 'victory': if (lastVictoryRound !== state.round) { lastVictoryRound = state.round; audio.play('victory'); } break;
+    case 'notice': if (typeof event.message === 'string') ui.toast(event.message); break;
+    default: break;
+  }
+}
+
+// Locate what the visible center reticle touches. The muzzle then aims toward
+// that point, correcting the third-person camera's height and shoulder offset.
+function aimPoint(player) {
+  const ray = world.aimRay();
+  const origin = ray.origin;
+  const direction = ray.direction;
+  let nearest = 72;
+  let enemy = null;
+  for (const candidate of state.enemies) {
+    if (candidate.hp <= 0) continue;
+    const ox = origin.x - candidate.x;
+    const oy = origin.y - (candidate.y + candidate.radius * .8);
+    const oz = origin.z - candidate.z;
+    const b = ox * direction.x + oy * direction.y + oz * direction.z;
+    const c = ox * ox + oy * oy + oz * oz - candidate.radius * candidate.radius;
+    const discriminant = b * b - c;
+    if (discriminant < 0) continue;
+    const root = Math.sqrt(discriminant);
+    let t = -b - root;
+    if (t < 0) t = -b + root;
+    if (t > .1 && t < nearest) { nearest = t; enemy = candidate; }
+  }
+  if (direction.y < -.015) {
+    for (let t = 2; t < nearest; t += 1.2) {
+      const x = origin.x + direction.x * t;
+      const y = origin.y + direction.y * t;
+      const z = origin.z + direction.z * t;
+      if (y <= heightAt(x, z) + .1) { nearest = t; enemy = null; break; }
+    }
+  }
+  const point = { x: origin.x + direction.x * nearest, y: origin.y + direction.y * nearest, z: origin.z + direction.z * nearest };
+  const dx = point.x - player.x;
+  const dy = point.y - (player.y + 1.25);
+  const dz = point.z - player.z;
+  return { yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)), enemy };
+}
+
+function performAction(action) {
+  if (!net?.connected || !simulationPlayer) return;
+  audio.unlock();
+  if (['launch', 'ready', 'restart'].includes(action)) {
+    net.action(action);
+    input.focus();
+    return;
+  }
+  if (ui.menuOpen || state.phase === 'lobby' || state.phase === 'victory') return;
+  const player = renderedPlayer || simulationPlayer;
+  if (player.knockedUntil > state.elapsed) return;
+  const base = input.snapshot();
+  if (action === 'fire') {
+    const now = performance.now();
+    if (now < nextShotAt || player.mode !== 'ground') return;
+    nextShotAt = now + (player.weapon === 'scatter' ? 660 : 310);
+    const aim = aimPoint(player);
+    sendInput({ ...base, yaw: aim.yaw, pitch: aim.pitch });
+    net.action('fire');
+    // Facing changes used for the shot never change the player's mouse view or
+    // leave their movement pointed along the offset muzzle ray on the next tick.
+    sendInput(base);
+  } else if (action === 'interact') {
+    const target = findInteractable(state, player);
+    if (target) { sendInput(base); net.action('interact', target.id); }
+  } else if (action === 'flintlock' || action === 'scatter') {
+    net.action('swap', action);
+    input.focus();
+  } else if (action === 'heal') {
+    const cooldown = player.healUntil - state.elapsed;
+    if (cooldown > 0) ui.toast(`Your healing pulse returns in ${Math.ceil(cooldown)} seconds.`);
+    else net.action('heal');
+    input.focus();
+  } else if (['melee', 'reload', 'ping'].includes(action)) {
+    sendInput(base);
+    net.action(action);
+  }
+}
+
+function fixedUpdate(now) {
+  if (!net.connected || !simulationPlayer || state.phase === 'victory') return;
+  const controls = input.snapshot();
+  if (state.phase === 'lobby') controls.jump = false;
+  const packet = { ...controls, seq: ++sequence };
+  if (!net.sendInput(packet)) return;
+  const elapsed = estimatedElapsed(now);
+  if (!(simulationPlayer.knockedUntil > elapsed)) movePlayer(simulationPlayer, controls, STEP, elapsed);
+  pending.push({ seq: sequence, input: controls, dt: STEP });
+  // A lagging connection cannot accumulate an unbounded prediction history.
+  if (pending.length > 100) pending = pending.slice(-100);
+}
+
+function frame(now) {
+  if (!running) return;
+  const rawDt = (now - lastFrame) / 1000;
+  const dt = Math.min(.05, Math.max(.001, rawDt));
+  lastFrame = now;
+  if (!document.hidden && rawDt < .5) { frameTimes.push(rawDt); if (frameTimes.length > 240) frameTimes.shift(); }
+  try {
+    if (document.hidden) {
+      accumulator = 0;
+      input.reset();
+    } else {
+      accumulator = Math.min(.2, accumulator + dt);
+      while (accumulator >= STEP) { fixedUpdate(now); accumulator -= STEP; }
+    }
+    if (input.firing) performAction('fire');
+    const elapsed = estimatedElapsed(now);
+    renderedPlayer = simulationPlayer ? { ...simulationPlayer } : null;
+    if (renderedPlayer) {
+      if (net.connected && state.phase !== 'victory' && !(renderedPlayer.knockedUntil > elapsed) && accumulator > 0) {
+        const partial = input.snapshot();
+        if (state.phase === 'lobby') partial.jump = false;
+        movePlayer(renderedPlayer, partial, accumulator, elapsed);
+      }
+      const decay = Math.exp(-12 * dt);
+      correction.x *= decay; correction.y *= decay; correction.z *= decay;
+      renderedPlayer.x += correction.x; renderedPlayer.y += correction.y; renderedPlayer.z += correction.z;
+      renderedPlayer.yaw = input.yaw; renderedPlayer.pitch = input.pitch;
+    }
+    const view = {
+      yaw: input.yaw, pitch: input.pitch,
+      menu: !renderedPlayer || state.phase === 'victory',
+      aiming: input.aiming, time: now / 1000, locked: input.locked,
+    };
+    const renderState = { ...state, elapsed };
+    world.update(dt, renderState, renderedPlayer, view);
+    world.render();
+    if (now - lastUIAt >= 65) {
+      ui.setTarget(renderedPlayer && renderedPlayer.mode === 'ground' ? aimPoint(renderedPlayer).enemy : null);
+      ui.update(renderState, renderedPlayer, world, view);
+      lastUIAt = now;
+    }
+  } catch (error) {
+    console.error('Skywake Isles rendering failed:', error);
+    running = false;
+    input.reset(); input.setEnabled(false); sendNeutralInput();
+    ui.fatal('The island stopped drawing. Refresh to return to your crew. ' + error.message);
+    return;
+  }
+  animationFrame = requestAnimationFrame(frame);
+}
+
+window.addEventListener('resize', () => { world.resize(); lastUIAt = 0; });
+canvas.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  running = false;
+  cancelAnimationFrame(animationFrame);
+  input.reset(); input.setEnabled(false); sendNeutralInput();
+  ui.fatal('Your browser paused its graphics device. Refresh this page to rejoin your crew. If this happens again, choose Smooth sailing in the graphics menu.');
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { input.reset(); sendNeutralInput(); }
+  else { lastFrame = performance.now(); accumulator = 0; }
+});
+
+// Readable diagnostics for local verification. There are no simulation bypasses.
+window.SKY = {
+  state: () => state,
+  player: () => renderedPlayer,
+  input, world, net,
+  fps: () => ({
+    average: frameTimes.length ? frameTimes.length / frameTimes.reduce((sum, seconds) => sum + seconds, 0) : 0,
+    samples: frameTimes.length,
+    frameMs: frameTimes.length ? [...frameTimes].sort((a, b) => a - b)[Math.floor(frameTimes.length * .95)] * 1000 : 0,
+  }),
+};
+
+synchronizeInput();
+ui.ready();
+animationFrame = requestAnimationFrame(frame);

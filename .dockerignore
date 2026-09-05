@@ -1,0 +1,12 @@
+.git
+.qa
+node_modules
+data
+test
+docs
+screenshots
+*.log
+README.md
+CREDITS.md
+DESIGN.md
+.gitignore

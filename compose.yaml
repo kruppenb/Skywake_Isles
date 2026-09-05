@@ -1,0 +1,19 @@
+services:
+  skywake-isles:
+    build: .
+    image: skywake-isles:local
+    container_name: skywake-isles
+    init: true
+    ports:
+      - "3400:3400"
+    environment:
+      NODE_ENV: production
+      PORT: "3400"
+      DATA_DIR: /app/data
+    volumes:
+      - skywake-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+volumes:
+  skywake-data:
