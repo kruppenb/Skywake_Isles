@@ -470,7 +470,7 @@ export function createUI(callbacks = {}) {
         activeIds.add(friend.id);
         let plate = plates.get(friend.id);
         if (!plate) { plate = document.createElement('span'); plate.className = 'nameplate'; refs.nameplates.append(plate); plates.set(friend.id, plate); }
-        const position = world.project({ x: friend.x, y: friend.y + 2.65, z: friend.z });
+        const position = world.projectPlayer?.(friend.id, 3.35) ?? world.project({ x: friend.x, y: friend.y + 3.35, z: friend.z });
         show(plate, position.visible && !paused && !mapOpen); text(plate, friend.name); plate.style.setProperty('--crew-color', friend.color);
         plate.style.left = `${position.x}px`; plate.style.top = `${position.y}px`;
       }

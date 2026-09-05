@@ -15,9 +15,12 @@ function setup(count = 1) {
 }
 function locate(p, point) { Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, vy: 0 }); }
 function ticks(game, seconds) { for (let i = 0; i < Math.ceil(seconds / 0.05); i++) game.tick(0.05); }
+const aimSequences = new WeakMap();
 function aim(game, p, target) {
   const dx = target.x - p.x, dz = target.z - p.z;
-  game.setInput(p.id, { seq: p.lastInputSeq + 1, forward: 0, right: 0, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(target.y + target.radius * 0.8 - p.y - 1.25, Math.hypot(dx, dz)), jump: false, sprint: false });
+  const seq = (aimSequences.get(p) ?? -1) + 1;
+  aimSequences.set(p, seq);
+  game.setInput(p.id, { seq, forward: 0, right: 0, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(target.y + target.radius * 0.8 - p.y - 1.25, Math.hypot(dx, dz)), jump: false, sprint: false });
 }
 
 test('names, five-player limit, reserved reconnect, host transfer, expiry, and privacy', () => {

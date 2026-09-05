@@ -3,12 +3,12 @@ import { createInput } from './input.js';
 import { GameNet } from './net.js';
 import { createUI, findInteractable } from './ui.js';
 import { createAudio } from './audio.js';
-import { movePlayer } from '/shared/movement.js';
+import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { SEED, SHRINES, CHESTS, heightAt } from '/shared/world.js';
 
 const canvas = document.getElementById('world');
 const testMode = new URLSearchParams(location.search).get('test') === '1';
-const STEP = .05;
+const STEP = PREDICTION_STEP;
 const neutral = (view) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: view?.yaw || 0, pitch: view?.pitch || 0 });
 const previewState = () => ({
   phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
@@ -19,7 +19,6 @@ const previewState = () => ({
 let state = previewState();
 let simulationPlayer = null;
 let renderedPlayer = null;
-let pending = [];
 let sequence = 0;
 let accumulator = 0;
 let receivedAt = performance.now();
@@ -34,7 +33,9 @@ let animationFrame = 0;
 let input;
 let world;
 let net;
-const correction = { x: 0, y: 0, z: 0 };
+const prediction = new LocalPrediction();
+const renderClock = new RenderClock();
+renderClock.observe(state, receivedAt);
 const frameTimes = [];
 const audio = createAudio();
 
@@ -86,14 +87,15 @@ net = new GameNet({
     if (status.status !== 'connected') {
       input.reset();
       input.setEnabled(false);
+      resetPredictionHistory();
     }
     if (status.status === 'reconnecting' && simulationPlayer && status.attempt === 0) ui.toast('The connection drifted. Your place in the crew is saved while we reconnect.', true);
   },
   onWelcome(message) {
     forcePrediction = true;
     input.reset();
-    pending = [];
-    accumulator = 0;
+    resetPredictionHistory();
+    renderClock.observe(message.state, performance.now(), true);
     const player = message.state.players.find((entry) => entry.id === message.id);
     sequence = Math.max(sequence, player?.lastInputSeq || 0);
     if (player && !message.reconnected) input.setView(player.yaw || 0, -.16);
@@ -115,10 +117,11 @@ net = new GameNet({
 function resetToWelcome() {
   simulationPlayer = null;
   renderedPlayer = null;
-  pending = [];
+  prediction.reset();
   accumulator = 0;
-  correction.x = correction.y = correction.z = 0;
   state = previewState();
+  receivedAt = performance.now();
+  renderClock.observe(state, receivedAt, true);
   lastAuthoritativeMode = null;
   ui.reset();
   input.reset(); input.releasePointer(); input.setEnabled(false);
@@ -131,9 +134,11 @@ function synchronizeInput() {
   input.setSuspended(ui.menuOpen || !simulationPlayer || state.phase === 'victory');
 }
 
-function estimatedElapsed(now = performance.now()) {
-  if (state.phase === 'lobby' || state.phase === 'victory') return state.elapsed;
-  return state.elapsed + Math.min(.25, Math.max(0, (now - receivedAt) / 1000));
+function resetPredictionHistory() {
+  prediction.reset(simulationPlayer, { simulationTime: prediction.simulationTime });
+  simulationPlayer = prediction.current;
+  accumulator = 0;
+  forcePrediction = true;
 }
 
 function sendInput(packet) {
@@ -147,12 +152,14 @@ function sendNeutralInput() {
 function receiveState(next) {
   if (!next || !Array.isArray(next.players)) return;
   const phaseChanged = next.phase !== state.phase || next.round !== state.round;
+  const now = performance.now();
+  const stale = now - receivedAt > 500 || document.hidden;
   state = next;
-  receivedAt = performance.now();
+  receivedAt = now;
+  renderClock.observe(state, now);
   const authoritative = state.players.find((entry) => entry.id === net.id);
-  if (!authoritative) { simulationPlayer = null; renderedPlayer = null; synchronizeInput(); return; }
+  if (!authoritative) { simulationPlayer = null; renderedPlayer = null; prediction.reset(); synchronizeInput(); return; }
   if (phaseChanged) {
-    pending = [];
     accumulator = 0;
     input.reset();
     nextShotAt = 0;
@@ -163,7 +170,7 @@ function receiveState(next) {
     }
     if (state.phase === 'finale') ui.toast('The Tempest Crab has the compass! Dodge the glowing splashes and work together.');
   }
-  reconcile(authoritative, forcePrediction || phaseChanged || !simulationPlayer);
+  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer);
   forcePrediction = false;
   if (lastAuthoritativeMode !== authoritative.mode) {
     if (lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding') audio.play('drop');
@@ -178,25 +185,12 @@ function receiveState(next) {
 
 function reconcile(authoritative, force) {
   sequence = Math.max(sequence, authoritative.lastInputSeq || 0);
-  pending = pending.filter((entry) => entry.seq > authoritative.lastInputSeq);
-  const next = { ...authoritative };
-  let elapsed = state.elapsed;
-  if (next.knockedUntil > elapsed || state.phase === 'victory') pending = [];
-  for (const entry of pending) {
-    elapsed += entry.dt;
-    movePlayer(next, entry.input, entry.dt, state.phase === 'lobby' ? 0 : elapsed);
-  }
-  if (!force && simulationPlayer && simulationPlayer.mode === next.mode) {
-    const dx = simulationPlayer.x - next.x;
-    const dy = simulationPlayer.y - next.y;
-    const dz = simulationPlayer.z - next.z;
-    if (Math.hypot(dx, dy, dz) < 5) {
-      correction.x += dx; correction.y += dy; correction.z += dz;
-      const size = Math.hypot(correction.x, correction.y, correction.z);
-      if (size > 3) { correction.x *= 3 / size; correction.y *= 3 / size; correction.z *= 3 / size; }
-    } else correction.x = correction.y = correction.z = 0;
-  } else correction.x = correction.y = correction.z = 0;
-  simulationPlayer = next;
+  prediction.reconcile(authoritative, {
+    phase: state.phase, elapsed: state.elapsed, simulationTime: state.simulationTime ?? state.elapsed, renderElapsed: renderClock.elapsed,
+    alpha: accumulator / STEP, force,
+  });
+  simulationPlayer = prediction.current;
+  if (force) accumulator = 0;
 }
 
 function receiveEvent(event) {
@@ -310,17 +304,14 @@ function performAction(action) {
   }
 }
 
-function fixedUpdate(now) {
+function fixedUpdate(elapsed) {
   if (!net.connected || !simulationPlayer || state.phase === 'victory') return;
   const controls = input.snapshot();
   if (state.phase === 'lobby') controls.jump = false;
   const packet = { ...controls, seq: ++sequence };
   if (!net.sendInput(packet)) return;
-  const elapsed = estimatedElapsed(now);
-  if (!(simulationPlayer.knockedUntil > elapsed)) movePlayer(simulationPlayer, controls, STEP, elapsed);
-  pending.push({ seq: sequence, input: controls, dt: STEP });
-  // A lagging connection cannot accumulate an unbounded prediction history.
-  if (pending.length > 100) pending = pending.slice(-100);
+  prediction.step(sequence, controls, elapsed, state.phase);
+  simulationPlayer = prediction.current;
 }
 
 function frame(now) {
@@ -330,31 +321,28 @@ function frame(now) {
   lastFrame = now;
   if (!document.hidden && rawDt < .5) { frameTimes.push(rawDt); if (frameTimes.length > 240) frameTimes.shift(); }
   try {
-    if (document.hidden) {
-      accumulator = 0;
+    const elapsed = renderClock.sample(now);
+    if (document.hidden || rawDt > .5 || now - receivedAt > 500) {
+      if (!forcePrediction) resetPredictionHistory();
       input.reset();
-    } else {
-      accumulator = Math.min(.2, accumulator + dt);
-      while (accumulator >= STEP) { fixedUpdate(now); accumulator -= STEP; }
+    } else if (!forcePrediction) {
+      accumulator = Math.min(.2, accumulator + Math.max(0, rawDt));
+      while (accumulator + 1e-8 >= STEP) {
+        fixedUpdate(state.phase === 'lobby' ? 0 : elapsed - accumulator + STEP);
+        accumulator = Math.max(0, accumulator - STEP);
+      }
     }
     if (input.firing) performAction('fire');
-    const elapsed = estimatedElapsed(now);
-    renderedPlayer = simulationPlayer ? { ...simulationPlayer } : null;
+    prediction.decay(Math.min(.2, Math.max(0, rawDt)));
+    renderedPlayer = prediction.sample(accumulator / STEP, state.phase === 'lobby' ? 0 : elapsed);
     if (renderedPlayer) {
-      if (net.connected && state.phase !== 'victory' && !(renderedPlayer.knockedUntil > elapsed) && accumulator > 0) {
-        const partial = input.snapshot();
-        if (state.phase === 'lobby') partial.jump = false;
-        movePlayer(renderedPlayer, partial, accumulator, elapsed);
-      }
-      const decay = Math.exp(-12 * dt);
-      correction.x *= decay; correction.y *= decay; correction.z *= decay;
-      renderedPlayer.x += correction.x; renderedPlayer.y += correction.y; renderedPlayer.z += correction.z;
       renderedPlayer.yaw = input.yaw; renderedPlayer.pitch = input.pitch;
     }
     const view = {
       yaw: input.yaw, pitch: input.pitch,
       menu: !renderedPlayer || state.phase === 'victory',
       aiming: input.aiming, time: now / 1000, locked: input.locked,
+      snapshotTime: state.elapsed, snapshotReceivedAt: receivedAt, round: state.round,
     };
     const renderState = { ...state, elapsed };
     world.update(dt, renderState, renderedPlayer, view);
@@ -383,8 +371,9 @@ canvas.addEventListener('webglcontextlost', (event) => {
   ui.fatal('Your browser paused its graphics device. Refresh this page to rejoin your crew. If this happens again, choose Smooth sailing in the graphics menu.');
 });
 document.addEventListener('visibilitychange', () => {
+  resetPredictionHistory();
   if (document.hidden) { input.reset(); sendNeutralInput(); }
-  else { lastFrame = performance.now(); accumulator = 0; }
+  else lastFrame = performance.now();
 });
 
 // Readable diagnostics for local verification. There are no simulation bypasses.

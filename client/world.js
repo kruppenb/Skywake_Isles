@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBSTACLES, BEACON, SPAWN, WORLD_RADIUS, SEED } from '../shared/world.js';
 import { makePalette, GeoBatch, buildGalleon, buildPirate, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
 
 const TAU = Math.PI * 2;
 const COLORS = { beach: '#e6d394', jungle: '#5aab70', volcano: '#c08d67', moon: '#839fa0', haven: '#81b57a' };
@@ -278,8 +279,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   scene.add(ocean.group, scenery.group, sky.group);
   const ship = buildGalleon(palette); scene.add(ship.group);
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), pingModels = new Map();
-  const effects = [], telegraphs = new Map();
+  const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
+  const remotePlayers = createRemoteInterpolation();
   let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
+  let cameraShipPose = null;
   let width = 1, height = 1, frameCount = 0, fps = 60, fpsElapsed = 0, lowQuality = quality === 'low';
   const direction = new THREE.Vector3(), right = new THREE.Vector3(), desiredCamera = new THREE.Vector3(), cameraTarget = new THREE.Vector3();
   const projectVector = new THREE.Vector3(), raycaster = new THREE.Raycaster();
@@ -318,9 +321,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     atmospheric.add(mesh); motes.push({ mesh, center, phase: random() * TAU, radius: isEmber ? 3 + random() * 3 : 4 + random() * 12, rise: random() * 5, ember: isEmber });
   }
 
-  function addEffect(object, life, update) {
-    scene.add(object); effects.push({ object, life, age: 0, update });
-    if (effects.length > 120) { const old = effects.shift(); disposeObject(old.object, preserve); }
+  function removeEffect(effect) {
+    effect.cleanup?.(); disposeObject(effect.object, preserve);
+  }
+  function addEffect(object, life, update, cleanup) {
+    scene.add(object); effects.push({ object, life, age: 0, update, cleanup });
+    if (effects.length > 120) removeEffect(effects.shift());
     return object;
   }
   function burst(x, y, z, color, count = 12, scale = 1) {
@@ -363,20 +369,102 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     if (event.id) telegraphs.set(event.id, clockTime + duration);
   }
 
+  function showHit(event) {
+    const target = enemies.get(event.targetId) || players.get(event.targetId);
+    const x = event.x ?? target?.group.position.x, y = event.y ?? (target?.group.position.y || 0) + 1, z = event.z ?? target?.group.position.z;
+    if ([x, y, z].every(Number.isFinite)) {
+      burst(x, y, z, '#ffe9bd', 8, .75);
+      if (event.damage) speechPop(Math.round(event.damage), x, y + .8, z);
+    }
+    if (target) target.flashUntil = clockTime + .13;
+  }
+  function muzzleEffects(model, from, shotDirection) {
+    const flash = new THREE.Group(); flash.name = 'muzzle-flash';
+    const amber = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({ color: '#ffc05a', transparent: true, opacity: .85, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
+    const core = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({ color: '#fff8cf', transparent: true, opacity: 1, depthWrite: false, toneMapped: false }));
+    amber.scale.set(.23, .55, .23); amber.position.y = .28;
+    core.scale.set(.12, .34, .12); core.position.y = .19;
+    flash.add(amber, core); flash.position.copy(from); flash.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shotDirection);
+    addEffect(flash, .08, (object, age) => {
+      if (model?.group.parent) model.getMuzzle?.(object.position);
+      const fade = 1 - age / .08; amber.material.opacity = fade * .85; core.material.opacity = fade;
+      object.scale.setScalar(.75 + fade * .3);
+    });
+    const smoke = new THREE.Group(); smoke.name = 'muzzle-smoke'; smoke.position.copy(from);
+    for (let i = 0; i < 3; i++) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), new THREE.MeshBasicMaterial({ color: i % 2 ? '#eee1bd' : '#b9c1b6', transparent: true, opacity: .27, depthWrite: false }));
+      puff.userData.velocity = shotDirection.clone().multiplyScalar(.8 + i * .4).add(new THREE.Vector3((i - 1) * .17, .45 + i * .12, 0));
+      puff.scale.setScalar(.09); smoke.add(puff);
+    }
+    addEffect(smoke, .48, (object, age) => {
+      object.children.forEach((puff, index) => {
+        puff.position.copy(puff.userData.velocity).multiplyScalar(age);
+        puff.scale.setScalar(.09 + age * (.52 + index * .13)); puff.material.opacity = .27 * (1 - age / .48);
+      });
+    });
+  }
+  function impactRing(point, direction) {
+    const ring = meshRing(.22, .075, '#ffe7a0', .9); ring.name = 'bullet-impact';
+    ring.position.copy(point); ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    addEffect(ring, .18, (object, age) => { object.scale.setScalar(1 + age * 7); object.material.opacity = .9 * (1 - age / .18); });
+  }
+  function showShot(event) {
+    const model = players.get(event.playerId), from = new THREE.Vector3(), to = new THREE.Vector3(event.to.x, event.to.y, event.to.z);
+    from.set(event.from.x, event.from.y, event.from.z);
+    if (model?.getMuzzle) model.getMuzzle(from);
+    const flight = makeTracerFlight(from, to, event.weapon);
+    if (!flight) return;
+    const shotDirection = to.clone().sub(from).normalize();
+    const shotTime = typeof performance === 'undefined' ? clockTime : performance.now() / 1000;
+    const previous = discharges.get(event.playerId);
+    if (!previous || previous.weapon !== event.weapon || shotTime - previous.time >= .08) {
+      model?.fire?.(event.weapon); muzzleEffects(model, from, shotDirection);
+      discharges.set(event.playerId, { weapon: event.weapon, time: shotTime });
+    }
+    const tracer = new THREE.Group(); tracer.name = 'bullet-tracer';
+    tracer.userData = { kind: 'tracer', playerId: event.playerId, weapon: event.weapon, from: { ...from }, to: { ...to }, duration: flight.duration };
+    tracer.position.copy(from); tracer.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shotDirection);
+    const outer = new THREE.Mesh(new THREE.CylinderGeometry(.085, .055, 1, 7), new THREE.MeshBasicMaterial({ color: '#ffbf4a', transparent: true, opacity: .6, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(.033, .024, 1, 6), new THREE.MeshBasicMaterial({ color: '#fff3ba', transparent: true, opacity: 1, depthWrite: false, toneMapped: false }));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: '#fffbdc', transparent: true, opacity: 1, depthWrite: false, toneMapped: false }));
+    outer.name = 'tracer-amber-trail'; core.name = 'tracer-pale-core'; head.name = 'tracer-moving-head'; head.scale.set(.11, .18, .11);
+    tracer.add(outer, core, head);
+    const impact = { key: `${event.playerId}:${event.hitId}`, hit: null };
+    if (event.hitId) {
+      const queue = pendingImpacts.get(impact.key) || []; queue.push(impact); pendingImpacts.set(impact.key, queue);
+    }
+    function forgetImpact() {
+      const queue = pendingImpacts.get(impact.key);
+      if (!queue) return;
+      const index = queue.indexOf(impact); if (index >= 0) queue.splice(index, 1);
+      if (!queue.length) pendingImpacts.delete(impact.key);
+    }
+    let arrived = false;
+    function animateTracer(object, age) {
+      const pose = sampleTracerFlight(flight, age), length = Math.max(.001, pose.head - pose.tail);
+      outer.position.y = core.position.y = (pose.head + pose.tail) * .5;
+      outer.scale.y = core.scale.y = length; head.position.y = pose.head;
+      outer.material.opacity = pose.opacity * .65; core.material.opacity = head.material.opacity = pose.opacity;
+      if (pose.arrived && !arrived) {
+        arrived = true;
+        if (event.hitId) {
+          impactRing(to, shotDirection); if (impact.hit) showHit(impact.hit); else burst(to.x, to.y, to.z, '#ffe9b8', 7, .7);
+        }
+        forgetImpact();
+      }
+    }
+    animateTracer(tracer, 0);
+    addEffect(tracer, flight.duration + flight.fade, animateTracer, forgetImpact);
+  }
+
   function handleEvent(event) {
     if (!event || disposed) return;
     if (event.kind === 'shot' && event.from && event.to) {
-      const from = new THREE.Vector3(event.from.x, event.from.y, event.from.z), to = new THREE.Vector3(event.to.x, event.to.y, event.to.z);
-      if (![from.x, from.y, from.z, to.x, to.y, to.z].every(Number.isFinite)) return;
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), new THREE.LineBasicMaterial({ color: event.weapon === 'scatter' ? '#ffe39a' : '#fff2c2', transparent: true, opacity: .95 }));
-      addEffect(line, .13, (object, age) => { object.material.opacity = 1 - age / .13; });
-      burst(from.x, from.y, from.z, '#ffe39a', 6, .65);
-      if (event.hitId) burst(to.x, to.y, to.z, '#ffe9b8', 7, .70);
+      if (![event.from.x, event.from.y, event.from.z, event.to.x, event.to.y, event.to.z].every(Number.isFinite)) return;
+      showShot(event);
     } else if (event.kind === 'hit') {
-      const target = enemies.get(event.targetId) || players.get(event.targetId);
-      const x = event.x ?? target?.group.position.x, y = event.y ?? (target?.group.position.y || 0) + 1, z = event.z ?? target?.group.position.z;
-      if (Number.isFinite(x) && Number.isFinite(z)) { burst(x, y, z, '#ffe9bd', 8, .75); if (event.damage) speechPop(Math.round(event.damage), x, y + .8, z); }
-      if (target) target.flashUntil = clockTime + .13;
+      const pending = pendingImpacts.get(`${event.sourceId}:${event.targetId}`)?.find(impact => !impact.hit);
+      if (pending) pending.hit = event; else showHit(event);
     } else if (event.kind === 'defeated') {
       if (Number.isFinite(event.x)) { burst(event.x, (event.y || heightAt(event.x, event.z)) + .8, event.z, event.type === 'tempest' ? '#f4d582' : '#f2b789', event.type === 'tempest' ? 55 : 19, event.type === 'tempest' ? 3.5 : 1.4); pulse(event.x, event.z, '#ffdb8a', event.type === 'tempest' ? 12 : 2.5); }
     } else if (event.kind === 'chest') {
@@ -404,29 +492,30 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     }
   }
 
-  function updatePlayers(dt, state, localPlayer, time) {
+  function updatePlayers(dt, state, localPlayer, time, view, shipPose) {
+    remotePlayers.push(state?.players || [], { receivedAt: view.snapshotReceivedAt, snapshotTime: view.snapshotTime, round: view.round ?? state?.round, phase: state?.phase, now: time * 1000 });
     const seen = new Set();
     for (const source of state?.players || []) {
       if (!source.online && source.id !== localPlayer?.id) continue;
-      const player = source.id === localPlayer?.id ? localPlayer : source;
+      const isLocal = source.id === localPlayer?.id;
+      const sample = isLocal ? null : remotePlayers.sample(source.id, time * 1000, shipPose);
+      const player = isLocal ? localPlayer : sample?.player || source;
       seen.add(player.id);
       let model = players.get(player.id);
       if (!model) {
-        model = { ...buildPirate(palette, player.color), lastX: player.x, lastZ: player.z, flashUntil: 0 };
+        model = { ...buildPirate(palette, player.color), flashUntil: 0 };
+        model.group.userData.playerId = player.id;
         model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
         scene.add(model.group); players.set(player.id, model);
       }
-      const target = new THREE.Vector3(player.x, player.y, player.z), isLocal = player.id === localPlayer?.id;
-      const snap = isLocal || model.group.position.distanceTo(target) > 18;
-      if (snap) model.group.position.copy(target); else model.group.position.lerp(target, 1 - Math.exp(-dt * 14));
-      const angle = Math.atan2(Math.sin((player.yaw || 0) - model.group.rotation.y), Math.cos((player.yaw || 0) - model.group.rotation.y));
-      model.group.rotation.y += angle * (isLocal ? 1 : 1 - Math.exp(-dt * 16));
-      const speed = Math.hypot(player.x - model.lastX, player.z - model.lastZ) / Math.max(dt, .008);
-      model.speed = smooth(model.speed || 0, Math.min(speed, 12), dt * 10);
-      model.animate(time, model.speed, player); model.lastX = player.x; model.lastZ = player.z;
+      model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
+      model.speed = displayedSpeed(model.lastPose, player, dt, !!sample && model.generation !== sample.generation);
+      model.group.userData.movementSpeed = model.speed;
+      model.animate(time, model.speed, player, { dt, aiming: isLocal && !!view.aiming, elapsed });
+      model.lastPose = { ...player }; model.generation = sample?.generation;
       model.group.visible = !player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0;
     }
-    for (const [id, model] of players) if (!seen.has(id)) { disposeObject(model.group, preserve); players.delete(id); }
+    for (const [id, model] of players) if (!seen.has(id)) { disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
   }
   function updateEnemies(dt, state, time) {
     const seen = new Set();
@@ -486,8 +575,16 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     for (const [id, model] of pingModels) if (!seen.has(id)) { disposeObject(model, preserve); pingModels.delete(id); }
   }
 
-  function updateCamera(dt, player, view) {
+  function updateCamera(dt, player, view, shipPose) {
+    const GROUND_SHOULDER_OFFSET = 1.48, GROUND_CAMERA_HEIGHT = 2.42;
+    const GROUND_CAMERA_BACK = 7.45, AIM_CAMERA_BACK = 5.7;
+    const NORMAL_GAMEPLAY_FOV = 50, AIM_GAMEPLAY_FOV = 43, GLIDING_FOV = 58;
     const menu = view.menu || !player;
+    if (!menu && player.mode === 'aboard' && cameraShipPose) {
+      camera.position.x += shipPose.x - cameraShipPose.x;
+      camera.position.y += shipPose.y - cameraShipPose.y;
+      camera.position.z += shipPose.z - cameraShipPose.z;
+    }
     if (menu) {
       const t = view.time ?? clockTime, orbit = Math.sin(t * .035) * .08;
       desiredCamera.set(-122 * Math.cos(orbit) + 174 * Math.sin(orbit), 105 + Math.sin(t * .09) * 2.3, 174 * Math.cos(orbit) + 122 * Math.sin(orbit));
@@ -498,9 +595,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       const yaw = Number.isFinite(view.yaw) ? view.yaw : player.yaw || 0, pitch = clamp(Number.isFinite(view.pitch) ? view.pitch : player.pitch || -.15, -1.25, 1.1);
       direction.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
       right.set(Math.cos(yaw), 0, -Math.sin(yaw));
-      const back = player.mode === 'gliding' ? 10.2 : view.aiming && player.mode === 'ground' ? 6.1 : 8;
-      const anchor = new THREE.Vector3(player.x, player.y + 2.7, player.z);
-      desiredCamera.copy(anchor).addScaledVector(direction, -back).addScaledVector(right, .65);
+      const back = player.mode === 'gliding' ? 10.2 : view.aiming && player.mode === 'ground' ? AIM_CAMERA_BACK : GROUND_CAMERA_BACK;
+      const anchor = new THREE.Vector3(player.x, player.y + (player.mode === 'ground' ? GROUND_CAMERA_HEIGHT : 2.7), player.z);
+      desiredCamera.copy(anchor).addScaledVector(direction, -back).addScaledVector(right, player.mode === 'ground' ? GROUND_SHOULDER_OFFSET : .92);
       let safeFraction = 1;
       if (player.mode === 'ground') {
         const dx = desiredCamera.x - anchor.x, dz = desiredCamera.z - anchor.z, lengthSq = dx * dx + dz * dz;
@@ -519,7 +616,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 18));
       // Center ray is exactly input direction, including after collision.
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
-      camera.fov = smooth(camera.fov, view.aiming ? 46 : player.mode === 'gliding' ? 58 : 53, dt * 8);
+      camera.fov = smooth(camera.fov, view.aiming ? AIM_GAMEPLAY_FOV : player.mode === 'gliding' ? GLIDING_FOV : NORMAL_GAMEPLAY_FOV, dt * 8);
       if (Math.hypot(player.x - sun.target.position.x, player.z - sun.target.position.z) > 8) {
         sun.target.position.set(player.x, 0, player.z); sun.position.set(player.x - 60, 130, player.z + 70);
         sun.target.updateMatrixWorld();
@@ -545,6 +642,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       ship.cabin.material.opacity = smooth(ship.cabin.material.opacity, fade ? .12 : 1, dt * 14);
       ship.cabin.material.depthWrite = !fade && ship.cabin.material.opacity > .95;
     }
+    cameraShipPose = !menu && player.mode === 'aboard' ? { ...shipPose } : null;
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(); cameraReady = true;
   }
 
@@ -556,16 +654,18 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
     ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time);
     ocean.animate(time); sky.animate(time);
-    updateCamera(dt, localPlayer, view); updatePlayers(dt, state, localPlayer, time); updateEnemies(dt, state, time); updateObjectives(state, time);
+    updateCamera(dt, localPlayer, view, shipPose); updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
       mote.mesh.position.set(mote.center.x + Math.sin(a) * mote.radius, mote.center.y + (mote.ember ? (mote.rise + time * .7) % 7 : Math.sin(time * .5 + mote.phase) * 1.1 + mote.rise * .4), mote.center.z + Math.cos(a) * mote.radius);
       mote.mesh.material.opacity = .5 + Math.sin(time * 1.5 + mote.phase) * .3;
     }
-    for (let i = effects.length - 1; i >= 0; i--) {
-      const effect = effects[i]; effect.age += dt;
-      if (effect.age >= effect.life) { disposeObject(effect.object, preserve); effects.splice(i, 1); }
-      else effect.update?.(effect.object, effect.age, dt);
+    for (const effect of [...effects]) {
+      const index = effects.indexOf(effect); if (index < 0) continue;
+      effect.age += dt;
+      if (effect.age >= effect.life) {
+        effects.splice(index, 1); effect.update?.(effect.object, effect.life, dt); removeEffect(effect);
+      } else effect.update?.(effect.object, effect.age, dt);
     }
     for (const [id, until] of telegraphs) if (until < clockTime) telegraphs.delete(id);
     frameCount++; fpsElapsed += dt;
@@ -583,6 +683,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     projectVector.set(point.x, point.y, point.z).project(camera);
     return { x: (projectVector.x * .5 + .5) * width, y: (-projectVector.y * .5 + .5) * height, visible: projectVector.z > -1 && projectVector.z < 1 && Math.abs(projectVector.x) < 1.15 && Math.abs(projectVector.y) < 1.15 };
   }
+  function projectPlayer(id, height = 3.35) {
+    const position = players.get(id)?.group.position;
+    return position ? project({ x: position.x, y: position.y + height, z: position.z }) : null;
+  }
   function aimRay() {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
@@ -591,8 +695,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   function dispose() {
     if (disposed) return; disposed = true;
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
-    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); pingModels.clear(); effects.length = 0;
+    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); pingModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
   resize(); update(0, null, null, { menu: true, time: 0 });
-  return { scene, camera, renderer, update, render, resize, setQuality, dispose, handleEvent, project, aimRay, getStats };
+  return { scene, camera, renderer, update, render, resize, setQuality, dispose, handleEvent, project, projectPlayer, aimRay, getStats };
 }

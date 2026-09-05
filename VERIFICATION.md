@@ -1,4 +1,43 @@
-# Release verification
+# Movement and character polish verification
+
+September 5, 2026 follow-up. `npm test` passed all 45 tests in 89.99 seconds,
+including the full five-client voyage, victory/replay, and persistence checks.
+Changed JavaScript passes syntax checks; `git diff --check` passes.
+
+- Before the fix, an idle pirate drifted up to 0.491m relative to the initial
+  boat and its hip swung between -0.65 and +0.65 radians. Afterward, all five
+  pirates had zero deck/height drift and zero idle gait speed over 180 browser
+  frames. The camera maintained a constant offset from the ship.
+- Ground walking measured 8m/s and sprinting 11m/s, with frame variation below
+  1e-12m/s after warm-up. Browser testing exposed repeated-ACK timing pulses;
+  simulation-timestamp reconciliation and a coalesced-timer regression test
+  resolved them. Unconsumed jumps also remain airborne until acknowledged.
+- Browser controls verified deck movement, manual drop, gliding with a stowed
+  gun, landing, ground jump, pause with zero movement, and same-character
+  reconnect. Final drop/jump probes showed no return-to-deck or grounded bounce.
+- Inspected new pirate front/shoulder views, both guns, firing/reload poses,
+  glider, and crab combat. Pirates use 14 visible meshes aboard (15 grounded),
+  with approximately 14,700 visible triangles. Hands remain on their gun grips
+  through reload and recoil to floating-point precision.
+- Actual shots produce moving tracers from the visible muzzle. Scattershot
+  showed five trails and one flash. A second browser observed remote shots.
+  Aimed browser fire dealt two 24-damage hits to a crab.
+- Firing effects return to zero. Repeated shots settled at the same 274
+  geometries and two textures; both graphics settings render the effects.
+- Five-player probes at 1280x800 and 1920x1080 averaged about 60fps. The 1080p
+  180-frame sample had a 16.8ms 95th percentile. Browser console: no warnings
+  or errors. These short measurements are specific to this host.
+
+Rebuilt the Docker service and confirmed it healthy. All six changed client
+modules returned HTTP 200, `no-cache`, and exact SHA-256 matches to the local
+files. The updated game loaded and joined successfully through
+http://192.168.1.27:3400. Test servers used isolated save directories.
+
+This update uses original procedural art, adds no dependencies, and preserves
+combat balance, collision sizes, and the existing aggregate-save volume.
+The original release's longer play-through and platform limitations follow.
+
+# Original release verification
 
 Verified on September 5, 2026 on this Windows host. Tests used original Skywake
 Isles code and assets only. No Rustbeard files or running services were changed.

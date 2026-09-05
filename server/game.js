@@ -52,7 +52,7 @@ export class Game {
     Object.assign(p, makePlayerPosition(), {
       ready: false, hp: 100, maxHp: 100, ammo: 8, maxAmmo: 8, weapon: 'flintlock',
       reloadUntil: 0, healUntil: 0, knockedUntil: 0, invulnerableUntil: 0,
-      lastInputSeq: -1, kills: 0, rescues: 0, chests: 0,
+      lastInputSeq: -1, _receivedInputSeq: -1, kills: 0, rescues: 0, chests: 0,
       _fireAt: 0, _meleeAt: 0, _swapAt: 0, _pingAt: 0, _damageAt: -100,
       _inputAt: -1, _input: { forward: 0, right: 0, sprint: false, jump: false, yaw: 0, pitch: 0 },
     });
@@ -91,7 +91,7 @@ export class Game {
     const p = this.players.get(id);
     if (!p || (!p.online && this.onlineCount >= MAX_PLAYERS)) return null;
     p.online = true; p._expiresAt = 0; p._input = restInput(p); p._inputAt = this.clock;
-    p.lastInputSeq = -1;
+    p.lastInputSeq = -1; p._receivedInputSeq = -1;
     if (!this.hostId) this.hostId = id;
     return p;
   }
@@ -116,8 +116,8 @@ export class Game {
       !['forward', 'right', 'yaw', 'pitch'].every(k => typeof input[k] === 'number' && Number.isFinite(input[k]))) {
       return bad('Invalid movement input.', 'BAD_INPUT');
     }
-    if (input.seq <= p.lastInputSeq) return good();
-    p.lastInputSeq = input.seq;
+    if (input.seq <= p._receivedInputSeq) return good();
+    p._receivedInputSeq = input.seq;
     p._input = { forward: clamp(input.forward, -1, 1), right: clamp(input.right, -1, 1),
       yaw: ((input.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI,
       pitch: clamp(input.pitch, -1.35, 1.35), jump: input.jump === true, sprint: input.sprint === true };
@@ -349,10 +349,13 @@ export class Game {
     if (this.phase !== 'lobby' && this.phase !== 'victory') this.elapsed += dt;
     for (const p of [...this.players.values()]) {
       if (!p.online) { if (this.clock >= p._expiresAt) this.players.delete(p.id); continue; }
-      if (this.phase === 'victory') continue;
-      if (p.knockedUntil) { if (this.elapsed >= p.knockedUntil) this.revive(p); continue; }
+      // Inputs retire only when this simulation tick consumes them. Downed
+      // and victory inputs are consumed as no-ops so they cannot replay later.
+      if (this.phase === 'victory') { p.lastInputSeq = p._receivedInputSeq; continue; }
+      if (p.knockedUntil) { if (this.elapsed >= p.knockedUntil) this.revive(p); p.lastInputSeq = p._receivedInputSeq; continue; }
       const input = this.clock - p._inputAt < 0.4 ? p._input : restInput(p);
       movePlayer(p, this.phase === 'lobby' ? { ...input, jump: false } : input, dt, this.phase === 'lobby' ? 0 : this.elapsed);
+      p.lastInputSeq = p._receivedInputSeq;
       if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.reloadUntil = 0; }
       if (this.phase !== 'lobby' && this.elapsed - p._damageAt > 8) p.hp = Math.min(p.maxHp, p.hp + 7 * dt);
     }
@@ -445,7 +448,7 @@ export class Game {
   }
 
   snapshot() {
-    return { phase: this.phase, elapsed: this.elapsed, seed: SEED, round: this.round, hostId: this.hostId,
+    return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
       players: [...this.players.values()].map(p => cleanObject(p, PUBLIC_PLAYER)),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })),
