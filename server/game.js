@@ -454,7 +454,7 @@ export class Game {
       this.emit({ kind: 'chest', id: option.id, playerId: p.id, pearls: 12, ...rolled, dropId: drop.id });
     } else if (option.kind === 'shrine') {
       option.data.status = 'active';
-      const n = 3 + Math.min(2, Math.floor((this.onlineCount - 1) / 2));
+      const n = 3 + 2 * (clamp(this.onlineCount, 1, MAX_PLAYERS) - 1);
       for (let i = 0; i < n; i++) {
         const angle = i / n * Math.PI * 2 + 0.3;
         this.spawnEnemy(i === n - 1 && n > 3 ? 'spitter' : 'crab', option.point.x + Math.cos(angle) * 12, option.point.z + Math.sin(angle) * 12, option.point.region, option.id);

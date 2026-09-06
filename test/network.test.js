@@ -87,7 +87,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     crew[0].action('launch'); await until(() => crew[0].errors.some(e => e.code === 'HOST_ONLY'), 3000, 'nonhost launch denied');
     crew[1].action('launch');
     await until(() => crew.every(b => b.state?.phase === 'voyage'), 5000, 'voyage launch');
-    assert.ok(crew.every(b => b.state.enemies.length === 36));
+    assert.ok(crew.every(b => b.state.enemies.length === 56));
     assert.ok(crew.every(b => b.player.rarity === 'common' && Object.keys(b.player.inventory).length === 2));
 
     let destination = SPAWN, formationRadius = 1.3, autoDrop = true, combat = false, tick = 0;
@@ -190,7 +190,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
       await until(() => gathered(shrine), 22000, `walk to ${shrine.id} shrine`, details);
       crew[1].action('interact', shrine.id);
       await until(() => crew[1].state.shrines.find(s => s.id === shrine.id).status === 'active', 3000, `activate ${shrine.id}`);
-      assert.equal(crew[1].state.shrines.find(s => s.id === shrine.id).remaining, 5);
+      assert.equal(crew[1].state.shrines.find(s => s.id === shrine.id).remaining, 11);
       await until(() => crew.every(b => b.state.shrines.find(s => s.id === shrine.id).status === 'cleared'), 22000, `defeat ${shrine.id} guards and charge for five seconds`, details);
       t.diagnostic(`${shrine.name} cleared through aimed weapon fire and standing near the shrine.`);
     }

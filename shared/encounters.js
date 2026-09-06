@@ -1,8 +1,8 @@
-import { BEACON, CHESTS, SHRINES, SPAWN, OBSTACLES, heightAt } from './world.js';
+import { MAX_PLAYERS, BEACON, CHESTS, SHRINES, SPAWN, OBSTACLES, heightAt } from './world.js';
 import { resolveWorldCollision } from './collision.js';
 
 export const SAFE_LANDING_RADIUS = 20;
-// Three finite guards per destination, on its inland approach or nearby trail.
+// Three finite guards per destination, plus one melee crab per extra pirate.
 export const ENCOUNTER_GROUPS = Object.freeze([
   { id: 'saltwind-harbor', zone: 'beach', x: -27, z: 73 },
   { id: 'tideglass-market', zone: 'haven', x: -24, z: 28 },
@@ -19,11 +19,11 @@ export function inSafeLanding(point) {
 }
 
 export function encounterSpawns(playerCount = 1) {
-  const extra = Math.min(12, Math.max(0, Math.floor(playerCount) - 1) * 3);
+  const crewCount = Number.isFinite(playerCount) ? Math.max(1, Math.min(MAX_PLAYERS, Math.floor(playerCount))) : 1;
   const result = [];
   for (let groupIndex = 0; groupIndex < ENCOUNTER_GROUPS.length; groupIndex++) {
     const group = ENCOUNTER_GROUPS[groupIndex];
-    const count = 3 + Math.floor(extra / ENCOUNTER_GROUPS.length) + (groupIndex < extra % ENCOUNTER_GROUPS.length ? 1 : 0);
+    const count = 3 + crewCount - 1;
     for (let i = 0; i < count; i++) {
       const angle = i / count * Math.PI * 2 + groupIndex * 0.47;
       let point;
