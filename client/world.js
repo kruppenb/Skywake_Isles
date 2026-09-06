@@ -10,6 +10,8 @@ import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
 import { SIDE_EVENTS, SIDE_EVENT_COLOR } from '../shared/side-events.js';
 import { createObjectiveMarker, updateObjectiveMarker } from './objective-markers.js';
+import { createOldWatch } from './old-watch.js';
+import { oldWatchWeight } from '../shared/old-watch.js';
 
 const TAU = Math.PI * 2;
 const COLORS = { beach: '#e6d394', jungle: '#5aab70', volcano: '#c08d67', moon: '#839fa0', haven: '#81b57a' };
@@ -149,8 +151,9 @@ function buildOcean(palette, random) {
 
 function buildScenery(palette, random) {
   const group = new THREE.Group(), land = new GeoBatch(palette), luminous = new GeoBatch(palette, palette.glow);
+  const oldWatchDecoration = new GeoBatch(palette);
   for (const obstacle of OBSTACLES) {
-    if (obstacle.type === 'landmark' || obstacle.type === 'building') continue;
+    if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
     if (obstacle.type === 'tree') {
       const size = clamp((obstacle.height || 7) / 7, .7, 1.5);
@@ -169,28 +172,30 @@ function buildScenery(palette, random) {
   for (let i = 0; i < 245; i++) {
     const a = random() * TAU, radius = Math.sqrt(random()) * 124;
     const x = Math.sin(a) * radius, z = Math.cos(a) * radius, y = heightAt(x, z);
-    if (y < 1.7 || reserved(x, z, 1.2) || OBSTACLES.some(o => Math.hypot(x - o.x, z - o.z) < o.radius + 3)) continue;
+    if (y < 1.7 || reserved(x, z, 1.2) || OBSTACLES.some(o => o.pilot !== 'old-watch' && Math.hypot(x - o.x, z - o.z) < o.radius + 3)) continue;
     const region = regionAt(x, z)?.id, size = .58 + random() * .40;
+    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : land;
     if (region === 'moon') {
-      if (i % 3 === 0) addBroadTree(land, x, y, z, size, true, a);
-      else addMushroom(land, x, y, z, size * (i % 4 === 0 ? 1.55 : 1), a);
+      if (i % 3 === 0) addBroadTree(decoration, x, y, z, size, true, a);
+      else addMushroom(decoration, x, y, z, size * (i % 4 === 0 ? 1.55 : 1), a);
     } else if (region === 'volcano') {
-      if (i % 3 === 0) addCrystal(land, x, y, z, size, a, '#f0b168');
-      else land.add('pebble', [x, y + size * .8, z], [size * 1.3, size * 1.2, size], [.3, a, .1], i % 2 ? '#966e61' : '#bd8c6b');
-    } else if (region === 'jungle' && i % 3 !== 0) addBroadTree(land, x, y, z, size, false, a);
-    else addPalm(land, x, y, z, size, a, region === 'jungle');
+      if (i % 3 === 0) addCrystal(decoration, x, y, z, size, a, '#f0b168');
+      else decoration.add('pebble', [x, y + size * .8, z], [size * 1.3, size * 1.2, size], [.3, a, .1], i % 2 ? '#966e61' : '#bd8c6b');
+    } else if (region === 'jungle' && i % 3 !== 0) addBroadTree(decoration, x, y, z, size, false, a);
+    else addPalm(decoration, x, y, z, size, a, region === 'jungle');
   }
   for (let i = 0; i < 720; i++) {
     const x = (random() - .5) * 254, z = (random() - .5) * 254, y = heightAt(x, z);
     if (y < 2 || reserved(x, z, .2)) continue;
     const region = regionAt(x, z)?.id, s = .30 + random() * .5;
-    if (region === 'volcano') land.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, random() * TAU, 0], '#bb9876');
+    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : land;
+    if (region === 'volcano') decoration.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, random() * TAU, 0], '#bb9876');
     else {
       const color = region === 'moon' ? '#a599c8' : i % 3 === 0 ? '#91b773' : '#579868';
-      land.add('sphere', [x, y + .30 * s, z], [s, .66 * s, s * .85], [0, random() * TAU, 0], color);
+      decoration.add('sphere', [x, y + .30 * s, z], [s, .66 * s, s * .85], [0, random() * TAU, 0], color);
       if (i % 4 === 0) for (let j = 0; j < 3; j++) {
         const ox = Math.sin(j * 2.4) * .25, oz = Math.cos(j * 2.4) * .25;
-        land.add('sphere', [x + ox, y + .58 * s, z + oz], [.13, .12, .13], [0, 0, 0], region === 'moon' ? '#b8f2e8' : '#ffe1a5');
+        decoration.add('sphere', [x + ox, y + .58 * s, z + oz], [.13, .12, .13], [0, 0, 0], region === 'moon' ? '#b8f2e8' : '#ffe1a5');
       }
     }
   }
@@ -265,7 +270,8 @@ function buildScenery(palette, random) {
     }
   }
   group.add(land.mesh(), luminous.mesh({ shadow: false }));
-  return { group, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+  const legacyVegetation = oldWatchDecoration.mesh(); legacyVegetation.name = 'old-watch-original-vegetation'; group.add(legacyVegetation);
+  return { group, legacyVegetation, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -310,7 +316,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const camera = new THREE.PerspectiveCamera(53, 1, .12, 1100);
   const palette = makePalette(), preserve = new Set([palette.solid, palette.glow]);
   const random = seededRandom(SEED);
-  scene.add(new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2));
+  const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2); scene.add(hemisphere);
   const sun = new THREE.DirectionalLight('#fff0d0', 2.7); sun.position.set(-70, 140, 80); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -.00025; sun.shadow.normalBias = .06;
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 10, far: 360 });
@@ -320,6 +326,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   scene.add(ocean.group, scenery.group, sky.group);
   const settlements = buildSettlements(palette), reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
   scene.add(settlements.group);
+  const oldWatch = createOldWatch({ scene, settlements, legacyVegetation: scenery.legacyVegetation, hemisphere, sun });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
@@ -769,6 +776,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     ocean.animate(time); sky.animate(time);
     updateCamera(dt, localPlayer, view, shipPose);
     settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
+    oldWatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
@@ -806,9 +814,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats } }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
+    oldWatch.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }

@@ -89,24 +89,28 @@ export function buildSettlements(palette) {
   const group = new THREE.Group(); group.name = 'island-settlements';
   const rotors = [], pennants = [], chimneys = [], boats = [], occupied = [], propSites = [], buildingBounds = [], interiors = [];
   const batches = new Map(POINTS_OF_INTEREST.map(p => [p.id, new GeoBatch(palette)]));
+  const oldWatchFallback = new THREE.Group(); oldWatchFallback.name = 'old-watch-original-exterior'; group.add(oldWatchFallback);
+  const oldWatchTower = new GeoBatch(palette);
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
 
-  function hangingFlag(f, x, y, z, color, size = 1) {
+  function hangingFlag(f, x, y, z, color, size = 1, parent = group) {
     const pivot = new THREE.Group(), b = new GeoBatch(palette);
     b.add('box', [.49 * size, -.25 * size, 0], [.97 * size, .49 * size, .035], [0, 0, -.06], color);
     b.add('box', [.5 * size, -.25 * size, .025], [.13 * size, .39 * size, .025], [0, 0, -.06], C.cream);
     pivot.add(b.mesh({ shadow: false }));
     const point = f.point(x, y, z); pivot.position.copy(point);
-    group.add(pivot); pennants.push({ pivot, phase: pennants.length * 1.8 });
+    parent.add(pivot); pennants.push({ pivot, phase: pennants.length * 1.8 });
   }
 
   function furnishedBuilding(building) {
     const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
-    const floorY = heightAt(x, z), source = batches.get(building.poiId), firstVertex = source.positions.length;
+    const pilot = building.id === 'watch-barracks';
+    const floorY = heightAt(x, z), source = pilot ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
     const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
     const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
-    const floor = frame(source, x, floorY, z, yaw), cover = frame(roof, x, floorY, z, yaw);
+    let floor = frame(source, x, floorY, z, yaw);
+    const cover = frame(roof, x, floorY, z, yaw);
     const wall = { add(shape, position, ...args) {
       const face = Math.abs(position[0]) / width >= Math.abs(position[2]) / depth
         ? (position[0] >= 0 ? 0 : 1) : (position[2] >= 0 ? 2 : 3);
@@ -143,6 +147,8 @@ export function buildSettlements(palette) {
       wall.add('box', [width * .33, wallHeight * .82, depth / 2 + .16], [.74, .51, .15], [0, 0, 0], C.teal);
       wall.add('ring', [width * .33, wallHeight * .82, depth / 2 + .25], [.16, .16, .16], [0, 0, 0], C.cream);
     }
+    // Furnishings remain visible when the authored shell replaces the fallback.
+    if (pilot) floor = frame(batches.get(building.poiId), x, floorY, z, yaw);
     for (const item of buildingFurnishings(building)) {
       const { x: fx, z: fz, width: fw, depth: fd, top } = item;
       const add = (shape, p, s, color, rotation = [0, 0, 0]) => floor.add(shape, [fx + p[0], p[1], fz + p[2]], s, rotation, color);
@@ -181,7 +187,9 @@ export function buildSettlements(palette) {
       face.userData.normal = normals[index]; wallsMesh.add(face);
     });
     wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
-    group.add(wallsMesh, roofMesh); interiors.push({ building, walls: wallsMesh, roof: roofMesh });
+    (pilot ? oldWatchFallback : group).add(wallsMesh, roofMesh);
+    if (pilot) { const base = source.mesh(); base.name = 'watch-barracks-original-base'; oldWatchFallback.add(base); }
+    interiors.push({ building, walls: wallsMesh, roof: roofMesh, originalWalls: wallsMesh, originalRoof: roofMesh });
     let visualRadius = 0, visualHeight = 0;
     for (const [batch, first] of [[source, firstVertex], ...upper.map(batch => [batch, 0]), [roof, 0]]) for (let index = first; index < batch.positions.length; index += 3) {
       visualRadius = Math.max(visualRadius, Math.hypot(batch.positions[index] - x, batch.positions[index + 2] - z));
@@ -193,14 +201,14 @@ export function buildSettlements(palette) {
   for (const building of BUILDINGS) {
     if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
-    const sourceBatch = batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
+    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
     let high = ground, low = ground;
     for (let i = 0; i < 12; i++) {
       const y = heightAt(x + Math.sin(i / 12 * TAU) * r * .83, z + Math.cos(i / 12 * TAU) * r * .83);
       high = Math.max(high, y); low = Math.min(low, y);
     }
-    const y = high + .10, h = height - (y - ground), f = frame(batches.get(building.poiId), x, y, z, yaw);
+    const y = high + .10, h = height - (y - ground), f = frame(sourceBatch, x, y, z, yaw);
     // Deep, compact masonry foundations reach the terrain on the downhill side.
     const foundationDepth = y - low + .32;
     f.add('cylinder', [0, -.5 * foundationDepth + .08, 0], [r * .86, foundationDepth, r * .86], [0, 0, 0], C.stone);
@@ -250,7 +258,7 @@ export function buildSettlements(palette) {
       closedDoor(f, 0, .06, r * .745, 1.05, 2.05);
       for (const t of [.36, .59]) f.add('box', [0, h * t, r * .75], [.30, .92, .08], [0, 0, 0], C.dark);
       f.line([0, h * .77, 0], [0, h * .99, 0], .065, C.wood);
-      hangingFlag(f, 0, h * .965, 0, C.coral, .95);
+      hangingFlag(f, 0, h * .965, 0, C.coral, .95, building.id === 'signal-tower' ? oldWatchFallback : group);
     } else if (kind === 'observatory') {
       f.add('cylinder', [0, h * .245, 0], [r * .77, h * .49, r * .77], [0, 0, 0], color);
       f.add('cylinder', [0, h * .48, 0], [r * .86, .23, r * .86], [0, 0, 0], C.paleWood);
@@ -314,7 +322,7 @@ export function buildSettlements(palette) {
     return true;
   }
 
-  function site(place, dx, dz, radius, build, yaw = 0) {
+  function site(place, dx, dz, radius, build, yaw = 0, prefab = null) {
     for (let attempt = 0; attempt < 90; attempt++) {
       const angle = attempt * 2.39996, search = attempt ? .7 * Math.sqrt(attempt) : 0;
       const x = place.x + dx + Math.sin(angle) * search, z = place.z + dz + Math.cos(angle) * search;
@@ -322,8 +330,10 @@ export function buildSettlements(palette) {
       const y = heightAt(x, z);
       const slope = Math.max(...[0, 1, 2, 3].map(i => Math.abs(heightAt(x + Math.sin(i * Math.PI / 2) * radius, z + Math.cos(i * Math.PI / 2) * radius) - y)));
       if (slope > .7) continue;
-      build(frame(batches.get(place.id), x, y, z, yaw), x, y, z);
-      occupied.push({ x, z, radius }); propSites.push({ poiId: place.id, x, z, radius }); stats.propClusters++;
+      const source = prefab ? new GeoBatch(palette) : batches.get(place.id);
+      build(frame(source, x, y, z, yaw), x, y, z);
+      if (prefab) { const mesh = source.mesh(); mesh.name = 'old-watch-original-' + prefab; oldWatchFallback.add(mesh); }
+      occupied.push({ x, z, radius }); propSites.push({ poiId: place.id, x, z, radius, ...(prefab ? { prefab, yaw } : {}) }); stats.propClusters++;
       return true;
     }
     return false;
@@ -401,7 +411,7 @@ export function buildSettlements(palette) {
           f.add('sphere', [(i - 2) * .83, h + .02, 0], [.40, .08, .34], [0, 0, 0], '#7b9b6d');
         }
         for (let i = 0; i < 4; i++) f.add('pebble', [-1 + i * .64, .23, .8 + i % 2 * .3], [.38, .31, .32], [.1, i, .2], C.stone);
-      });
+      }, 0, place.id === 'old-watch' ? 'ruin_wall' : null);
       site(place, 5, -10, 1.25, telescope, -.4);
     } else if (place.kind === 'camp') {
       site(place, -6, -3, 1.7, f => {
@@ -470,12 +480,13 @@ export function buildSettlements(palette) {
       f.add('box', [0, 2.33, 0], [.40, .53, .4], [0, .3, 0], C.cream);
       f.add('cone', [0, 2.67, 0], [.35, .25, .35], [0, 0, 0], C.teal);
       for (const y of [2.06, 2.60]) f.add('box', [0, y, 0], [.44, .07, .44], [0, .3, 0], C.wood);
-    });
+    }, 0, place.id === 'old-watch' ? 'lantern' : null);
   }
 
   for (const place of POINTS_OF_INTEREST) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
   }
+  const towerFallbackMesh = oldWatchTower.mesh(); towerFallbackMesh.name = 'signal-tower-original'; oldWatchFallback.add(towerFallbackMesh);
 
   // Fishing skiffs lie beyond the actual scalloped shoreline, at sea level.
   for (let i = 0; i < 2; i++) {
@@ -543,7 +554,12 @@ export function buildSettlements(palette) {
   }
   group.userData.propSites = propSites; group.userData.buildingBounds = buildingBounds;
   animate(0);
-  return { group, animate, stats };
+  return { group, animate, stats, setOldWatchKit(kit = null) {
+    const interior = interiors.find(item => item.building.id === 'watch-barracks');
+    interior.walls = kit?.walls ?? interior.originalWalls;
+    interior.roof = kit?.roof ?? interior.originalRoof;
+    oldWatchFallback.visible = !kit;
+  } };
 }
 
 function buildResidents(palette, parent) {

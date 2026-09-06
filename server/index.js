@@ -11,7 +11,8 @@ import { MAX_PLAYERS } from '../shared/world.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = '1.0.0';
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary' };
+const THREE_ADDONS = new Set(['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js']);
 const json = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 
 export async function createGameServer({ port = Number(process.env.PORT || 3400), host = '0.0.0.0', dataDir = process.env.DATA_DIR || path.join(ROOT, 'data') } = {}) {
@@ -36,6 +37,7 @@ export async function createGameServer({ port = Number(process.env.PORT || 3400)
     if (pathname === '/health') return json(res, 200, { ok: true, game: 'Skywake Isles', players: game.onlineCount, phase: game.phase, version: VERSION });
     let file;
     if (pathname === '/vendor/three.module.js' || pathname === '/vendor/three.core.js') file = path.join(ROOT, 'node_modules/three/build', path.basename(pathname));
+    else if (pathname.startsWith('/vendor/addons/') && THREE_ADDONS.has(pathname.slice(15))) file = path.join(ROOT, 'node_modules/three/examples/jsm', pathname.slice(15));
     else if (pathname.startsWith('/vendor/')) return json(res, 404, { error: 'Not found' });
     else if (pathname.startsWith('/shared/')) file = path.join(ROOT, 'shared', pathname.slice(8));
     else if (pathname === '/favicon.svg') file = path.join(ROOT, 'client', 'favicon.svg');

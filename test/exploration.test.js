@@ -62,7 +62,8 @@ test('eight places and append-only loot/obstacle IDs preserve the original islan
   assert.deepEqual(OBSTACLES.slice(0, 34).map(o => o.id), Array.from({ length: 34 }, (_, i) => `prop-${i + 1}`));
   assert.equal(OBSTACLES[0].x, -24);
   assert.equal(OBSTACLES[33].type, 'landmark');
-  assert.equal(OBSTACLES.length, 34 + BUILDINGS.length);
+  assert.equal(OBSTACLES.length, 34 + BUILDINGS.length + 16);
+  assert.deepEqual(OBSTACLES.slice(34 + BUILDINGS.length).map(o => o.id), Array.from({ length: 16 }, (_, i) => `old-watch-prop-${i + 1}`));
   for (const place of POINTS_OF_INTEREST) {
     assert.ok(BUILDINGS.some(b => b.poiId === place.id), `${place.id} has architecture`);
     assert.ok(RESIDENTS.some(r => r.poiId === place.id), `${place.id} has a resident`);

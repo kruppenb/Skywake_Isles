@@ -1,0 +1,481 @@
+{
+  "schemaVersion": 1,
+  "generator": "tools/build-old-watch.py",
+  "seed": 481503,
+  "blenderVersion": "5.2.1 LTS",
+  "coordinateSystem": "Y-up, meters, +Z front",
+  "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
+  "file": "kit.glb",
+  "bytes": 7584620,
+  "sha256": "3fce2c1f50178bf0a681fdec6aafba86b98140cc108ce6ae522b45e6370f152b",
+  "prefabs": {
+    "barracks_base": {
+      "bounds": {
+        "min": [
+          -2.13,
+          -0.13,
+          -1.77
+        ],
+        "max": [
+          2.13,
+          0.47997,
+          1.77
+        ]
+      },
+      "dimensions": [
+        4.26,
+        0.60997,
+        3.54
+      ],
+      "horizontalRadius": 2.7437,
+      "triangles": 1188,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "watch_stone"
+      ]
+    },
+    "barracks_roof": {
+      "bounds": {
+        "min": [
+          -2.28333,
+          3.20389,
+          -1.88
+        ],
+        "max": [
+          2.28039,
+          5.09,
+          1.88
+        ]
+      },
+      "dimensions": [
+        4.56372,
+        1.88611,
+        3.76
+      ],
+      "horizontalRadius": 2.93144,
+      "triangles": 4816,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "dark_slate"
+      ]
+    },
+    "barracks_wall_back": {
+      "bounds": {
+        "min": [
+          -1.89,
+          0.48661,
+          -1.77
+        ],
+        "max": [
+          1.89,
+          3.16,
+          -1.53
+        ]
+      },
+      "dimensions": [
+        3.78,
+        2.67339,
+        0.24
+      ],
+      "horizontalRadius": 2.57238,
+      "triangles": 660,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "watch_stone"
+      ]
+    },
+    "barracks_wall_east": {
+      "bounds": {
+        "min": [
+          1.89,
+          0.48151,
+          -1.77
+        ],
+        "max": [
+          2.13,
+          3.2,
+          1.77
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.71849,
+        3.54
+      ],
+      "horizontalRadius": 2.75797,
+      "triangles": 2332,
+      "primitives": 4,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    },
+    "barracks_wall_front": {
+      "bounds": {
+        "min": [
+          -1.89,
+          0.48907,
+          1.53
+        ],
+        "max": [
+          1.89,
+          3.16,
+          1.77
+        ]
+      },
+      "dimensions": [
+        3.78,
+        2.67093,
+        0.24
+      ],
+      "horizontalRadius": 2.57238,
+      "triangles": 660,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "watch_stone"
+      ]
+    },
+    "barracks_wall_west": {
+      "bounds": {
+        "min": [
+          -2.13,
+          0.48109,
+          -1.77
+        ],
+        "max": [
+          -1.89,
+          3.2,
+          1.77
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.71891,
+        3.54
+      ],
+      "horizontalRadius": 2.75797,
+      "triangles": 2332,
+      "primitives": 4,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    },
+    "fern_clump": {
+      "bounds": {
+        "min": [
+          -0.4493,
+          -0.00338,
+          -0.50152
+        ],
+        "max": [
+          0.46335,
+          0.6827,
+          0.47582
+        ]
+      },
+      "dimensions": [
+        0.91265,
+        0.68609,
+        0.97734
+      ],
+      "horizontalRadius": 0.57076,
+      "triangles": 1008,
+      "primitives": 1,
+      "materials": [
+        "needle_foliage"
+      ]
+    },
+    "grass_clump": {
+      "bounds": {
+        "min": [
+          -0.36989,
+          0.0,
+          -0.29547
+        ],
+        "max": [
+          0.27854,
+          0.55495,
+          0.33077
+        ]
+      },
+      "dimensions": [
+        0.64843,
+        0.55495,
+        0.62624
+      ],
+      "horizontalRadius": 0.36994,
+      "triangles": 376,
+      "primitives": 1,
+      "materials": [
+        "needle_foliage"
+      ]
+    },
+    "ground_sample": {
+      "bounds": {
+        "min": [
+          -0.5,
+          0.0,
+          -0.5
+        ],
+        "max": [
+          0.5,
+          0.0,
+          0.5
+        ]
+      },
+      "dimensions": [
+        1.0,
+        0.0,
+        1.0
+      ],
+      "horizontalRadius": 0.70711,
+      "triangles": 2,
+      "primitives": 1,
+      "materials": [
+        "ground_earth"
+      ]
+    },
+    "pine_a": {
+      "bounds": {
+        "min": [
+          -1.8363,
+          -0.16054,
+          -2.17002
+        ],
+        "max": [
+          1.98602,
+          8.00054,
+          1.88314
+        ]
+      },
+      "dimensions": [
+        3.82232,
+        8.16108,
+        4.05316
+      ],
+      "horizontalRadius": 2.31265,
+      "triangles": 10306,
+      "primitives": 2,
+      "materials": [
+        "needle_foliage",
+        "pine_bark"
+      ]
+    },
+    "pine_b": {
+      "bounds": {
+        "min": [
+          -2.21942,
+          -0.16194,
+          -2.08499
+        ],
+        "max": [
+          2.27073,
+          10.00031,
+          2.05982
+        ]
+      },
+      "dimensions": [
+        4.49015,
+        10.16224,
+        4.14481
+      ],
+      "horizontalRadius": 2.39326,
+      "triangles": 11782,
+      "primitives": 2,
+      "materials": [
+        "needle_foliage",
+        "pine_bark"
+      ]
+    },
+    "rock_a": {
+      "bounds": {
+        "min": [
+          -0.88804,
+          -0.235,
+          -0.84938
+        ],
+        "max": [
+          0.96729,
+          1.195,
+          0.92202
+        ]
+      },
+      "dimensions": [
+        1.85533,
+        1.43,
+        1.7714
+      ],
+      "horizontalRadius": 0.988,
+      "triangles": 418,
+      "primitives": 1,
+      "materials": [
+        "watch_stone"
+      ]
+    },
+    "rock_b": {
+      "bounds": {
+        "min": [
+          -0.85522,
+          -0.235,
+          -0.89234
+        ],
+        "max": [
+          0.83792,
+          1.195,
+          0.98446
+        ]
+      },
+      "dimensions": [
+        1.69314,
+        1.43,
+        1.8768
+      ],
+      "horizontalRadius": 0.988,
+      "triangles": 418,
+      "primitives": 1,
+      "materials": [
+        "watch_stone"
+      ]
+    },
+    "ruin_wall": {
+      "bounds": {
+        "min": [
+          -2.09416,
+          -0.242,
+          -0.31293
+        ],
+        "max": [
+          2.09528,
+          1.692,
+          0.30733
+        ]
+      },
+      "dimensions": [
+        4.18944,
+        1.934,
+        0.62026
+      ],
+      "horizontalRadius": 2.10843,
+      "triangles": 1628,
+      "primitives": 1,
+      "materials": [
+        "watch_stone"
+      ]
+    },
+    "watch_tower": {
+      "bounds": {
+        "min": [
+          -2.64246,
+          -0.6075,
+          -2.64939
+        ],
+        "max": [
+          2.64217,
+          9.31,
+          2.64
+        ]
+      },
+      "dimensions": [
+        5.28463,
+        9.9175,
+        5.28939
+      ],
+      "horizontalRadius": 2.91699,
+      "triangles": 21152,
+      "primitives": 5,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "lantern_amber",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    }
+  },
+  "textures": [
+    {
+      "name": "old_watch_stone_color",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "sRGB",
+      "sourcePngBytes": 242302
+    },
+    {
+      "name": "old_watch_stone_normal",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "linear",
+      "sourcePngBytes": 342412
+    },
+    {
+      "name": "old_watch_timber_color",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "sRGB",
+      "sourcePngBytes": 272609
+    },
+    {
+      "name": "old_watch_timber_normal",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "linear",
+      "sourcePngBytes": 172506
+    },
+    {
+      "name": "old_watch_slate_color",
+      "width": 256,
+      "height": 256,
+      "colorSpace": "sRGB",
+      "sourcePngBytes": 40306
+    },
+    {
+      "name": "old_watch_slate_normal",
+      "width": 256,
+      "height": 256,
+      "colorSpace": "linear",
+      "sourcePngBytes": 4061
+    },
+    {
+      "name": "old_watch_earth_color",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "sRGB",
+      "sourcePngBytes": 125682
+    },
+    {
+      "name": "old_watch_earth_normal",
+      "width": 512,
+      "height": 512,
+      "colorSpace": "linear",
+      "sourcePngBytes": 255605
+    },
+    {
+      "name": "old_watch_foliage_color",
+      "width": 256,
+      "height": 256,
+      "colorSpace": "sRGB",
+      "sourcePngBytes": 38721
+    },
+    {
+      "name": "old_watch_foliage_normal",
+      "width": 256,
+      "height": 256,
+      "colorSpace": "linear",
+      "sourcePngBytes": 3356
+    }
+  ],
+  "totalTriangles": 59078,
+  "totalPrimitives": 33,
+  "embeddedImageCount": 10
+}

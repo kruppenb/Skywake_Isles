@@ -1,4 +1,5 @@
 import { BUILDINGS, EXPLORATION_CHESTS, buildingLocalPoint } from './exploration.js';
+import { OLD_WATCH_PROPS } from './old-watch.js';
 
 // Original designed island. These values are shared by rendering and authority.
 export const MAX_PLAYERS = 5;
@@ -46,7 +47,7 @@ const obstacleLayout = [
   [0, -20, 4.5, 31, 'landmark'],
 ];
 export const OBSTACLES = obstacleLayout.map(([x, z, radius, height, type], i) => ({ id: `prop-${i + 1}`, x, z, radius, height, type }))
-  .concat(BUILDINGS.map(({ id, x, z, radius, height }) => ({ id: `building-${id}`, type: 'building', x, z, radius, height, buildingId: id })));
+  .concat(BUILDINGS.map(({ id, x, z, radius, height }) => ({ id: `building-${id}`, type: 'building', x, z, radius, height, buildingId: id })), OLD_WATCH_PROPS);
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };

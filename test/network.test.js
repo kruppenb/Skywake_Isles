@@ -67,11 +67,13 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     const url = `ws://127.0.0.1:${server.port}`;
     const health = await request(server.port, '/health');
     assert.equal(health.status, 200); assert.equal(JSON.parse(health.body).game, 'Skywake Isles');
-    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/vendor/three.module.js', '/vendor/three.core.js']) {
+    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/vendor/three.module.js', '/vendor/three.core.js', '/vendor/addons/loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js']) {
       const response = await request(server.port, route); assert.equal(response.status, 200, route); assert.equal(response.headers['cache-control'], 'no-cache');
     }
+    const kit = await request(server.port, '/assets/old-watch/kit.glb');
+    assert.equal(kit.status, 200); assert.equal(kit.headers['content-type'], 'model/gltf-binary'); assert.equal(kit.body.slice(0, 4), 'glTF');
     for (const route of ['/shared/%2e%2e/server/game.js', '/%ZZ', '/shared/..%5cserver/game.js']) assert.equal((await request(server.port, route)).status, 400, route);
-    for (const route of ['/server/game.js', '/data/stats.json', '/package.json', '/vendor/private.js']) assert.equal((await request(server.port, route)).status, 404, route);
+    for (const route of ['/server/game.js', '/data/stats.json', '/package.json', '/vendor/private.js', '/vendor/addons/loaders/DRACOLoader.js', '/vendor/addons/../../package.json', '/node_modules/three/package.json', '/assets/old-watch/manifest.json']) assert.equal((await request(server.port, route)).status, route.includes('/../') ? 400 : 404, route);
     for (let i = 0; i < 5; i++) crew.push(await open(url, `Crew ${i + 1}`, COLORS[i]));
     await until(() => crew.every(b => b.state?.players.filter(p => p.online).length === 5), 5000, 'five synchronized crew');
     const sixth = await open(url, 'Sixth pirate', COLORS[0]);

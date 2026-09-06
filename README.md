@@ -54,6 +54,8 @@ Branching footpaths lead to eight places with their own daily bustle: Saltwind H
 
 Visit each place on foot to add it to your voyage journal. Press M for named destinations, building footprints, walking paths, and your personal discovery count. Discoveries begin afresh each voyage. Treasure tucked around the settlements still belongs to the whole crew, and the three shrines remain your shared objective.
 
+Northwest of Windward Farm, Old Watch is the weathered environment pilot: mossy masonry, aged timber, pines, and worn stone paths surround its tower and furnished barracks.
+
 Open chests for shared pearls, nearby healing, and one random gun. Its floating model and glow show where it landed; approach and press E again to pick it up. Guns roll Common, Uncommon, Rare, Epic, or Legendary rarity, shown by both name and color. Better rarities increase damage. Your five slots hold one of each gun; higher rarity loot upgrades a slot and equips it. Equal or lower duplicates stay for another crewmate. Everyone shares pearls, while the first pirate to claim a gun keeps it.
 
 Inland patrols guard paths and all eight destinations, with about 24 enemies for a solo voyage and up to 36 for a full crew. Crab and ranged spitter groups patrol locally, return to their posts, and stay away from the safe landing beach. Defeated patrols do not endlessly respawn. Visit the three compass shrines in any order, press E to awaken each one, defeat its crab guards, then stand near it for five seconds. A restored shrine grants a shard, heals nearby pirates, and becomes the automatic rescue checkpoint. There are no endless shrine waves.
@@ -82,7 +84,7 @@ Names and colors are saved only in each browser. Aggregate wins, voyages, and be
 
 ## Run without Docker and verify
 
-Node.js 22 or later is required. Dependencies are pinned and served locally; there is no bundler, CDN, or browser-time asset download.
+Node.js 22 or later is required. Dependencies are pinned and served locally; there is no bundler, CDN, or external runtime download. The browser loads Old Watch's GLB assets from the local game server. See [ENVIRONMENT_PIPELINE.md](docs/ENVIRONMENT_PIPELINE.md) for asset regeneration and extending the pilot.
 
 ```powershell
 npm ci
@@ -116,4 +118,4 @@ npm test
 
 The unit suite checks keyboard/mouse input, deterministic movement, snapshot timing and prediction, movement on the ship, remote interpolation, traveling tracers, walkable routes, physical collisions, combat and cooldowns, health and rescues, finite shrine progression, victory/replay, and atomic statistics. The end-to-end suite creates its own temporary save directory and ephemeral loopback port, joins five actual WebSocket clients, walks and fights using normal controls through the entire adventure, checks reconnect/late join/sixth-player rejection, and starts a new server instance to verify persistence. It takes roughly two minutes and cleans up its own sockets, server, and temporary files. See [VERIFICATION.md](VERIFICATION.md) for the browser play-through, hardware measurements, deployment checks, and testing limitations.
 
-This is a designed co-op island adventure, with fixed terrain and procedural original art. It does not include Fortnite building, a competitive battle royale, accounts, public matchmaking, or internet hosting infrastructure. No Rustbeard Island source or assets were used. See [CREDITS.md](CREDITS.md) for dependency attribution.
+This is a designed co-op island adventure, with fixed terrain, procedural scenery, and authored original assets. It does not include Fortnite building, a competitive battle royale, accounts, public matchmaking, or internet hosting infrastructure. No Rustbeard Island source or assets were used. See [CREDITS.md](CREDITS.md) for dependency attribution.
