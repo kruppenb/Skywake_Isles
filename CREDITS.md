@@ -8,6 +8,8 @@ Windward Farm's tapered plaster-and-stone windmill, framed rotating sails, timbe
 
 Tideglass Market's limewashed cottage, closed Haven huts, teal tiled roofs, timber fruit and sailcloth stalls, tied scalloped canvas, fruit, spiraled cloth rolls, worn paving and broadleaf shrubs are original geometry from `tools/build-tideglass-market.py`. The deterministic Blender source, GLB and validation manifest ship together. This extension borrows the same original stone, timber, slate, earth and foliage textures with recorded linear material tints; it adds no texture images or external art dependencies. Existing resident models, furniture, palms, gameplay layout and lighthouse remain part of the original game.
 
+Saltwind Harbor's net-house, tavern and fisher's cottage with their sidings, roofs, work sites, pilings and lobster pots are original geometry from `tools/build-saltwind-harbor.py`. Driftwood Yard and Sunwake Strand's timber shed, shipwright's cottage, ribbed hull frame, timber stacks, lantern post, sawhorses, pitch kettle, pier sections, banner poles, pennant line, landing crates, driftwood logs and signpost are original geometry from `tools/build-driftwood-yard.py`. Both ship their deterministic Blender source, GLB and validation manifest together and borrow the same original stone, timber, slate, earth and foliage textures with recorded linear material tints; neither adds texture images or external art dependencies. Existing residents, furniture, palms, boats, gameplay layout and the landing dock's fallback geometry remain part of the original game.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |
