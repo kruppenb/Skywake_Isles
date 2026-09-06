@@ -6,9 +6,11 @@ Windward Farm and its Old Watch connector are the second area. They carry that a
 
 Tideglass Market and immediate central Haven are the third area: pale weathered plaster, aged timber, teal tile roofs, coral and teal canvas, market stock, sandy walking routes and restrained broadleaf planting. The existing market cottage, two stalls and two closed Haven huts receive authored geometry. Original palms, residents, furniture, lighthouse, objectives and gameplay layout remain intact.
 
+Saltwind Harbor is the fourth area and the first of the coastal working waterfront. Its three enterable buildings share the kit's construction language but deliberately not its colours: the net-house is unpainted salt-grey board-and-batten with tarred trim under green cedar shakes; the tavern is lime-washed cream clapboard with a honey-oak frame, terracotta shingles, a fieldstone chimney, a hanging fish sign and a door lantern; the fisher's cottage is whitewashed shiplap with sea-blue louvred shutters under sun-faded salmon tiles. Authored work sites (mending table, crates and barrel, drying net, lantern post), mooring pilings, lobster pots, pale sand with shell-grit routes and straw dune grass replace the original flat props and lawn tufts. Boats, residents, furnishings, loot, the Sunwake landing and gameplay layout remain intact.
+
 ## Build and inspect
 
-The editable sources are `tools/build-old-watch.py`, `tools/build-windward-farm.py` and `tools/build-tideglass-market.py`. Shared deterministic mesh construction, metric UVs, vertex colors, material creation, tileable-noise helpers and glTF export live in `tools/environment_kit.py`. Each area retains its explicit models, seed, layout contract and exported bounds validation. Old Watch exports the self-contained shared library; Farm and Tideglass export uncompressed glTF 2 geometry extensions. The generators need Blender 5.2 or a compatible newer Blender with its bundled NumPy and glTF exporter; they do not need downloaded assets, image libraries, an asset CDN, or a running game server.
+The editable sources are `tools/build-old-watch.py`, `tools/build-windward-farm.py`, `tools/build-tideglass-market.py` and `tools/build-saltwind-harbor.py`. Shared deterministic mesh construction, metric UVs, vertex colors, material creation, tileable-noise helpers and glTF export live in `tools/environment_kit.py`. Each area retains its explicit models, seed, layout contract and exported bounds validation. Old Watch exports the self-contained shared library; Farm, Tideglass and Saltwind export uncompressed glTF 2 geometry extensions. Saltwind's generator derives every building's envelope from the same `radius`/`height` formula as `shared/exploration.js` and builds all three from one parametrized shed builder whose siding, trim, roof and extras come from a per-building spec, so a new building is a spec entry plus any signature detail, not a copy of another building's code. The generators need Blender 5.2 or a compatible newer Blender with its bundled NumPy and glTF exporter; they do not need downloaded assets, image libraries, an asset CDN, or a running game server.
 
 From the repository root in PowerShell:
 
@@ -16,6 +18,7 @@ From the repository root in PowerShell:
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-old-watch.py
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-windward-farm.py
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-tideglass-market.py
+& 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-saltwind-harbor.py
 ```
 
 Use a different Blender executable path where appropriate. `--background --factory-startup` starts an independent process and never touches an artist's open Blender scene. To render an optional inspection image outside the shipping asset directory:
@@ -31,6 +34,7 @@ To compare a regeneration without overwriting shipping output:
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-old-watch.py -- --output .qa/old-watch-regenerated
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-windward-farm.py -- --output .qa/farm-regenerated
 & 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-tideglass-market.py -- --output .qa/tideglass-regenerated
+& 'C:/Apps/Blender/blender.exe' --background --factory-startup --python-exit-code 1 --python tools/build-saltwind-harbor.py -- --output .qa/saltwind-regenerated --preview .qa/saltwind-preview.png
 ```
 
 Each seed is fixed. Keep the Blender/exporter version fixed when comparing binary hashes; exporter versions can change the binary representation. `--python-exit-code 1` makes validation errors fail the CLI process. Commit the source generator, area's `client/assets/<area>/kit.glb` and regenerated `manifest.json` together. Keep previews, build logs, temporary textures and Python cache files out of commits. All kits load from `/assets/<area>/kit.glb` on the same local server as the game. Farm and Tideglass accept `--preview <ignored-output.png>` and bind generated shared materials only after export, so preview textures never enter their shipping GLBs.
@@ -86,6 +90,18 @@ Tideglass uses eleven additional identity-transform roots:
 
 The Tideglass exporter clips complete triangles against both open doorway prisms, validates normals/UVs/vertex colors, identity transforms, bounds, shared dependency hash, size and zero images. Tests independently check triangle/door intersections, roof underside coverage, every paving face's outward direction and runtime building footing/height envelopes. The two hut yaws are taken after their original RNG draws; no gameplay IDs or colliders are added.
 
+Saltwind Harbor uses twenty-four identity-transform roots:
+
+| Root nodes | Purpose and envelope |
+| --- | --- |
+| `net_house_base`, `net_house_wall_east/west/front/back`, `net_house_roof` | 5.112 × 4.248m, wall 3.48m, ridge 5.85m under the 6m envelope; batten boards, tarred trim, cedar shakes, a closed hoist hatch on both gables and a hoist beam with pulley projecting .68m past the harbor-facing gable (the only allowed footprint excess). |
+| `tavern_base`, `tavern_wall_*`, `tavern_roof` | 5.68 × 4.72m, wall 4.06m, ridge 6.55m; lapped clapboard courses, oak posts and header, terracotta shingles, and a fieldstone stack reaching 6.945m at the fallback's smoke emitter `(-1.647, -1.038)` so the retained plume rises from the stone. The front carries a swinging fish sign and an amber door lantern, both proud of the siding but within .16m of the footprint. |
+| `fisher_cottage_base`, `fisher_cottage_wall_*`, `fisher_cottage_roof` | 4.26 × 3.54m, wall 3.20m, ridge 5.28m; wide painted shiplap, sea-blue posts, louvred shutters and two hung buoys beside the front door. |
+| `drying_net`, `mending_table`, `fish_crates`, `harbor_lantern` | Replacements for the four original harbor work sites, footed at the recorded site positions and radii (1.7, 1.9, 1.3 and .55m); nets are `net_cord` tubes with cork floats and sway in the wind uniform. |
+| `dock_post`, `lobster_pot` | Mooring piling with an iron cleat (radius .22m, 1.7m) and a rib-and-twine pot (radius .57m, .48m). |
+
+All three buildings keep the shared cottage/barn wall contract: base top .48m, floor .025m, both 2.30 × 2.80m doors clear, walls capped at their `wallHeight`, roofs within .175m overhangs and the building's `height`. The exporter validates every building's door prisms from its own dimensions, the chimney height, prop radii and a 3.5MiB / 42k-triangle guard; tests recheck the doorways, roof envelopes, the chimney seat and the work-site lookup at runtime scale.
+
 ## Materials and texture scale
 
 Five small original texture families are shared: stone, timber, slate, earth and foliage. Stone, timber and earth use 512 × 512 base color and normal maps; slate and foliage use 256 × 256. They are tileable and embedded in the GLB. Base color is sRGB. Tangent-space normal maps are linear/non-color, with glTF's +Y convention; normal pixels use six-bit precision per channel to keep the asset compact. Roughness is a material scalar, not a painted shadow map. No directional light or ambient occlusion is baked into the textures.
@@ -95,6 +111,21 @@ Explicit metric UVs provide approximately meter-scale masonry/soil detail and lo
 Farm reuses those texture families with explicit named slots. `watch_stone`, `aged_timber`, `forged_iron` and `recess_shadow` retain the source material; `farm_plaster`, `farm_roof`, `crop_straw`, `crop_leaf` and `hay_straw` clone the corresponding shared material with linear color multipliers recorded in the manifest. UVs and `COLOR_0` still provide scale and individual weathering. Multipliers above one deliberately brighten the darker shared surfaces for limewash and straw. Do not treat these linear multipliers as sRGB display colors.
 
 Tideglass also clones named shared materials without copying their textures. Its manifest records the exact brighter linear multipliers for plaster, timber, cream/coral/teal canvas, teal roofs, foliage and produce. Plaster normal scale is .28 and canvas .18; canvas has modeled reverse faces so its underside survives binding to the shared front-sided earth material. Gameplay review, rather than the offline preview alone, determined the brighter coastal palette. Clones remain owned by their area and never dispose borrowed textures.
+
+Saltwind clones the same families with its own named slots (manifest and `client/saltwind-harbor.js` are kept identical and checked by test): `tar_timber`, `salt_plank`, `oak_frame`, `tavern_wash`, `cottage_wash` and `sea_blue` on `aged_timber`; `shake_roof`, `harbor_tile` and `faded_tile` on `dark_slate`; `net_cord` on `needle_foliage`; `float_cream`/`float_coral` on `ground_earth`; `lantern_amber` unchanged. Two calibration facts are worth keeping: the shared base textures are dark (`aged_timber` averages about 104/93/74 sRGB, `dark_slate` 58/70/76), so a surface meant to read light in the third-person camera needs multipliers in the 5–10 range and a reduced normal scale (.28–.5), otherwise micro-shadowing keeps it near black however high the tint; and the bluish slate base fights warm roofs, so terracotta and salmon need red near 10 with green and blue at 2–4. Judge these in the running game beside an already-shipped kit; the Cycles preview lights them differently.
+
+### Area identity contract
+
+One construction and weathering language, never one colour scheme. Every area writes a palette card before modelling and compares it with the shipped rows below; a new card may not repeat another row's wall treatment + roof colour pair, and buildings within one area should differ from each other in at least siding, trim or roof. Materials may share source textures — the tint, normal scale, siding construction and accent props are what carry identity.
+
+| Area | Wall treatment | Trim / frame | Roof | Accents | Ground | Light |
+| --- | --- | --- | --- | --- | --- | --- |
+| The Old Watch | Mossy grey-green rubble masonry, silvered timber infill | Forged iron, dark recesses | Dark overlapping slate | Warm lantern glass | Earth, tawny grass, ferns, boulders | Cool and misty |
+| Windward Farm | Aged limewash over fieldstone; warm barn boards | Warm barn timber | Russet clay tile and shingled mill cap | Framed sails, golden wheat, leafy crops, hay | Worn field edges, split-rail fences | Warmer, slightly hazy |
+| Tideglass Market | Pale weathered plaster over stone | Pale aged timber | Teal tile | Cream/coral/teal canvas, produce, cloth bolts | Sandy routes, pavers, broadleaf shrubs | Bright coastal |
+| Saltwind Harbor | Net-house: unpainted salt-grey board-and-batten. Tavern: cream lime-washed clapboard. Cottage: whitewashed shiplap | Tar-black battens; honey oak; sea-blue shutters | Green cedar shakes; terracotta shingle; sun-faded salmon tile | Nets and cork floats, lobster pots, crates, amber lantern, fish sign | Pale sand, shell-grit paths, straw dune grass, tarred pilings | Airy and warm |
+
+Planned rows should start from what is *not* on this table: raw pitch-dark boatyard timber and open bleached sand for Driftwood Yard and Sunwake Strand, jungle hardwood and woven palm for Palmheart, scorched basalt and iron for Cinderworks, pale silvered wood and glass for Moonwatch.
 
 ## Shared ownership and total cost
 
@@ -107,9 +138,10 @@ Old Watch's existing GLB is the first shared library. It is loaded once per live
 | Shared Old Watch | 7,584,620 | 59,078 | 33 | 10 | 9,786,696 bytes |
 | Windward Farm additions | 2,459,180 | 26,740 | 30 | 0 | 0 bytes |
 | Tideglass Market additions | 2,019,240 | 22,258 | 45 | 0 | 0 bytes |
-| Unique combined total | 12,063,040 | 108,076 | 108 | 10 | 9,786,696 bytes |
+| Saltwind Harbor additions | 3,263,132 | 35,510 | 103 | 0 | 0 bytes |
+| Unique combined total | 15,326,172 | 143,586 | 211 | 10 | 9,786,696 bytes |
 
-These are download/source costs, not triangles or draw calls in a gameplay frame. Source parts are reused and instanced, and shadows can draw a visible mesh again. The texture estimate excludes browser decode copies, driver allocation overhead, render targets and other game textures. `world.getStats()` exposes renderer triangles/calls alongside `environmentAssets`, `oldWatch`, `windwardFarm` and `tideglassMarket` loading/installation statistics; measure warm views and populated gameplay as the rollout grows.
+These are download/source costs, not triangles or draw calls in a gameplay frame. Source parts are reused and instanced, and shadows can draw a visible mesh again. The texture estimate excludes browser decode copies, driver allocation overhead, render targets and other game textures. `world.getStats()` exposes renderer triangles/calls alongside `environmentAssets`, `oldWatch`, `windwardFarm`, `tideglassMarket` and `saltwindHarbor` loading/installation statistics; measure warm views and populated gameplay as the rollout grows. Saltwind is the largest single kit because it authors three buildings at once; its guard is 3.5MiB and 42k source triangles, and like the others it is not an allocation for later areas.
 
 Old Watch's 8MiB/120k-triangle ceiling remains a per-kit failure guard. Farm's additions stay below 2.5MiB and 32k source triangles. Neither limit is an island-wide budget allocation. The present tradeoff retains uncompressed meshes and ten original PNG images. Small Farm foliage/field detail uses spatially bounded instance batches and distance/quality reductions; architecture remains visible at distance for ship and glider approaches. Avoid multiplying material draw calls by creating a separate object for every stone, tile or frond.
 
@@ -126,6 +158,8 @@ Tideglass's guard is 2.3MiB and 24k source triangles. Its 190 grass clumps, 32 s
 `client/environment-lighting.js` is the single owner of global sky, fog, hemisphere and sunlight. It captures an immutable baseline, blends normalized overlapping area weights and restores the baseline outside the areas and aboard ship. Old Watch's center profile stays the approved profile. A ready Farm adds a restrained warmer profile along the field and connector; Old Watch's former Farm lighting exclusion is removed only when Farm is ready. Farm failure keeps the original exclusion and baseline transition. Area animation controllers do not compete to write global lighting each frame.
 
 `shared/tideglass-market.js` bounds the market and immediate Haven dressing and excludes primary/exploration paths, resident loops, both cottage approaches, loot, work props and the objective dais from planting. Its ground follows the same alternating terrain triangles with transparent fades and a cottage/dais exclusion. Existing palm canopy geometry is retained. Only the original hut geometry and small ground vegetation are separated into complete fallbacks; the full original scenery triangle multiset and next RNG value remain regression-tested. Tideglass adds a ready-dependent coastal profile to the one lighting owner; market-only failure leaves Watch/Farm authored, while shared-library failure restores all three procedural areas and baseline lighting.
+
+`shared/saltwind-harbor.js` bounds the harbor to its square plus a halo around each of the three buildings, keeps the Sunwake landing (x > -4) and the water at baseline, and finds the four original work sites by their authored radii the way the farm finds its field. `client/settlement.js` marks all three harbor buildings authored, routes the generic work-site props into the harbor fallback group, and swaps every harbor interior's cutaway walls and roof at once; the fallback (buildings, base slabs and work sites) hides only after the whole kit installs. The sand overlay follows the alternating 2m terrain triangles at +.034m, fades at its edges and skips all three floors; dune grass reuses the shared `grass_clump` in 16m instanced cells with the market's 105/65m distances and 42% low-quality density; nets sway through one wind uniform that reduced motion zeroes. The tavern chimney is authored at the fallback's smoke emitter so the retained plume needs no new animation owner. Lighting adds an airier, warmer harbor profile to the one lighting owner.
 
 Judge changes in the actual third-person gameplay camera as well as the offline preview. Check the tower front, courtyard, both doors, interior cutaway, gliding/roof view and transition to the farm at high and low quality. Inspect the console and network tab for asset/texture failures; deliberately block the GLB once to confirm fallback. Run the relevant automated tests, `npm test` and `git diff --check` before committing and deploying.
 
@@ -197,13 +231,29 @@ Final `npm.cmd test` passed all **152 tests**, including the final paving depth-
 
 Implementation `2e2bc1d` was pushed to canonical `main` and deployed using `docker compose up -d --build --wait`. Compose reported healthy, `/health` returned `ok: true`, and 16 served environment assets matched `git show HEAD:<path>` by SHA-256, including all changed browser modules and the new GLB. The persistent volume mount was preserved. Deployed walking, interior and aerial screenshots and repeated independent/shared asset-failure checks passed without unexpected page/console/network errors. This evidence and the next bounded handoff are recorded in the rollout tracker.
 
+## Saltwind Harbor milestone QA — 2026-09-06
+
+Baseline `bf8fe6a` was served from the local Docker deployment; the final source ran from the working tree on an isolated Node server (`PORT=3491`, separate `DATA_DIR`). Both were driven through the ordinary client in Chrome/WebGL2 at 1600 × 900, device pixel ratio 1, one live player and no enemies withheld. The fixed comparison view is the harbor square facing the tavern front: player `(-22.9, 96.5)`, yaw `-.36`, pitch about `-.2`; `window.SKY.fps()` reports its rolling 240-frame window and `world.getStats()` the renderer counts.
+
+| View / quality | Draw calls, baseline → final | Renderer triangles, baseline → final | Baseline → final mean fps / p95 |
+| --- | ---: | ---: | ---: |
+| Tavern front / high | 646 → 670 | 785,520 → 807,292 | 56.8 / 18.3ms → 56.9 / 18.4ms |
+| Cottage front toward the sea / low | — | 254,778 | 67 calls |
+
+Frame time is vsync-bound on this host and unchanged within noise; the harbor adds about 24 calls and 21k triangles to a view that also holds the Haven, lighthouse and Moonbloom grove. The loaded cache reports four URLs, seven leases, ten shared images, **15,326,172 unique GLB bytes** and the unchanged **9,786,696** estimated decoded texture bytes.
+
+Live checks: walking views of all three buildings from the square, cottage and tavern close-ups, the tavern interior (roof and near walls cut away, chest prompt reachable), the aerial glide-in over the harbor, low graphics (dune grass cells thin to 42% and distant cells hide, architecture stays) and a clean console/network log. Reduced motion and both failure paths are exercised by `test/saltwind-harbor.test.js`: the wind uniform reads zero, a harbor-only failure keeps authored Watch/Farm/Market plus the complete harbor fallback including the original work-site batch, and a shared-library failure releases the separately arriving harbor source. Regeneration reproduced the shipping GLB byte for byte (`26b6fb7343ded602850328ee40a12fd075be7526382ab6e1f51d2f86b69bff51`; manifest `10091588c0f039c8a70663d09591b843d1ad6b6a9e19e2a8a8e955b980fff664`), and the farm's prop-site hash and the scenery RNG-stream regression still pass, so rerouting the harbor's work sites and lawn tufts changed no original geometry or random draws. Full `npm.cmd test` passed **161 tests**; `git diff --check` passed.
+
+Visual review history, kept so the next area does not repeat it: the first in-engine pass rendered the net-house near black although the Cycles preview looked fine — the runtime binding loop was not applying `normalScale`, and wall multipliers of 1.5–2 on the dark shared timber were far too timid; a side-by-side against the installed Tideglass cottage wall set the 5–10 range now recorded above. The painted roofs then read grey-mauve until red was pushed near 10 against the slate base. Hung details (sign, lantern, buoys) were first buried inside the siding thickness and were moved proud of the boards.
+
 ## Extending the next area
 
 1. Pick a small playable composition and specific reference characteristics: stone color, timber age, roof shape, vegetation and light. Establish collider and doorway envelopes before authoring.
-2. Reuse these material families where the surface language matches. Add a new small texture set only for a distinct surface, and record its origin and license in `CREDITS.md`.
-3. Add a ground-centered prefab with explicit UVs, vertex wear and an intentional silhouette. Merge by material. Add its naming, bounds and collision contract to both the generator validation and runtime integration.
-4. Export geometry additions into a new area's asset directory with declared shared material dependencies, integrate with visible fallback, and compare gameplay screenshots and renderer statistics at the same camera/quality settings. Preserve broad paths and readable interactive objects. Add profiles to the one lighting owner, not another area-specific global light writer.
-5. Commit the reproducible source, final GLB and manifest together after visual and gameplay checks. Reuse that validated pattern for a larger area only after the sample looks and performs well.
+2. Write the palette card and check it against the [Area identity contract](#area-identity-contract): siding construction, trim, roof colour, accents, ground and light must all differ from every shipped row, and neighbouring buildings inside the area must differ from each other. Keep the beach and coast lighter than the northern ruins.
+3. Reuse these material families where the surface language matches. Add a new small texture set only for a distinct surface, and record its origin and license in `CREDITS.md`.
+4. Add a ground-centered prefab with explicit UVs, vertex wear and an intentional silhouette. Merge by material. Add its naming, bounds and collision contract to both the generator validation and runtime integration.
+5. Export geometry additions into a new area's asset directory with declared shared material dependencies, integrate with visible fallback, and compare gameplay screenshots and renderer statistics at the same camera/quality settings. Preserve broad paths and readable interactive objects. Add profiles to the one lighting owner, not another area-specific global light writer.
+6. Commit the reproducible source, final GLB and manifest together after visual and gameplay checks. Reuse that validated pattern for a larger area only after the sample looks and performs well.
 
 See [ENVIRONMENT_ROLLOUT.md](ENVIRONMENT_ROLLOUT.md) for the authoritative milestone order, completion evidence, active handoff and the **"upgrade next zone"** resume workflow. Keep progress there so fresh windows can continue without previous chat history.
 

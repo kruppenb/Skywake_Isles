@@ -30,7 +30,10 @@ When the user says **"upgrade next zone"**, read
 status and handoff, then follow its one-milestone resume workflow and the
 detailed [environment pipeline](docs/ENVIRONMENT_PIPELINE.md). Inspect current
 repository, remote and deployment state first. Resume in-progress work before
-starting the first planned milestone. Complete and verify that one milestone,
-update the tracked handoff and evidence, and follow the completion workflow
-above. Do not automatically start the following milestone. This shortcut must
+starting the first planned milestone. Before modelling, write the area's palette
+card and check it against the pipeline's *Area identity contract* table: the
+island shares one construction and weathering language, never one colour scheme,
+and neighbouring buildings inside an area should differ from each other too.
+Complete and verify that one milestone, update the tracked handoff and evidence,
+and follow the completion workflow above. Do not automatically start the following milestone. This shortcut must
 work in a fresh window without previous chat history or local QA helpers.
