@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
 import { windwardFarmWeight } from '../shared/windward-farm.js';
 import { tideglassWeight } from '../shared/tideglass-market.js';
+import { saltwindHarborWeight } from '../shared/saltwind-harbor.js';
 
 // Profiles are immutable color strings/scalars. Each frame is evaluated from
 // the captured island baseline, never from another area's last frame.
@@ -9,15 +10,18 @@ export const ENVIRONMENT_PROFILES = Object.freeze({
   oldWatch: Object.freeze({ sky: '#abc6cc', skyStrength: .8, fog: '#b0c8ca', near: 72, far: 340, skyLight: '#d2dce1', groundLight: '#77765e', ambient: 1.5, sunColor: '#f5ddba', sunIntensity: 2.25 }),
   windwardFarm: Object.freeze({ sky: '#b9cecd', skyStrength: .8, fog: '#c0cebf', near: 88, far: 385, skyLight: '#e0dfcf', groundLight: '#858063', ambient: 1.7, sunColor: '#f8e2be', sunIntensity: 2.4 }),
   tideglassMarket: Object.freeze({ sky: '#b9dbdc', skyStrength: .65, fog: '#c6ded5', near: 95, far: 405, skyLight: '#e9e9d7', groundLight: '#8d9171', ambient: 1.85, sunColor: '#ffe7c4', sunIntensity: 2.5 }),
+  // Airier and warmer than the market: open beach light with pale sand bounce.
+  saltwindHarbor: Object.freeze({ sky: '#b7e0e8', skyStrength: .7, fog: '#cbe6e4', near: 100, far: 420, skyLight: '#eef3ec', groundLight: '#a09f85', ambient: 2.0, sunColor: '#fff1cf', sunIntensity: 2.6 }),
 });
 
-export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false } = {}) {
-  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0 };
+export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false } = {}) {
+  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0 };
   const oldWatch = oldWatchReady ? (farmReady ? oldWatchRadialWeight : oldWatchWeight)(player.x, player.z) : 0;
   const windwardFarm = farmReady ? windwardFarmWeight(player.x, player.z) : 0;
   const tideglassMarket = tideglassReady ? tideglassWeight(player.x, player.z) : 0;
-  const total = oldWatch + windwardFarm + tideglassMarket, scale = total > 1 ? 1 / total : 1;
-  return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale };
+  const saltwindHarbor = saltwindReady ? saltwindHarborWeight(player.x, player.z) : 0;
+  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor, scale = total > 1 ? 1 / total : 1;
+  return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale, saltwindHarbor: saltwindHarbor * scale };
 }
 
 export function createEnvironmentLighting({ scene, hemisphere = null, sun = null }) {
@@ -48,6 +52,6 @@ export function createEnvironmentLighting({ scene, hemisphere = null, sun = null
   }
   return { update(player, ready) { if (!disposed) apply(environmentWeights(player, ready)); }, dispose() {
     if (disposed) return;
-    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0 }); disposed = true;
+    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0 }); disposed = true;
   } };
 }

@@ -1,0 +1,869 @@
+{
+  "schemaVersion": 1,
+  "generator": "tools/build-saltwind-harbor.py",
+  "seed": 481203,
+  "blenderVersion": "5.2.1 LTS",
+  "coordinateSystem": "Y-up, meters, +Z front",
+  "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
+  "file": "kit.glb",
+  "bytes": 3263132,
+  "sha256": "26b6fb7343ded602850328ee40a12fd075be7526382ab6e1f51d2f86b69bff51",
+  "dependencies": [
+    {
+      "url": "/assets/old-watch/kit.glb",
+      "sha256": "3fce2c1f50178bf0a681fdec6aafba86b98140cc108ce6ae522b45e6370f152b",
+      "ownership": "Shared cache owns original material textures and reusable props"
+    }
+  ],
+  "materialBindings": {
+    "watch_stone": {
+      "source": "watch_stone"
+    },
+    "aged_timber": {
+      "source": "aged_timber"
+    },
+    "forged_iron": {
+      "source": "forged_iron"
+    },
+    "recess_shadow": {
+      "source": "recess_shadow"
+    },
+    "lantern_amber": {
+      "source": "lantern_amber"
+    },
+    "tar_timber": {
+      "source": "aged_timber",
+      "color": [
+        1.0,
+        0.95,
+        0.9
+      ],
+      "normalScale": 0.5
+    },
+    "salt_plank": {
+      "source": "aged_timber",
+      "color": [
+        5.0,
+        5.7,
+        6.5
+      ],
+      "normalScale": 0.3
+    },
+    "shake_roof": {
+      "source": "dark_slate",
+      "color": [
+        4.2,
+        4.8,
+        4.0
+      ],
+      "normalScale": 0.4
+    },
+    "oak_frame": {
+      "source": "aged_timber",
+      "color": [
+        1.9,
+        1.6,
+        1.25
+      ],
+      "normalScale": 0.6
+    },
+    "tavern_wash": {
+      "source": "aged_timber",
+      "color": [
+        6.4,
+        5.7,
+        4.3
+      ],
+      "normalScale": 0.3
+    },
+    "harbor_tile": {
+      "source": "dark_slate",
+      "color": [
+        9.5,
+        2.2,
+        1.2
+      ],
+      "normalScale": 0.45
+    },
+    "cottage_wash": {
+      "source": "aged_timber",
+      "color": [
+        6.2,
+        6.3,
+        5.9
+      ],
+      "normalScale": 0.28
+    },
+    "sea_blue": {
+      "source": "aged_timber",
+      "color": [
+        1.5,
+        3.4,
+        4.6
+      ],
+      "normalScale": 0.45
+    },
+    "faded_tile": {
+      "source": "dark_slate",
+      "color": [
+        10.0,
+        4.2,
+        3.0
+      ],
+      "normalScale": 0.45
+    },
+    "net_cord": {
+      "source": "needle_foliage",
+      "color": [
+        2.4,
+        1.0,
+        1.35
+      ]
+    },
+    "float_cream": {
+      "source": "ground_earth",
+      "color": [
+        9.6,
+        9.1,
+        7.7
+      ]
+    },
+    "float_coral": {
+      "source": "ground_earth",
+      "color": [
+        9.0,
+        3.3,
+        2.2
+      ]
+    }
+  },
+  "prefabs": {
+    "dock_post": {
+      "bounds": {
+        "min": [
+          -0.15,
+          -0.06,
+          -0.1725
+        ],
+        "max": [
+          0.15,
+          1.7,
+          0.1725
+        ]
+      },
+      "dimensions": [
+        0.3,
+        1.76,
+        0.345
+      ],
+      "horizontalRadius": 0.22216,
+      "triangles": 160,
+      "primitives": 2,
+      "materials": [
+        "forged_iron",
+        "tar_timber"
+      ]
+    },
+    "drying_net": {
+      "bounds": {
+        "min": [
+          -0.9625,
+          -0.05,
+          -0.045
+        ],
+        "max": [
+          0.9625,
+          2.08,
+          0.169
+        ]
+      },
+      "dimensions": [
+        1.925,
+        2.13,
+        0.214
+      ],
+      "horizontalRadius": 0.96312,
+      "triangles": 652,
+      "primitives": 4,
+      "materials": [
+        "float_coral",
+        "float_cream",
+        "net_cord",
+        "tar_timber"
+      ]
+    },
+    "fish_crates": {
+      "bounds": {
+        "min": [
+          -0.88092,
+          0.0,
+          -0.38
+        ],
+        "max": [
+          1.07,
+          1.16,
+          0.96092
+        ]
+      },
+      "dimensions": [
+        1.95092,
+        1.16,
+        1.34092
+      ],
+      "horizontalRadius": 1.22653,
+      "triangles": 2986,
+      "primitives": 4,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "net_cord",
+        "oak_frame"
+      ]
+    },
+    "fisher_cottage_base": {
+      "bounds": {
+        "min": [
+          -2.13,
+          -0.3,
+          -1.77
+        ],
+        "max": [
+          2.13,
+          0.475,
+          1.77
+        ]
+      },
+      "dimensions": [
+        4.26,
+        0.775,
+        3.54
+      ],
+      "horizontalRadius": 2.75353,
+      "triangles": 1232,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "watch_stone"
+      ]
+    },
+    "fisher_cottage_roof": {
+      "bounds": {
+        "min": [
+          -2.27,
+          3.2,
+          -1.915
+        ],
+        "max": [
+          2.27,
+          5.3975,
+          1.915
+        ]
+      },
+      "dimensions": [
+        4.54,
+        2.1975,
+        3.83
+      ],
+      "horizontalRadius": 2.96781,
+      "triangles": 1084,
+      "primitives": 4,
+      "materials": [
+        "aged_timber",
+        "cottage_wash",
+        "faded_tile",
+        "sea_blue"
+      ]
+    },
+    "fisher_cottage_wall_back": {
+      "bounds": {
+        "min": [
+          -1.89,
+          0.485,
+          -1.77
+        ],
+        "max": [
+          1.89,
+          3.2,
+          -1.53
+        ]
+      },
+      "dimensions": [
+        3.78,
+        2.715,
+        0.24
+      ],
+      "horizontalRadius": 2.58121,
+      "triangles": 572,
+      "primitives": 4,
+      "materials": [
+        "cottage_wash",
+        "forged_iron",
+        "sea_blue",
+        "watch_stone"
+      ]
+    },
+    "fisher_cottage_wall_east": {
+      "bounds": {
+        "min": [
+          1.89,
+          0.485,
+          -1.77
+        ],
+        "max": [
+          2.13,
+          3.2,
+          1.77
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.715,
+        3.54
+      ],
+      "horizontalRadius": 2.75536,
+      "triangles": 1716,
+      "primitives": 5,
+      "materials": [
+        "cottage_wash",
+        "forged_iron",
+        "recess_shadow",
+        "sea_blue",
+        "watch_stone"
+      ]
+    },
+    "fisher_cottage_wall_front": {
+      "bounds": {
+        "min": [
+          -1.89,
+          0.485,
+          1.53
+        ],
+        "max": [
+          1.89,
+          3.2,
+          1.925
+        ]
+      },
+      "dimensions": [
+        3.78,
+        2.715,
+        0.395
+      ],
+      "horizontalRadius": 2.60368,
+      "triangles": 652,
+      "primitives": 7,
+      "materials": [
+        "cottage_wash",
+        "float_coral",
+        "float_cream",
+        "forged_iron",
+        "net_cord",
+        "sea_blue",
+        "watch_stone"
+      ]
+    },
+    "fisher_cottage_wall_west": {
+      "bounds": {
+        "min": [
+          -2.13,
+          0.485,
+          -1.77
+        ],
+        "max": [
+          -1.89,
+          3.2,
+          1.77
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.715,
+        3.54
+      ],
+      "horizontalRadius": 2.75536,
+      "triangles": 1716,
+      "primitives": 5,
+      "materials": [
+        "cottage_wash",
+        "forged_iron",
+        "recess_shadow",
+        "sea_blue",
+        "watch_stone"
+      ]
+    },
+    "harbor_lantern": {
+      "bounds": {
+        "min": [
+          -0.13,
+          -0.05,
+          -0.06045
+        ],
+        "max": [
+          0.13,
+          2.5,
+          0.43
+        ]
+      },
+      "dimensions": [
+        0.26,
+        2.55,
+        0.49045
+      ],
+      "horizontalRadius": 0.44808,
+      "triangles": 288,
+      "primitives": 3,
+      "materials": [
+        "forged_iron",
+        "lantern_amber",
+        "tar_timber"
+      ]
+    },
+    "lobster_pot": {
+      "bounds": {
+        "min": [
+          -0.464,
+          0.0025,
+          -0.344
+        ],
+        "max": [
+          0.464,
+          0.484,
+          0.344
+        ]
+      },
+      "dimensions": [
+        0.928,
+        0.4815,
+        0.688
+      ],
+      "horizontalRadius": 0.56938,
+      "triangles": 772,
+      "primitives": 3,
+      "materials": [
+        "forged_iron",
+        "net_cord",
+        "oak_frame"
+      ]
+    },
+    "mending_table": {
+      "bounds": {
+        "min": [
+          -1.4,
+          -0.01,
+          -0.4675
+        ],
+        "max": [
+          1.11,
+          1.09,
+          0.55862
+        ]
+      },
+      "dimensions": [
+        2.51,
+        1.1,
+        1.02612
+      ],
+      "horizontalRadius": 1.40739,
+      "triangles": 1732,
+      "primitives": 6,
+      "materials": [
+        "aged_timber",
+        "float_coral",
+        "float_cream",
+        "forged_iron",
+        "net_cord",
+        "oak_frame"
+      ]
+    },
+    "net_house_base": {
+      "bounds": {
+        "min": [
+          -2.556,
+          -0.3,
+          -2.124
+        ],
+        "max": [
+          2.556,
+          0.475,
+          2.124
+        ]
+      },
+      "dimensions": [
+        5.112,
+        0.775,
+        4.248
+      ],
+      "horizontalRadius": 3.30741,
+      "triangles": 1584,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "watch_stone"
+      ]
+    },
+    "net_house_roof": {
+      "bounds": {
+        "min": [
+          -2.696,
+          3.48,
+          -2.269
+        ],
+        "max": [
+          2.696,
+          5.9675,
+          2.94517
+        ]
+      },
+      "dimensions": [
+        5.392,
+        2.4875,
+        5.21417
+      ],
+      "horizontalRadius": 3.52053,
+      "triangles": 1844,
+      "primitives": 6,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "recess_shadow",
+        "salt_plank",
+        "shake_roof",
+        "tar_timber"
+      ]
+    },
+    "net_house_wall_back": {
+      "bounds": {
+        "min": [
+          -2.316,
+          0.485,
+          -2.124
+        ],
+        "max": [
+          2.316,
+          3.48,
+          -1.884
+        ]
+      },
+      "dimensions": [
+        4.632,
+        2.995,
+        0.24
+      ],
+      "horizontalRadius": 3.13439,
+      "triangles": 1100,
+      "primitives": 4,
+      "materials": [
+        "forged_iron",
+        "salt_plank",
+        "tar_timber",
+        "watch_stone"
+      ]
+    },
+    "net_house_wall_east": {
+      "bounds": {
+        "min": [
+          2.316,
+          0.485,
+          -2.124
+        ],
+        "max": [
+          2.556,
+          3.48,
+          2.124
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.995,
+        4.248
+      ],
+      "horizontalRadius": 3.30925,
+      "triangles": 2344,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "recess_shadow",
+        "salt_plank",
+        "tar_timber",
+        "watch_stone"
+      ]
+    },
+    "net_house_wall_front": {
+      "bounds": {
+        "min": [
+          -2.316,
+          0.485,
+          1.884
+        ],
+        "max": [
+          2.316,
+          3.48,
+          2.124
+        ]
+      },
+      "dimensions": [
+        4.632,
+        2.995,
+        0.24
+      ],
+      "horizontalRadius": 3.13439,
+      "triangles": 1100,
+      "primitives": 4,
+      "materials": [
+        "forged_iron",
+        "salt_plank",
+        "tar_timber",
+        "watch_stone"
+      ]
+    },
+    "net_house_wall_west": {
+      "bounds": {
+        "min": [
+          -2.556,
+          0.485,
+          -2.124
+        ],
+        "max": [
+          -2.316,
+          3.48,
+          2.124
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.995,
+        4.248
+      ],
+      "horizontalRadius": 3.30925,
+      "triangles": 2344,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "recess_shadow",
+        "salt_plank",
+        "tar_timber",
+        "watch_stone"
+      ]
+    },
+    "tavern_base": {
+      "bounds": {
+        "min": [
+          -2.84,
+          -0.3,
+          -2.36
+        ],
+        "max": [
+          2.84,
+          0.475,
+          2.36
+        ]
+      },
+      "dimensions": [
+        5.68,
+        0.775,
+        4.72
+      ],
+      "horizontalRadius": 3.67666,
+      "triangles": 1760,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "watch_stone"
+      ]
+    },
+    "tavern_roof": {
+      "bounds": {
+        "min": [
+          -2.98,
+          4.06,
+          -2.505
+        ],
+        "max": [
+          2.98,
+          6.945,
+          2.505
+        ]
+      },
+      "dimensions": [
+        5.96,
+        2.885,
+        5.01
+      ],
+      "horizontalRadius": 3.89097,
+      "triangles": 2600,
+      "primitives": 6,
+      "materials": [
+        "aged_timber",
+        "harbor_tile",
+        "oak_frame",
+        "recess_shadow",
+        "tavern_wash",
+        "watch_stone"
+      ]
+    },
+    "tavern_wall_back": {
+      "bounds": {
+        "min": [
+          -2.6,
+          0.485,
+          -2.36
+        ],
+        "max": [
+          2.6,
+          4.06,
+          -2.12
+        ]
+      },
+      "dimensions": [
+        5.2,
+        3.575,
+        0.24
+      ],
+      "horizontalRadius": 3.5033,
+      "triangles": 1332,
+      "primitives": 4,
+      "materials": [
+        "forged_iron",
+        "oak_frame",
+        "tavern_wash",
+        "watch_stone"
+      ]
+    },
+    "tavern_wall_east": {
+      "bounds": {
+        "min": [
+          2.6,
+          0.485,
+          -2.36
+        ],
+        "max": [
+          2.84,
+          4.06,
+          2.36
+        ]
+      },
+      "dimensions": [
+        0.24,
+        3.575,
+        4.72
+      ],
+      "horizontalRadius": 3.6785,
+      "triangles": 2092,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "oak_frame",
+        "recess_shadow",
+        "tavern_wash",
+        "watch_stone"
+      ]
+    },
+    "tavern_wall_front": {
+      "bounds": {
+        "min": [
+          -2.6,
+          0.485,
+          2.12
+        ],
+        "max": [
+          2.6,
+          4.06,
+          2.52
+        ]
+      },
+      "dimensions": [
+        5.2,
+        3.575,
+        0.4
+      ],
+      "horizontalRadius": 3.5033,
+      "triangles": 1756,
+      "primitives": 6,
+      "materials": [
+        "forged_iron",
+        "lantern_amber",
+        "oak_frame",
+        "sea_blue",
+        "tavern_wash",
+        "watch_stone"
+      ]
+    },
+    "tavern_wall_west": {
+      "bounds": {
+        "min": [
+          -2.84,
+          0.485,
+          -2.36
+        ],
+        "max": [
+          -2.6,
+          4.06,
+          2.36
+        ]
+      },
+      "dimensions": [
+        0.24,
+        3.575,
+        4.72
+      ],
+      "horizontalRadius": 3.6785,
+      "triangles": 2092,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "oak_frame",
+        "recess_shadow",
+        "tavern_wash",
+        "watch_stone"
+      ]
+    }
+  },
+  "textures": [],
+  "embeddedImageCount": 0,
+  "decodedTextureBytes": 0,
+  "buildingContracts": {
+    "net_house": {
+      "width": 5.112,
+      "depth": 4.248,
+      "wallHeight": 3.4799999999999995,
+      "height": 6.0,
+      "thickness": 0.24,
+      "doorWidth": 2.3,
+      "doorHeight": 2.8,
+      "baseTop": 0.48,
+      "floorTop": 0.025,
+      "ridge": 5.85
+    },
+    "tavern": {
+      "width": 5.68,
+      "depth": 4.72,
+      "wallHeight": 4.06,
+      "height": 7.0,
+      "thickness": 0.24,
+      "doorWidth": 2.3,
+      "doorHeight": 2.8,
+      "baseTop": 0.48,
+      "floorTop": 0.025,
+      "ridge": 6.55,
+      "chimney": [
+        -1.6471999999999998,
+        6.9,
+        -1.0384
+      ]
+    },
+    "fisher_cottage": {
+      "width": 4.26,
+      "depth": 3.54,
+      "wallHeight": 3.2,
+      "height": 5.5,
+      "thickness": 0.24,
+      "doorWidth": 2.3,
+      "doorHeight": 2.8,
+      "baseTop": 0.48,
+      "floorTop": 0.025,
+      "ridge": 5.28
+    }
+  },
+  "totalTriangles": 35510,
+  "totalPrimitives": 103
+}

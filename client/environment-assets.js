@@ -6,6 +6,7 @@ export const ENVIRONMENT_ASSET_REGISTRY = Object.freeze({
   '/assets/old-watch/kit.glb': Object.freeze({ bytes: 7584620, triangles: 59078, decodedTextureBytes: 9786696 }),
   '/assets/windward-farm/kit.glb': Object.freeze({ bytes: 2459180, triangles: 26740, decodedTextureBytes: 0 }),
   '/assets/tideglass-market/kit.glb': Object.freeze({ bytes: 2019240, triangles: 22258, decodedTextureBytes: 0 }),
+  '/assets/saltwind-harbor/kit.glb': Object.freeze({ bytes: 3263132, triangles: 35510, decodedTextureBytes: 0 }),
 });
 
 const released = new WeakSet(), owners = new WeakMap();
