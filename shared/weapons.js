@@ -16,6 +16,10 @@ export const RARITIES = Object.freeze(Object.fromEntries([
   { id: 'legendary', name: 'Legendary', color: '#ffc65c', damageMultiplier: 1.6, weight: 3 },
 ].map(rarity => [rarity.id, Object.freeze(rarity)])));
 
+// A gun a pirate cannot use (an equal or better copy is already carried) still
+// leaves their ground on contact; the crew is paid this many shared pearls instead.
+export const SALVAGE_PEARLS = 5;
+
 export function weaponStats(weapon, rarity = 'common') {
   const base = Object.hasOwn(WEAPONS, weapon) ? WEAPONS[weapon] : WEAPONS.flintlock;
   const quality = Object.hasOwn(RARITIES, rarity) ? RARITIES[rarity] : RARITIES.common;

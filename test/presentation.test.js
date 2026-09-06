@@ -252,11 +252,15 @@ test('weapon drops never offer an E interaction, including new guns and owned up
   assert.equal(findInteractable(state, player), null);
 });
 
-test('persistent weapon drops cannot mask chest, shrine, or lighthouse interactions', () => {
-  for (const [kind, target] of [['chest', CHESTS[0]], ['shrine', SHRINES[0]], ['beacon', BEACON]]) {
+test('chests open by walking and never prompt for E; drops cannot mask shrine or lighthouse interactions', () => {
+  const atChest = pirate({ x: CHESTS[0].x, y: heightAt(CHESTS[0].x, CHESTS[0].z), z: CHESTS[0].z, inventory: {} });
+  const chestState = { elapsed: 0, phase: 'voyage', shards: 0, players: [atChest], drops: [],
+    chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'cleared' })) };
+  assert.equal(findInteractable(chestState, atChest), null, 'an unopened chest underfoot offers no E prompt');
+  for (const [kind, target] of [['shrine', SHRINES[0]], ['beacon', BEACON]]) {
     const player = pirate({ x: target.x, y: heightAt(target.x, target.z), z: target.z });
     const state = { elapsed: 0, phase: 'voyage', shards: kind === 'beacon' ? 3 : 0, players: [player],
-      chests: CHESTS.map((chest) => ({ id: chest.id, opened: kind !== 'chest' || chest.id !== target.id })),
+      chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })),
       shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: kind === 'shrine' && shrine.id === target.id ? 'dormant' : 'cleared' })),
       drops: [{ ...player, id: 'loot', weapon: 'longshot', rarity: 'legendary' }] };
     for (const inventory of [{}, { longshot: { rarity: 'legendary' } }]) {

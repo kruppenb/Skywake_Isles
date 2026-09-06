@@ -575,6 +575,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     } else if (event.kind === 'loot') {
       const player = latestState?.players?.find(p => p.id === event.playerId);
       if (player) pulse(player.x, player.z, RARITIES[event.rarity]?.color || '#aebbc5', 1.8, .6);
+    } else if (event.kind === 'salvage') {
+      // The spare gun turns into pearls where it lay (the drop stays for the crew).
+      const at = latestState?.drops?.find(d => d.id === event.id) || latestState?.players?.find(p => p.id === event.playerId);
+      if (at && Number.isFinite(at.x) && Number.isFinite(at.z)) {
+        const y = Number.isFinite(at.y) ? at.y : heightAt(at.x, at.z);
+        burst(at.x, y + 1, at.z, '#ffe295', 14, 1.2); speechPop('+' + (event.pearls || 0), at.x, y + 2, at.z); pulse(at.x, at.z, '#ffe193', 2);
+      }
     } else if (event.kind === 'shrine') {
       const shrine = SHRINES.find(s => s.id === event.id);
       if (shrine) { pulse(shrine.x, shrine.z, shrine.color || '#b9f0d7', 10, 1.6); if (event.status === 'cleared') burst(shrine.x, heightAt(shrine.x, shrine.z) + 2.5, shrine.z, '#fce49d', 40, 2.5); }

@@ -1,7 +1,7 @@
 import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt } from '../shared/world.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
-import { WEAPONS, RARITIES, weaponStats, rollWeapon } from '../shared/weapons.js';
+import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, seawardBearing, sideEventWave } from '../shared/side-events.js';
@@ -18,6 +18,10 @@ const bad = (message, code = 'ACTION_DENIED') => ({ ok: false, message, code });
 const restInput = p => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: p.yaw, pitch: p.pitch });
 const sightPoint = (point, lift = 1) => ({ x: point.x, y: (point.y ?? heightAt(point.x, point.z)) + lift, z: point.z });
 const canReach = (from, to) => hasWorldLineOfSight(sightPoint(from, 1.25), sightPoint(to, 0.8));
+// Landed pirates open chests and collect (or salvage) guns by walking this close.
+const PICKUP_RADIUS = 2;
+const CHEST_PEARLS = 12;
+const CHEST_POINTS = new Map(CHESTS.map(c => [c.id, { ...c, y: heightAt(c.x, c.z) }]));
 
 // Verify the whole walk, not just the endpoint: a clear-looking spawn on the
 // other side of a cottage must not leave a crab walking into its wall.
@@ -321,9 +325,15 @@ export class Game {
   }
 
   pickupWeapon(p, drop) {
+    if (p.collectedDropIds.includes(drop.id)) return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}.`, 'DUPLICATE_WEAPON');
     const owned = p.inventory[drop.weapon];
-    if (p.collectedDropIds.includes(drop.id) || (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier)) {
-      return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}.`, 'DUPLICATE_WEAPON');
+    if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
+      // A gun this pirate cannot use still leaves their ground: it is salvaged
+      // once per pirate for shared pearls while the drop stays for the crew.
+      p.collectedDropIds.push(drop.id);
+      this.pearls += SALVAGE_PEARLS;
+      this.emit({ kind: 'salvage', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity, pearls: SALVAGE_PEARLS });
+      return good();
     }
     // Keep the shared drop for the crew; each pirate records their own pickup.
     // Upgrades preserve both active and inactive magazines.
@@ -426,7 +436,9 @@ export class Game {
     if (p.mode !== 'ground') return bad('Land near the treasure to interact.', 'TOO_FAR');
     const options = [];
     for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
-    for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHESTS.find(c => c.id === chest.id) });
+    // Chests open by walking over them (see tick); an explicit or nearby E
+    // target remains a fallback for clients that still send it.
+    for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHEST_POINTS.get(chest.id) });
     // Retained weapons must not mask nearby E interactions. Explicit drop
     // targets remain supported for clients that still send pickup actions.
     if (target) for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
@@ -445,14 +457,8 @@ export class Game {
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
     if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
     if (option.kind === 'loot') return this.pickupWeapon(p, option.data);
-    if (option.kind === 'chest') {
-      option.data.opened = true; p.chests++; this.pearls += 12;
-      for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
-      const rolled = rollWeapon(this.random);
-      const drop = { id: `drop-${this.round}-${option.id}`, ...rolled, x: option.point.x, y: heightAt(option.point.x, option.point.z), z: option.point.z };
-      this.drops.push(drop);
-      this.emit({ kind: 'chest', id: option.id, playerId: p.id, pearls: 12, ...rolled, dropId: drop.id });
-    } else if (option.kind === 'shrine') {
+    if (option.kind === 'chest') this.openChest(p, option.data, option.point);
+    else if (option.kind === 'shrine') {
       option.data.status = 'active';
       const n = 3 + 2 * (clamp(this.onlineCount, 1, MAX_PLAYERS) - 1);
       for (let i = 0; i < n; i++) {
@@ -470,6 +476,15 @@ export class Game {
       this.emit({ kind: 'notice', message: 'The Tempest Crab has the final compass! Watch the splash circles.' });
     }
     return good();
+  }
+
+  openChest(p, chest, point = CHEST_POINTS.get(chest.id)) {
+    chest.opened = true; p.chests++; this.pearls += CHEST_PEARLS;
+    for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
+    const rolled = rollWeapon(this.random);
+    const drop = { id: `drop-${this.round}-${chest.id}`, ...rolled, x: point.x, y: point.y, z: point.z };
+    this.drops.push(drop);
+    this.emit({ kind: 'chest', id: chest.id, playerId: p.id, pearls: CHEST_PEARLS, ...rolled, dropId: drop.id });
   }
 
   startSideEvent(p, id) {
@@ -603,8 +618,15 @@ export class Game {
       p.lastInputSeq = p._receivedInputSeq;
       if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.inventory[p.weapon].ammo = p.ammo; p.reloadUntil = 0; }
       if ((this.phase === 'voyage' || this.phase === 'finale') && p.hp > 0 && p.mode === 'ground' && p.grounded) {
+        // Walking over treasure opens it, and its gun is collected or salvaged
+        // on the same tick; no key press is needed for either.
+        for (const chest of this.chests) {
+          if (chest.opened) continue;
+          const point = CHEST_POINTS.get(chest.id);
+          if (distance(p, point) <= PICKUP_RADIUS && Math.abs(p.y - point.y) < 3 && canReach(p, point)) this.openChest(p, chest, point);
+        }
         for (const drop of this.drops) {
-          if (distance(p, drop) <= 2 && Math.abs(p.y - drop.y) < 3 && canReach(p, drop)) this.pickupWeapon(p, drop);
+          if (distance(p, drop) <= PICKUP_RADIUS && Math.abs(p.y - drop.y) < 3 && canReach(p, drop)) this.pickupWeapon(p, drop);
         }
       }
       if (p._burst && (p.weapon !== p._burst.weapon || p.rarity !== p._burst.rarity || p.mode === 'aboard')) p._burst = null;

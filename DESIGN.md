@@ -153,7 +153,11 @@ Ping: {id,playerId,x,z,expiresAt}.
 Events always {kind,...}; common kinds:
 shot {playerId,from:{x,y,z},to:{x,y,z},weapon,hitId?,damage?},
 hit {targetId,damage,x,y,z,sourceId?}, defeated {id,x,y,z,type},
-chest {id,playerId,pearls}, shrine {id,status}, heal {playerId},
+chest {id,playerId,pearls,weapon,rarity,dropId},
+loot {id,playerId,weapon,rarity,upgraded} (a pirate equipped drop id),
+salvage {id,playerId,weapon,rarity,pearls} (a pirate who already carried an
+equal or better gun walked over drop id; it is hidden for them and the crew
+gained pearls), shrine {id,status}, heal {playerId},
 downed {playerId}, revive {playerId,by?}, ping {playerId,x,z},
 phase {phase}, notice {message}, victory {pearls,duration,rescues,kills},
 side-event {id,status,wave,reward?,spawns?:[{type,x,z}]} (spawns only when a
@@ -178,8 +182,14 @@ server validated at spawn when a building blocks the straight approach.
 Rosters latch to the starting crew: wave 1 crabs only, wave 2 adds spitters,
 the final wave adds one Tidebreaker mini boss per two pirates. Supplies
 hold 100 integrity, crabs strip 8 and Tidebreakers 14 per hit, the deadline
-is 180s, and the reward is 45 pearls plus a local heal. Chests open with E at 3.5m, give shared
-pearls and heal; no competition for loot. Three shards unlock BEACON.
+is 180s, and the reward is 45 pearls plus a local heal. Chests open when a
+living landed pirate walks within 2m with line of sight (the server still
+accepts an explicit E target within 3.5m for older clients; the client shows
+no E prompt for chests), give 12 shared pearls and heal; the rolled gun lands
+on the chest and is collected by walking within 2m, usually on the same tick.
+A pirate already carrying an equal or better copy salvages it instead: the
+drop is added to their collectedDropIds (hidden for them only) and the crew
+gains SALVAGE_PEARLS (5); no competition for loot. Three shards unlock BEACON.
 E at BEACON starts finale with Tempest Crab. Boss has telegraphed swipes and
 ranged splashes (events acceptable for visuals) and minion summons with cap.
 Boss 650HP solo +180 per additional player; normal crabs ~45–65HP.

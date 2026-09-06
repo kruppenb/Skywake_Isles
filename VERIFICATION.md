@@ -1,3 +1,33 @@
+# Walkover chests and salvaged duplicates verification
+
+September 6, 2026. Chests now open when a living, landed pirate walks within
+2 m with line of sight, with no key press, and a gun the pirate cannot use
+(an equal or better copy already carried) no longer lingers underfoot: it is
+salvaged once per pirate for 5 shared pearls, disappears for that pirate and
+stays on the ground for the rest of the crew. Measured on this Windows host.
+
+- `server/game.js` shares one `openChest` between the walkover tick and the
+  explicit E fallback (still accepted within 3.5 m for older clients), and
+  `pickupWeapon` emits a new `salvage {id,playerId,weapon,rarity,pearls}`
+  event instead of the old `DUPLICATE_WEAPON` denial for a first contact; a
+  copy already in `collectedDropIds` is still denied so nothing pays twice.
+  The client hides the chest E prompt, toasts and bursts the salvage, and the
+  chest toast for the opener no longer tells them to walk over a gun they are
+  already standing on.
+- New and rewritten loot tests cover: chest walkover at 1.9 m opening, paying
+  12 pearls, healing a crewmate 6 m away and equipping the rolled gun on the
+  same tick; 2.7 m (E range) not opening it; every pickup guard (radius,
+  jumping, falling, gliding, aboard, offline, downed, dead, lobby, victory)
+  applied to chests, new guns and unusable duplicates alike; the through-wall
+  case for salvage; a cottage chest opening through its rear doorway; salvage
+  paying once per pirate across a two-pirate crew, a reconnect and a late
+  arrival while `isLootVisible` hides the copy only for the salvager; and the
+  upgrade path still equipping rather than salvaging.
+- The full `npm test` passed 193 tests in 140.7 s, including the five-client
+  network voyage (whose explicit re-pickup of an already collected gun still
+  returns `DUPLICATE_WEAPON`). `git diff --check` is clean and `node --check`
+  parses every edited module.
+
 # Seaward crab defense verification
 
 September 6, 2026. The optional supply defenses now stage three crew-scaled

@@ -62,11 +62,8 @@ export function findInteractable(state, player) {
       options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance(player, friend) - 10 });
     }
   }
-  for (const chest of CHESTS) {
-    if (!state.chests.find((entry) => entry.id === chest.id)?.opened && distance(player, chest) <= 3.5 && reachable(chest)) {
-      options.push({ ...chest, kind: 'chest', label: 'Open shared treasure', distance: distance(player, chest) });
-    }
-  }
+  // Chests open by walking over them, so they never ask for E; only shrines,
+  // revives, optional defenses and the lighthouse do.
   for (const shrine of SHRINES) {
     const dynamic = state.shrines.find((entry) => entry.id === shrine.id);
     if (dynamic?.status === 'dormant' && distance(player, shrine) <= 4 && reachable(shrine)) {

@@ -183,7 +183,7 @@ function receiveState(next) {
     if (lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding') audio.play('drop');
     if (lastAuthoritativeMode === 'gliding' && authoritative.mode === 'ground') {
       audio.play('land');
-      ui.toast('Boots on the island! E opens treasure and awakens compass shrines.');
+      ui.toast('Boots on the island! Walk over treasure to open it; E awakens compass shrines.');
     }
     lastAuthoritativeMode = authoritative.mode;
   }
@@ -219,8 +219,19 @@ function receiveEvent(event) {
     case 'melee': if (mine) audio.play('melee'); break;
     case 'chest': {
       audio.play('collect', { distant: !mine });
-      const loot = Object.hasOwn(WEAPONS, event.weapon) ? ` Walk over the ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} to equip it. Your copy disappears; the crew's stays.` : '';
-      ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!${loot}`);
+      const gun = Object.hasOwn(WEAPONS, event.weapon) ? `${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name}` : '';
+      // The opener is already standing on the gun, so it equips or is salvaged
+      // on the same tick; only crewmates need directions to it.
+      if (mine) ui.toast(`You found ${event.pearls || 0} shared pearls!${gun ? ` A ${gun} tumbles out.` : ''}`);
+      else ui.toast(`${name} found ${event.pearls || 0} shared pearls!${gun ? ` Walk over the ${gun} to equip it. Your copy disappears; the crew's stays.` : ''}`);
+      break;
+    }
+    case 'salvage': {
+      if (!Object.hasOwn(WEAPONS, event.weapon)) break;
+      audio.play('collect', { distant: !mine });
+      const pearls = Number.isFinite(event.pearls) ? event.pearls : 0;
+      ui.toast(mine ? `You already carry an equal or better ${WEAPONS[event.weapon].name}, so it was salvaged for +${pearls} shared pearls.`
+        : `${name} salvaged a spare ${WEAPONS[event.weapon].name} for +${pearls} shared pearls.`);
       break;
     }
     case 'loot':

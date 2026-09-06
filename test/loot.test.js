@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
 import { COLORS, CHESTS, SHRINES, heightAt, seededRandom } from '../shared/world.js';
 import { BUILDINGS, buildingWorldPoint, buildingLocalPoint } from '../shared/exploration.js';
-import { WEAPONS, WEAPON_ORDER, RARITIES, rollWeapon, weaponStats } from '../shared/weapons.js';
+import { WEAPONS, WEAPON_ORDER, RARITIES, SALVAGE_PEARLS, rollWeapon, weaponStats } from '../shared/weapons.js';
+import { isLootVisible } from '../client/loot-visibility.js';
 
 function locate(p, point) { Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, vy: 0 }); }
 function ticks(game, seconds) { for (let i = 0; i < Math.ceil(seconds / 0.05); i++) game.tick(0.05); }
@@ -92,10 +93,10 @@ test('walking into a weapon equips it without interact, with sequential pickups 
   assert.deepEqual(game.snapshot().drops, [drop]);
 });
 
-test('automatic pickup requires a living online landed pirate, active voyage and nearby reachable drop', () => {
+test('automatic pickup and salvage require a living online landed pirate, active voyage and nearby reachable drop', () => {
   const guards = [
-    ['outside radius', (game, p, drop) => { drop.x += 2.01; }],
-    ['vertical separation', (game, p, drop) => { drop.y += 3; }],
+    ['outside radius', (game, p, drops) => { for (const drop of drops) drop.x += 2.01; }],
+    ['vertical separation', (game, p, drops) => { for (const drop of drops) drop.y += 3; }],
     ['jumping', (game, p) => { game.setInput(p.id, { seq: 0, forward: 0, right: 0, yaw: 0, pitch: 0, jump: true }); }],
     ['falling', (game, p) => { p.y += 1; p.grounded = false; p.vy = -1; }],
     ['gliding', (game, p) => { p.mode = 'gliding'; p.y += 1; p.grounded = false; }],
@@ -108,34 +109,109 @@ test('automatic pickup requires a living online landed pirate, active voyage and
   ];
   for (const [label, guard] of guards) {
     const { game, p, events } = setup();
-    const drop = { id: 'guarded', weapon: 'longshot', rarity: 'legendary', x: p.x, y: p.y, z: p.z };
-    game.drops.push(drop); guard(game, p, drop); game.tick();
+    // A new gun and an unusable duplicate of the starting flintlock share every guard.
+    const drops = [{ id: 'guarded', weapon: 'longshot', rarity: 'legendary' }, { id: 'spare', weapon: 'flintlock', rarity: 'common' }]
+      .map(drop => ({ ...drop, x: p.x, y: p.y, z: p.z }));
+    game.drops.push(...drops); guard(game, p, drops); game.tick();
     assert.equal(p.inventory.longshot, undefined, label);
-    assert.equal(events.filter(e => e.kind === 'loot').length, 0, label);
-    assert.equal(game.drops.length, 1, label);
+    assert.deepEqual(p.collectedDropIds, [], label); assert.equal(game.pearls, 0, label);
+    assert.equal(events.filter(e => e.kind === 'loot' || e.kind === 'salvage').length, 0, label);
+    assert.equal(game.drops.length, 2, label);
   }
   const { game, p } = setup();
   const building = BUILDINGS.find(b => b.kind === 'cottage' && b.enterable);
   const inside = buildingWorldPoint(building, building.width / 2 - .5, -.45);
   locate(p, buildingWorldPoint(building, building.width / 2 + .7, -.45));
   const drop = { id: 'wall', weapon: 'longshot', rarity: 'legendary', ...inside, y: heightAt(inside.x, inside.z) };
-  game.drops.push(drop); game.tick();
+  const spare = { ...drop, id: 'wall-spare', weapon: 'flintlock', rarity: 'common' };
+  game.drops.push(drop, spare); game.tick();
   assert.ok(Math.hypot(p.x - drop.x, p.z - drop.z) < 2);
   assert.equal(p.inventory.longshot, undefined, 'nearby loot cannot pass through a wall');
+  assert.deepEqual(p.collectedDropIds, []); assert.equal(game.pearls, 0, 'salvage cannot pass through a wall either');
   locate(p, { x: 0, z: 50 }); Object.assign(drop, { x: p.x + 2, y: p.y, z: p.z });
   game.phase = 'finale'; game.tick(); assert.equal(p.weapon, 'longshot', 'finale and radius boundary permit pickup');
 });
 
-test('persistent weapons leave targetless chest, shrine and revive interactions available', () => {
+test('walking within two metres of a chest opens it without E and equips its gun on the same tick', () => {
+  const { game, p, events } = setup(undefined, 2), ally = game.players.get('p1');
+  locate(p, { x: CHESTS[0].x, z: CHESTS[0].z + 2.7 }); locate(ally, { x: CHESTS[0].x, z: CHESTS[0].z + 6 });
+  ticks(game, .5); assert.equal(game.chests[0].opened, false, 'E range alone never opens a chest');
+  p.hp = ally.hp = 40; p._damageAt = ally._damageAt = game.elapsed;
+  locate(p, { x: CHESTS[0].x, z: CHESTS[0].z + 1.9 }); game.tick();
+  assert.equal(game.chests[0].opened, true); assert.equal(p.chests, 1); assert.equal(ally.chests, 0); assert.equal(game.pearls, 12);
+  assert.equal(p.hp, 62); assert.equal(ally.hp, 62, 'the chest heal still reaches a crewmate within ten metres');
+  const opened = events.find(e => e.kind === 'chest');
+  assert.equal(opened.id, CHESTS[0].id); assert.equal(opened.playerId, p.id); assert.equal(opened.pearls, 12);
+  assert.equal(game.drops.length, 1); assert.equal(game.drops[0].id, opened.dropId);
+  assert.deepEqual([game.drops[0].x, game.drops[0].z], [CHESTS[0].x, CHESTS[0].z]);
+  assert.equal(p.weapon, 'longshot'); assert.equal(p.rarity, 'legendary'); assert.equal(ally.inventory.longshot, undefined);
+  assert.equal(events.filter(e => e.kind === 'loot').length, 1);
+  ticks(game, .5);
+  assert.equal(game.pearls, 12); assert.equal(events.filter(e => e.kind === 'chest').length, 1); assert.equal(game.drops.length, 1);
+  assert.equal(game.action(p.id, 'interact', CHESTS[0].id).code, 'TOO_FAR', 'an opened chest cannot reroll');
+  const guards = [
+    ['outside radius', (game, p) => { locate(p, { x: CHESTS[0].x, z: CHESTS[0].z + 2.01 }); }],
+    ['jumping', (game, p) => { game.setInput(p.id, { seq: 0, forward: 0, right: 0, yaw: 0, pitch: 0, jump: true }); }],
+    ['falling', (game, p) => { p.y += 1; p.grounded = false; p.vy = -1; }],
+    ['gliding', (game, p) => { p.mode = 'gliding'; p.y += 1; p.grounded = false; }],
+    ['aboard', (game, p) => { p.mode = 'aboard'; }],
+    ['offline', (game, p) => { game.disconnect(p.id); }],
+    ['downed', (game, p) => { p.knockedUntil = 10; }],
+    ['dead', (game, p) => { p.hp = 0; p._damageAt = game.elapsed; }],
+    ['lobby', game => { game.phase = 'lobby'; }],
+    ['victory', game => { game.phase = 'victory'; }],
+  ];
+  for (const [label, guard] of guards) {
+    const { game, p, events } = setup();
+    locate(p, { x: CHESTS[0].x, z: CHESTS[0].z + 1.9 }); guard(game, p); game.tick();
+    assert.equal(game.chests[0].opened, false, label); assert.equal(game.pearls, 0, label);
+    assert.equal(events.filter(e => e.kind === 'chest').length, 0, label); assert.equal(game.drops.length, 0, label);
+  }
+  // Indoor treasure opens for a pirate stepping in through the rear doorway.
+  const building = BUILDINGS.find(b => b.kind === 'cottage' && b.enterable), indoors = CHESTS.find(c => c.buildingId === building.id);
+  const doorway = setup();
+  locate(doorway.p, buildingWorldPoint(building, 0, -building.depth / 2 - .6));
+  assert.ok(Math.hypot(doorway.p.x - indoors.x, doorway.p.z - indoors.z) < 2);
+  doorway.game.tick();
+  assert.equal(doorway.game.chests.find(c => c.id === indoors.id).opened, true, 'an open door permits the walkover');
+});
+
+test('drops beyond pickup reach never mask targetless chest, shrine and revive interactions', () => {
   const { game, p } = setup(undefined, 2), ally = game.players.get('p1');
   const drop = { id: 'retained', weapon: 'flintlock', rarity: 'common' }; game.drops.push(drop);
-  locate(p, CHESTS[0]); Object.assign(drop, { x: p.x, y: p.y, z: p.z });
-  game.tick(); assert.equal(game.chests[0].opened, false, 'walking never auto-opens a chest');
-  assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(game.chests[0].opened, true);
-  locate(p, SHRINES[0]); Object.assign(drop, { x: p.x, y: p.y, z: p.z });
+  locate(p, { x: CHESTS[0].x, z: CHESTS[0].z + 2.7 }); Object.assign(drop, { x: p.x + 2.5, y: p.y, z: p.z });
+  game.tick(); assert.equal(game.chests[0].opened, false, 'a chest 2.7 m away waits for a closer step or E');
+  assert.deepEqual(p.collectedDropIds, []);
+  assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(game.chests[0].opened, true, 'E within 3.5 m still opens a chest');
+  locate(p, SHRINES[0]); Object.assign(drop, { x: p.x + 2.5, y: p.y, z: p.z });
   locate(ally, { x: p.x + 1, z: p.z }); ally.knockedUntil = 10;
   assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(ally.knockedUntil, 0);
   assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(game.shrines[0].status, 'active');
+  assert.deepEqual(p.collectedDropIds, []); assert.equal(game.drops.length, 2);
+});
+
+test('a gun nobody can use still leaves each pirate\'s ground once, pays shared pearls and stays for the crew', () => {
+  const { game, p, events } = setup(undefined, 2), ally = game.players.get('p1');
+  const drop = { id: 'spare', weapon: 'scatter', rarity: 'common', x: p.x, y: p.y, z: p.z }; game.drops.push(drop);
+  game.tick();
+  assert.equal(game.pearls, SALVAGE_PEARLS); assert.deepEqual(p.collectedDropIds, ['spare']); assert.deepEqual(ally.collectedDropIds, []);
+  assert.equal(p.weapon, 'flintlock'); assert.deepEqual(p.inventory.scatter, { rarity: 'common', ammo: 5 });
+  let snapshot = game.snapshot();
+  assert.equal(isLootVisible(drop, snapshot.players[0]), false, 'the salvaged copy disappears for the salvager');
+  assert.equal(isLootVisible(drop, snapshot.players[1]), true, 'and stays visible for the crewmate');
+  ticks(game, 1); assert.equal(game.pearls, SALVAGE_PEARLS, 'standing on a salvaged drop pays once');
+  locate(ally, { x: drop.x, z: drop.z }); game.tick();
+  assert.equal(game.pearls, 2 * SALVAGE_PEARLS); assert.deepEqual(ally.collectedDropIds, ['spare']);
+  assert.deepEqual(game.drops, [drop]); assert.deepEqual(game.snapshot().drops, [drop]);
+  assert.deepEqual(events.filter(e => e.kind === 'salvage').map(({ id, playerId, weapon, rarity, pearls }) => ({ id, playerId, weapon, rarity, pearls })),
+    [{ id: 'spare', playerId: p.id, weapon: 'scatter', rarity: 'common', pearls: SALVAGE_PEARLS }, { id: 'spare', playerId: ally.id, weapon: 'scatter', rarity: 'common', pearls: SALVAGE_PEARLS }]);
+  assert.equal(events.filter(e => e.kind === 'loot').length, 0);
+  game.disconnect(p.id); game.reconnect(p.id); game.tick();
+  assert.deepEqual(p.collectedDropIds, ['spare']); assert.equal(game.pearls, 2 * SALVAGE_PEARLS, 'reconnecting cannot salvage the same copy again');
+  snapshot = game.snapshot(); assert.equal(isLootVisible(drop, snapshot.players[0]), false);
+  const late = game.addPlayer('late', 'Navigator', COLORS[2]); locate(late, { x: drop.x, z: drop.z }); game.tick();
+  assert.equal(game.pearls, 3 * SALVAGE_PEARLS); assert.deepEqual(late.collectedDropIds, ['spare']);
+  game.resetRound(); assert.equal(game.pearls, 0); assert.deepEqual(p.collectedDropIds, []); assert.deepEqual(game.drops, []);
 });
 
 test('far, malformed, invented and through-wall drop/chest claims cannot grant weapons', () => {
@@ -159,24 +235,29 @@ test('far, malformed, invented and through-wall drop/chest claims cannot grant w
   assert.equal(game.action(p.id, 'interact', indoors.id).ok, true, 'open door permits reachable loot');
 });
 
-test('duplicate and lower-rarity guns stay for crew; upgrades preserve magazines and cooldown', () => {
+test('equal and lower-rarity guns are salvaged once, never refill or re-equip; upgrades preserve magazines and cooldown', () => {
   const { game, p, events } = setup(); p.ammo = 2;
   const place = (rarity, id) => game.drops.push({ id, weapon: 'flintlock', rarity, x: p.x, y: p.y, z: p.z });
   place('common', 'same');
-  assert.equal(game.action(p.id, 'interact', 'same').code, 'DUPLICATE_WEAPON');
-  assert.equal(game.drops.length, 1); assert.equal(p.ammo, 2);
-  assert.deepEqual(p.collectedDropIds, []);
+  assert.equal(game.action(p.id, 'interact', 'same').ok, true);
+  assert.equal(game.pearls, SALVAGE_PEARLS); assert.equal(game.drops.length, 1); assert.equal(p.ammo, 2); assert.equal(p.rarity, 'common');
+  assert.deepEqual(p.collectedDropIds, ['same']);
+  assert.equal(game.action(p.id, 'interact', 'same').code, 'DUPLICATE_WEAPON', 'a salvaged copy cannot pay twice');
+  assert.equal(game.pearls, SALVAGE_PEARLS);
   p._fireAt = game.elapsed + 4;
   place('epic', 'upgrade'); assert.equal(game.action(p.id, 'interact', 'upgrade').ok, true);
   assert.equal(p.rarity, 'epic'); assert.equal(p.inventory.flintlock.rarity, 'epic');
   assert.equal(p.ammo, 2); assert.equal(p.inventory.flintlock.ammo, 2);
-  assert.equal(p._fireAt, game.elapsed + 4);
+  assert.equal(p._fireAt, game.elapsed + 4); assert.equal(game.pearls, SALVAGE_PEARLS, 'a real upgrade is equipped, not salvaged');
   assert.equal(game.action(p.id, 'fire').ok, true); assert.equal(p.ammo, 2);
-  place('rare', 'lower'); assert.equal(game.action(p.id, 'interact', 'lower').code, 'DUPLICATE_WEAPON');
+  place('rare', 'lower'); assert.equal(game.action(p.id, 'interact', 'lower').ok, true);
+  assert.equal(game.pearls, 2 * SALVAGE_PEARLS); assert.equal(p.rarity, 'epic'); assert.equal(p.ammo, 2);
   assert.equal(game.action(p.id, 'interact', 'upgrade').code, 'DUPLICATE_WEAPON');
-  assert.deepEqual(p.collectedDropIds, ['upgrade']);
+  assert.deepEqual(p.collectedDropIds, ['same', 'upgrade', 'lower']);
   assert.deepEqual(events.filter(e => e.kind === 'loot').map(({ id, upgraded }) => ({ id, upgraded })), [{ id: 'upgrade', upgraded: true }]);
-  assert.deepEqual(game.drops.map(d => d.id), ['same', 'upgrade', 'lower']);
+  assert.deepEqual(events.filter(e => e.kind === 'salvage').map(({ id, rarity, pearls }) => ({ id, rarity, pearls })),
+    [{ id: 'same', rarity: 'common', pearls: SALVAGE_PEARLS }, { id: 'lower', rarity: 'rare', pearls: SALVAGE_PEARLS }]);
+  assert.deepEqual(game.drops.map(d => d.id), ['same', 'upgrade', 'lower'], 'every copy stays for the crew');
 });
 
 test('automatic upgrades preserve magazines and cadence, cancel reload/burst and ignore revisited duplicates', () => {
@@ -191,12 +272,15 @@ test('automatic upgrades preserve magazines and cadence, cancel reload/burst and
   game.drops.push({ id: 'lower', weapon: 'repeater', rarity: 'rare', x: p.x, y: p.y, z: p.z });
   ticks(game, 1);
   assert.equal(p._fireAt, 4); assert.equal(p._swapAt, swapAt); assert.equal(p.ammo, 3); assert.equal(p.rarity, 'epic');
+  assert.equal(game.pearls, SALVAGE_PEARLS, 'the unusable lower copy is salvaged once on contact');
+  assert.deepEqual(p.collectedDropIds, ['upgrade', 'lower']);
   game.action(p.id, 'swap', 'flintlock'); assert.equal(p.ammo, 2);
   const fireAt = p._fireAt, swappedAt = p._swapAt;
   locate(p, { x: 5, z: 50 }); game.tick(); locate(p, { x: 0, z: 50 }); ticks(game, 1);
   assert.equal(p.weapon, 'flintlock'); assert.equal(p.ammo, 2); assert.equal(p.inventory.repeater.ammo, 3);
   assert.equal(p._fireAt, fireAt); assert.equal(p._swapAt, swappedAt);
   assert.equal(events.filter(e => e.kind === 'loot').length, 1);
+  assert.equal(events.filter(e => e.kind === 'salvage').length, 1); assert.equal(game.pearls, SALVAGE_PEARLS);
 
   const burst = setup(); grant(burst.game, burst.p, 'burst'); burst.game.action(burst.p.id, 'fire');
   const burstFireAt = burst.p._fireAt;
