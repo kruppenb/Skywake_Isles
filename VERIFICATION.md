@@ -27,6 +27,21 @@ stays on the ground for the rest of the crew. Measured on this Windows host.
   network voyage (whose explicit re-pickup of an already collected gun still
   returns `DUPLICATE_WEAPON`). `git diff --check` is clean and `node --check`
   parses every edited module.
+- Docker was rebuilt from a git-archive export of commit 7fb09c2 (project
+  `skywake-isles`, `skywake-isles_skywake-data` volume kept) and reported
+  healthy; `/health` returned 200 and `/`, `/index.html`, `/main.js`,
+  `/ui.js`, `/world.js` and `/shared/weapons.js` all returned HTTP 200 with
+  `no-cache` and matched the commit byte for byte after CRLF normalization.
+- Live check against that deployment in a Playwright browser at 1280 by 800:
+  joined as captain, set sail, took the automatic drop and landed at the
+  spawn (0, 94). Holding W walked the pirate to (0, 80) straight through
+  chest-1 at (0, 88) without pressing E; a second Node WebSocket crew member
+  watching the server saw the `chest` event (+12, a Common Scatter Blaster)
+  and, on the same tick, the `salvage` event (+5) because the pirate already
+  carried a Common Scatter Blaster. The HUD read "17 shared pearls", the
+  pirate's `collectedDropIds` hid the drop while it stayed in the crew's drop
+  list, the loadout was unchanged, and the console logged no errors or
+  warnings.
 
 # Seaward crab defense verification
 
