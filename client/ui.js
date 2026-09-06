@@ -2,6 +2,7 @@ import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_DUR
 import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } from '../shared/exploration.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
+import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -11,6 +12,27 @@ const read = (key, fallback) => { try { return localStorage.getItem(key) || fall
 const write = (key, value) => { try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ } };
 const show = (element, visible) => { element.hidden = !visible; };
 const text = (element, value) => { const next = String(value); if (element.textContent !== next) element.textContent = next; };
+
+function sideEventEntries(state) {
+  return (state.sideEvents || []).flatMap((event) => {
+    const definition = SIDE_EVENTS.find((entry) => entry.id === event.id);
+    return definition ? [{ ...event, ...definition }] : [];
+  });
+}
+
+export function sideEventForHUD(state, player, { paused = false, mapOpen = false } = {}) {
+  if (!player || player.mode !== 'ground' || state.phase !== 'voyage' || paused || mapOpen) return null;
+  const events = sideEventEntries(state).map((event) => ({ ...event, distance: distance(player, event) }));
+  const active = events.find((event) => event.status === 'active');
+  const nearby = events.filter((event) => event.distance <= 32);
+  const recent = nearby.filter((event) => ['completed', 'failed'].includes(event.status)
+    && state.elapsed >= event.finishedAt && state.elapsed - event.finishedAt < 8)
+    .sort((a, b) => b.finishedAt - a.finishedAt)[0];
+  const available = nearby.filter((event) => event.status === 'available').sort((a, b) => a.distance - b.distance)[0];
+  const event = active || recent || available;
+  return event ? { ...event, integrityPercent: Math.round(clamp(event.integrity / Math.max(1, event.maxIntegrity) * 100, 0, 100)),
+    secondsLeft: Math.max(0, event.endsAt - state.elapsed) } : null;
+}
 
 export function findInteractable(state, player) {
   if (!player || player.mode !== 'ground' || player.knockedUntil > state.elapsed || state.phase === 'victory') return null;
@@ -43,6 +65,13 @@ export function findInteractable(state, player) {
   }
   if (state.phase === 'voyage' && state.shards >= 3 && distance(player, BEACON) <= 4 && reachable(BEACON)) {
     options.push({ ...BEACON, kind: 'beacon', label: 'Restore the lighthouse', distance: distance(player, BEACON) });
+  }
+  if (state.phase === 'voyage' && player.grounded && player.hp > 0 && player.online !== false && !(state.sideEvents || []).some((event) => event.status === 'active')) {
+    for (const event of sideEventEntries(state)) {
+      if (event.status !== 'available' || distance(player, event) > event.interactionRange
+        || Math.abs(player.y - heightAt(event.x, event.z)) >= 3 || !reachable(event)) continue;
+      options.push({ ...event, kind: 'side-event', label: 'Defend supplies (optional)', color: SIDE_EVENT_COLOR, distance: distance(player, event) });
+    }
   }
   return options.sort((a, b) => a.distance - b.distance)[0] || null;
 }
@@ -129,6 +158,15 @@ function createMapPainter() {
     ctx.beginPath(); ctx.moveTo(x, y - radius); ctx.lineTo(x + radius * .8, y); ctx.lineTo(x, y + radius); ctx.lineTo(x - radius * .8, y); ctx.closePath();
     ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke();
   };
+  const shield = (ctx, x, y, radius, active) => {
+    if (active) {
+      ctx.beginPath(); ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#123c51cc'; ctx.fill(); ctx.strokeStyle = SIDE_EVENT_COLOR; ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(x - radius * .8, y - radius * .8); ctx.lineTo(x + radius * .8, y - radius * .8);
+    ctx.lineTo(x + radius * .7, y + radius * .15); ctx.lineTo(x, y + radius); ctx.lineTo(x - radius * .7, y + radius * .15); ctx.closePath();
+    ctx.fillStyle = SIDE_EVENT_COLOR; ctx.fill(); ctx.strokeStyle = '#123c51'; ctx.lineWidth = 1.5; ctx.stroke();
+  };
 
   return function drawMap(canvas, state, player, large, elapsed, discoveries) {
     const rect = canvas.getBoundingClientRect();
@@ -144,10 +182,11 @@ function createMapPainter() {
     const size = Math.min(width, height) - (large ? 16 : 0);
     const ox = (width - size) / 2; const oy = (height - size) / 2;
     const mapPoint = (point) => ({ x: ox + size * (.5 + point.x / (extent * 2)), y: oy + size * (.5 + point.z / (extent * 2)) });
+    const mapEvents = state.phase === 'voyage' ? sideEventEntries(state).filter((event) => ['available', 'active'].includes(event.status)) : [];
     const occupied = [];
     if (large) {
-      for (const point of [...SHRINES, BEACON, ...POINTS_OF_INTEREST]) {
-        const position = mapPoint(point); const radius = point === BEACON ? 17 : point.radius ? 7 : 15;
+      for (const point of [...SHRINES, BEACON, ...POINTS_OF_INTEREST, ...mapEvents]) {
+        const position = mapPoint(point); const radius = point === BEACON ? 17 : point.placeId ? 12 : point.radius ? 7 : 15;
         occupied.push({ x: position.x - radius, y: position.y - radius, width: radius * 2, height: radius * 2 });
       }
     }
@@ -200,18 +239,25 @@ function createMapPainter() {
         occupied.push({ x: position.x - labelWidth / 2, y: y - 13, width: labelWidth, height: 31 });
       }
     }
-    for (const place of POINTS_OF_INTEREST) {
-      const position = mapPoint(place); const discovered = discoveries.has(place.id);
-      ctx.beginPath(); ctx.arc(position.x, position.y, large ? 4 : 2, 0, Math.PI * 2);
-      ctx.fillStyle = discovered ? '#286e67' : '#e9efda'; ctx.fill();
-      ctx.strokeStyle = '#286e67'; ctx.lineWidth = large ? 1.5 : .8; ctx.stroke();
+    // At a defense settlement, its shield and title also identify the place.
+    // Every destination uses the same collision-aware label placement below.
+    const destinations = [...mapEvents, ...POINTS_OF_INTEREST.filter((place) => !mapEvents.some((event) => event.placeId === place.id))];
+    for (const place of destinations) {
+      const position = mapPoint(place); const isEvent = !!place.placeId; const discovered = discoveries.has(isEvent ? place.placeId : place.id);
+      if (isEvent) shield(ctx, position.x, position.y, large ? 8 : 4.5, place.status === 'active');
+      else {
+        ctx.beginPath(); ctx.arc(position.x, position.y, large ? 4 : 2, 0, Math.PI * 2);
+        ctx.fillStyle = discovered ? '#286e67' : '#e9efda'; ctx.fill();
+        ctx.strokeStyle = '#286e67'; ctx.lineWidth = large ? 1.5 : .8; ctx.stroke();
+      }
       if (!large) continue;
       ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
-      const labelWidth = ctx.measureText(place.name).width + 10; const labelHeight = 18;
+      const statusLine = isEvent ? `${place.status === 'active' ? `Wave ${place.wave}/${SIDE_EVENT_WAVES}` : 'Optional defense'} · ${place.reward} pearls` : '';
+      const labelWidth = Math.max(ctx.measureText(place.name).width, ctx.measureText(statusLine).width) + 10; const labelHeight = isEvent ? 31 : 18;
       const candidates = [
-        [10, -9], [-labelWidth - 10, -9], [-labelWidth / 2, -29], [-labelWidth / 2, 12],
-        [10, -30], [-labelWidth - 10, -30], [10, 13], [-labelWidth - 10, 13],
-        [-labelWidth / 2, -49], [-labelWidth / 2, 32],
+        [12, -labelHeight / 2], [-labelWidth - 12, -labelHeight / 2], [-labelWidth / 2, -labelHeight - 12], [-labelWidth / 2, 14],
+        [12, -labelHeight - 12], [-labelWidth - 12, -labelHeight - 12], [12, 15], [-labelWidth - 12, 15],
+        [-labelWidth / 2, -labelHeight - 32], [-labelWidth / 2, 34],
       ];
       // Keep destination names clear of the quest symbols, region names, and one another.
       const labels = candidates.map(([dx, dy], index) => {
@@ -223,9 +269,10 @@ function createMapPainter() {
       ctx.beginPath(); ctx.moveTo(position.x, position.y);
       ctx.lineTo(clamp(position.x, label.x, label.x + label.width), clamp(position.y, label.y, label.y + label.height));
       ctx.strokeStyle = '#315e6677'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = discovered ? '#e9f5dfed' : '#eef1e3dd'; ctx.fillRect(label.x, label.y, label.width, label.height);
-      ctx.textAlign = 'left'; ctx.fillStyle = discovered ? '#19594f' : '#3b6269';
+      ctx.fillStyle = isEvent ? '#123c51f2' : discovered ? '#e9f5dfed' : '#eef1e3dd'; ctx.fillRect(label.x, label.y, label.width, label.height);
+      ctx.textAlign = 'left'; ctx.fillStyle = isEvent ? SIDE_EVENT_COLOR : discovered ? '#19594f' : '#3b6269';
       ctx.fillText(place.name, label.x + 5, label.y + 12);
+      if (isEvent) { ctx.fillStyle = '#fff6dd'; ctx.font = '10px "Trebuchet MS",sans-serif'; ctx.fillText(statusLine, label.x + 5, label.y + 25); }
     }
     for (const ping of state.pings) {
       if (ping.expiresAt < elapsed) continue;
@@ -429,7 +476,7 @@ export function createUI(callbacks = {}) {
       if (!joined && value) return;
       paused = !!value;
       if (paused) { mapOpen = false; show(refs['map-overlay'], false); }
-      if (paused) show(refs['discovery-notice'], false);
+      if (paused) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
       show(refs['pause-overlay'], paused); document.body.classList.toggle('paused', paused); document.body.classList.toggle('map-open', mapOpen);
       modalChanged();
       if (paused) refs['resume-button'].focus({ preventScroll: true });
@@ -437,7 +484,7 @@ export function createUI(callbacks = {}) {
     setMap(value) {
       if (!joined || paused) return;
       mapOpen = !!value; show(refs['map-overlay'], mapOpen); document.body.classList.toggle('map-open', mapOpen); mapAt = 0;
-      if (mapOpen) show(refs['discovery-notice'], false);
+      if (mapOpen) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
       modalChanged();
       if (mapOpen) refs['close-map'].focus({ preventScroll: true });
     },
@@ -466,6 +513,8 @@ export function createUI(callbacks = {}) {
       const playing = joined && state.phase !== 'lobby' && state.phase !== 'victory';
       const lobby = joined && state.phase === 'lobby';
       const won = joined && state.phase === 'victory';
+      const sideEvent = sideEventForHUD(state, player, { paused, mapOpen });
+      show(refs['side-event-status'], !!sideEvent);
       if (joined && discoveryRound !== state.round) { discoveryRound = state.round; clearDiscoveries(); }
       show(refs['discovery-notice'], playing && !paused && !mapOpen && player.mode === 'ground' && now < discoveryUntil);
       show(refs.welcome, !joined); show(refs['welcome-caption'], !joined); show(refs['welcome-shade'], !joined);
@@ -524,7 +573,30 @@ export function createUI(callbacks = {}) {
         text(refs['shrine-percent'], activeShrine.remaining > 0 ? activeShrine.remaining : `${Math.round(activeShrine.charge * 100)}%`);
         refs['shrine-meter'].value = activeShrine.charge;
       }
-      refs['crew-hud'].style.top = activeShrine ? '325px' : '';
+      if (sideEvent) {
+        const active = sideEvent.status === 'active';
+        text(refs['side-event-name'], `${sideEvent.name}${sideEvent.distance > 32 ? ` · ${Math.round(sideEvent.distance)} m` : ''}`);
+        let eventDetail = `${sideEvent.description} Earn ${sideEvent.reward} shared pearls.`;
+        let eventHint = 'Approach the cyan supplies and press E';
+        if (active) {
+          eventDetail = `Wave ${sideEvent.wave}/${SIDE_EVENT_WAVES} · ${sideEvent.remaining > 0 ? `${sideEvent.remaining} crab${sideEvent.remaining === 1 ? '' : 's'} remaining` : 'Next wave incoming'} · ${formatTime(sideEvent.secondsLeft)} left`;
+          eventHint = 'Keep the crabs away from the supplies.';
+        } else if (sideEvent.status === 'completed') {
+          eventDetail = `Supplies saved! +${sideEvent.reward} shared pearls.`;
+          eventHint = 'Your compass quest continues.';
+        } else if (sideEvent.status === 'failed') {
+          eventDetail = 'Supplies lost. Your compass quest continues.';
+          eventHint = '';
+        }
+        refs['side-event-status'].dataset.status = sideEvent.status;
+        text(refs['side-event-detail'], eventDetail); text(refs['side-event-hint'], eventHint);
+        show(refs['side-event-hint'], !!eventHint); show(refs['side-event-supplies'], active);
+        if (active) {
+          text(refs['side-event-percent'], `${sideEvent.integrityPercent}%`);
+          refs['side-event-meter'].value = sideEvent.integrityPercent;
+          refs['side-event-meter'].setAttribute('aria-label', `${sideEvent.name}: supplies ${sideEvent.integrityPercent}% intact`);
+        }
+      }
       crewHealth(state, player);
       const hp = Math.max(0, Math.ceil(player.hp));
       text(refs['health-number'], hp); refs['health-bar'].value = hp; refs['health-bar'].max = player.maxHp;
@@ -582,9 +654,20 @@ export function createUI(callbacks = {}) {
           x = bounds.width / 2 - Math.sin(normalized) * (bounds.width / 2 - 55);
           y = bounds.height / 2 - Math.cos(normalized) * (bounds.height / 2 - 110);
         }
-        refs['objective-marker'].style.left = `${clamp(x, 42, bounds.width - 42)}px`; refs['objective-marker'].style.top = `${clamp(y, 86, bounds.height - 125)}px`;
         refs['objective-marker'].classList.toggle('edge', edge);
         text(refs['objective-marker'].lastElementChild, `${objectiveDistance} m`);
+        const markerBounds = refs['objective-marker'].getBoundingClientRect();
+        const halfWidth = markerBounds.width / 2; const halfHeight = markerBounds.height / 2;
+        const horizontalMargin = Math.max(42, halfWidth + 8);
+        x = clamp(x, horizontalMargin, bounds.width - horizontalMargin);
+        y = clamp(y, Math.max(86, halfHeight + 8), bounds.height - Math.max(125, halfHeight + 8));
+        const questBounds = refs['crew-hud'].parentElement.getBoundingClientRect();
+        if (!refs['objective-marker'].hidden && questBounds.width > 0 && questBounds.height > 0
+          && x + halfWidth > questBounds.left - bounds.left - 8 && x - halfWidth < questBounds.right - bounds.left + 8
+          && y + halfHeight > questBounds.top - bounds.top - 8 && y - halfHeight < questBounds.bottom - bounds.top + 8) {
+          x = clamp(questBounds.right - bounds.left + halfWidth + 8, horizontalMargin, bounds.width - horizontalMargin);
+        }
+        refs['objective-marker'].style.left = `${x}px`; refs['objective-marker'].style.top = `${y}px`;
       }
       const activeIds = new Set();
       for (const friend of state.players) {

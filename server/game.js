@@ -3,10 +3,12 @@ import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPONS, RARITIES, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
+import { SIDE_EVENTS, SIDE_EVENT_WAVES } from '../shared/side-events.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
 const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
 const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'scale', 'attackRadius'];
+const PUBLIC_SIDE_EVENT = ['id', 'status', 'wave', 'remaining', 'integrity', 'maxIntegrity', 'startedAt', 'endsAt', 'finishedAt'];
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const cleanObject = (value, keys) => Object.fromEntries(keys.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
@@ -15,6 +17,51 @@ const bad = (message, code = 'ACTION_DENIED') => ({ ok: false, message, code });
 const restInput = p => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: p.yaw, pitch: p.pitch });
 const sightPoint = (point, lift = 1) => ({ x: point.x, y: (point.y ?? heightAt(point.x, point.z)) + lift, z: point.z });
 const canReach = (from, to) => hasWorldLineOfSight(sightPoint(from, 1.25), sightPoint(to, 0.8));
+
+// Verify the whole walk, not just the endpoint: a clear-looking spawn on the
+// other side of a cottage must not leave a crab walking into its wall.
+export function sideEventPathClear(from, to) {
+  if (![from?.x, from?.z, to?.x, to?.z].every(Number.isFinite)) return false;
+  if (!hasWorldLineOfSight(sightPoint(from), sightPoint(to), 0.8)) return false;
+  const steps = Math.max(1, Math.ceil(distance(from, to) / 0.75));
+  let previousY = heightAt(from.x, from.z);
+  for (let step = 0; step <= steps; step++) {
+    const fraction = step / steps;
+    const point = { x: from.x + (to.x - from.x) * fraction, z: from.z + (to.z - from.z) * fraction };
+    point.y = heightAt(point.x, point.z);
+    if (point.y < 1 || inSafeLanding(point) || Math.abs(point.y - previousY) > 0.8) return false;
+    const resolved = resolveWorldCollision({ ...point }, 0.85);
+    if (distance(point, resolved) > 0.001) return false;
+    previousY = point.y;
+  }
+  return true;
+}
+
+export function sideEventSpawns(id, playerCount, wave, occupied = []) {
+  const point = SIDE_EVENTS.find(event => event.id === id);
+  if (!point || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > MAX_PLAYERS ||
+    !Number.isInteger(wave) || wave < 1 || wave > SIDE_EVENT_WAVES ||
+    !Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
+  const count = (wave === 1 ? 3 : 4) + Math.floor((playerCount - 1) / 2), result = [];
+  for (let index = 0; index < count; index++) {
+    let spawn = null;
+    // Try distinct bearings first, then alternate radii. Every fallback passes
+    // the same checks; exhausting candidates fails safely instead of spawning
+    // the last rejected point.
+    search: for (const radius of [12, 14, 10, 15]) for (let attempt = 0; attempt < 96; attempt++) {
+      const angle = index / count * Math.PI * 2 + wave * 0.47 + attempt * Math.PI * 2 / 96;
+      const candidate = { x: point.x + Math.cos(angle) * radius, z: point.z + Math.sin(angle) * radius };
+      if ([...occupied, ...result].some(other => distance(other, candidate) < 2.8)) continue;
+      if ([BEACON, ...CHESTS, ...SHRINES].some(other => distance(other, candidate) < 3.6)) continue;
+      if (!sideEventPathClear(candidate, point)) continue;
+      spawn = { ...candidate, type: wave === 2 && index === count - 1 ? 'spitter' : 'crab', zone: point.region };
+      break search;
+    }
+    if (!spawn) return null;
+    result.push(spawn);
+  }
+  return result;
+}
 
 function clipShotEndpoint(from, to) {
   if (hasWorldLineOfSight(from, to)) return to;
@@ -60,6 +107,8 @@ export class Game {
     this.phase = 'lobby'; this.elapsed = 0; this.pearls = 0; this.shards = 0;
     this.bossId = null; this.victory = null; this.checkpoint = { ...SPAWN };
     this.shrines = SHRINES.map(s => ({ id: s.id, status: 'dormant', charge: 0, remaining: 0 }));
+    this.sideEvents = SIDE_EVENTS.map(event => ({ id: event.id, status: 'available', wave: 0, remaining: 0,
+      integrity: 100, maxIntegrity: 100, startedAt: 0, endsAt: 0, finishedAt: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
     this.pings = []; this.drops = []; this.enemies.clear();
     for (const p of this.players.values()) this.resetPlayer(p);
@@ -300,12 +349,19 @@ export class Game {
     for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHESTS.find(c => c.id === chest.id) });
     for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
     for (const shrine of this.shrines) if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point: SHRINES.find(s => s.id === shrine.id) });
+    if (this.phase === 'voyage' && p.hp > 0 && p.grounded && !this.sideEvents.some(event => event.status === 'active')) {
+      for (const event of this.sideEvents) if (event.status === 'available') {
+        const point = SIDE_EVENTS.find(definition => definition.id === event.id);
+        options.push({ id: event.id, kind: 'side-event', range: point.interactionRange, point });
+      }
+    }
     if (this.shards === 3 && this.phase === 'voyage') options.push({ id: BEACON.id, kind: 'beacon', range: 4, point: BEACON });
     const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range && Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3 && canReach(p, o.point));
     reachable.sort((a, b) => (a.kind === 'revive' ? -10 : distance(p, a.point)) - (b.kind === 'revive' ? -10 : distance(p, b.point)));
     const option = reachable[0];
     if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
+    if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
     if (option.kind === 'loot') {
       const drop = option.data, owned = p.inventory[drop.weapon];
       if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
@@ -338,12 +394,97 @@ export class Game {
       this.emit({ kind: 'shrine', id: option.id, status: 'active' });
     } else if (option.kind === 'beacon') {
       this.phase = 'finale';
+      for (const event of this.sideEvents) if (event.status === 'active') this.finishSideEvent(event, 'cancelled');
       const boss = this.spawnEnemy('tempest', BEACON.x, BEACON.z - 16, 'haven');
       this.bossId = boss.id;
       this.emit({ kind: 'phase', phase: 'finale' });
       this.emit({ kind: 'notice', message: 'The Tempest Crab has the final compass! Watch the splash circles.' });
     }
     return good();
+  }
+
+  startSideEvent(p, id) {
+    const point = SIDE_EVENTS.find(definition => definition.id === id), event = this.sideEvents.find(item => item.id === id);
+    if (!point || !event || event.status !== 'available' || this.phase !== 'voyage' ||
+      this.sideEvents.some(item => item.status === 'active')) return bad('That optional defense is not available.');
+    if (!p?.online || p.hp <= 0 || p.knockedUntil || p.mode !== 'ground' || !p.grounded ||
+      distance(p, point) > point.interactionRange || Math.abs(p.y - heightAt(point.x, point.z)) >= 3 - 1e-8 || !canReach(p, point)) {
+      return bad('Stand near the cyan supplies with a clear path to begin.', 'TOO_FAR');
+    }
+    const crewCount = Math.max(1, this.onlineCount);
+    const spawns = sideEventSpawns(id, crewCount, 1, [...this.enemies.values()]);
+    if (!spawns) return bad('The supplies need a clear approach. Try again in a moment.');
+    Object.assign(event, { status: 'active', wave: 1, integrity: 100, startedAt: this.elapsed,
+      endsAt: this.elapsed + 120, finishedAt: 0, _crewCount: crewCount, _nextWaveAt: 0 });
+    this.spawnSideEventWave(event, spawns);
+    this.notifySideEvent(event, `${point.name}: protect the cyan supplies! Wave 1 of ${SIDE_EVENT_WAVES}.`);
+    return good();
+  }
+
+  spawnSideEventWave(event, spawns) {
+    for (const spawn of spawns) {
+      const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone);
+      enemy._sideEvent = event.id;
+    }
+    event.remaining = spawns.length;
+  }
+
+  notifySideEvent(event, message, reward) {
+    this.emit({ kind: 'side-event', id: event.id, status: event.status, wave: event.wave,
+      ...(reward === undefined ? {} : { reward }) });
+    if (message) this.emit({ kind: 'notice', message });
+  }
+
+  finishSideEvent(event, status) {
+    if (event.status !== 'active') return;
+    const point = SIDE_EVENTS.find(definition => definition.id === event.id);
+    event.status = status; event.remaining = 0; event.finishedAt = this.elapsed; event._nextWaveAt = 0;
+    for (const enemy of this.enemies.values()) if (enemy._sideEvent === event.id) this.enemies.delete(enemy.id);
+    if (status === 'completed') {
+      this.pearls += point.reward;
+      for (const p of this.players.values()) if (p.online && p.hp > 0 && !p.knockedUntil && p.mode === 'ground' &&
+        distance(p, point) <= point.radius && Math.abs(p.y - heightAt(point.x, point.z)) < 3 && canReach(p, point)) {
+        p.hp = Math.min(p.maxHp, p.hp + 25);
+      }
+      this.notifySideEvent(event, `${point.name}: supplies saved! +${point.reward} shared pearls.`, point.reward);
+    } else this.notifySideEvent(event, status === 'failed' ? 'Supplies lost. Your compass quest continues.' : null);
+  }
+
+  tickSideEvents(advanceWaves = true) {
+    for (const event of this.sideEvents) {
+      if (event.status !== 'active') continue;
+      if (this.phase !== 'voyage') { this.finishSideEvent(event, 'cancelled'); continue; }
+      if (event.integrity <= 0 || this.elapsed + 1e-8 >= event.endsAt) { this.finishSideEvent(event, 'failed'); continue; }
+      event.remaining = [...this.enemies.values()].filter(enemy => enemy._sideEvent === event.id).length;
+      if (!advanceWaves || event.remaining) continue;
+      if (event.wave === SIDE_EVENT_WAVES) { this.finishSideEvent(event, 'completed'); continue; }
+      if (!event._nextWaveAt) event._nextWaveAt = this.elapsed + 3;
+      if (this.elapsed + 1e-8 < event._nextWaveAt) continue;
+      const spawns = sideEventSpawns(event.id, event._crewCount, event.wave + 1, [...this.enemies.values()]);
+      if (!spawns) { this.finishSideEvent(event, 'failed'); continue; }
+      event.wave++; event._nextWaveAt = 0;
+      this.spawnSideEventWave(event, spawns);
+      this.notifySideEvent(event, `The crabs are back! Wave ${event.wave} of ${SIDE_EVENT_WAVES} at the cyan supplies.`);
+    }
+  }
+
+  sideEventDestination(enemy, point) {
+    if (sideEventPathClear(enemy, point)) { enemy._sideWaypoint = null; return point; }
+    if (enemy._sideWaypoint && distance(enemy, enemy._sideWaypoint) > 0.5) return enemy._sideWaypoint;
+    if (this.elapsed < (enemy._sideRouteAt ?? 0)) return enemy;
+    enemy._sideRouteAt = this.elapsed + 0.75;
+    // A pursuit may draw a defender behind a building. Find a clear two-leg
+    // return route around it instead of repeatedly pushing against its wall.
+    let waypoint = null, bestDistance = Infinity;
+    for (const radius of [4, 8, 12, 16, 20, 24]) for (let direction = 0; direction < 32; direction++) {
+      const angle = direction * Math.PI / 16;
+      const candidate = { x: point.x + Math.cos(angle) * radius, z: point.z + Math.sin(angle) * radius };
+      const routeDistance = distance(enemy, candidate) + radius;
+      if (routeDistance >= bestDistance || !sideEventPathClear(candidate, point) || !sideEventPathClear(enemy, candidate)) continue;
+      waypoint = candidate; bestDistance = routeDistance;
+    }
+    enemy._sideWaypoint = waypoint;
+    return waypoint ?? enemy;
   }
 
   spawnEnemy(type, x, z, zone, shrine = null) {
@@ -406,7 +547,9 @@ export class Game {
     }
     this.resetAbandonedRound();
     if (this.phase !== 'voyage' && this.phase !== 'finale') return;
+    this.tickSideEvents(false);
     for (const e of [...this.enemies.values()]) this.tickEnemy(e, dt);
+    this.tickSideEvents();
     for (const shrine of this.shrines) {
       if (shrine.status !== 'active') continue;
       shrine.remaining = [...this.enemies.values()].filter(e => e._shrine === shrine.id).length;
@@ -426,21 +569,33 @@ export class Game {
 
   tickEnemy(e, dt) {
     const t = this.elapsed;
+    if (!this.enemies.has(e.id)) return;
+    const defense = e._sideEvent ? this.sideEvents.find(event => event.id === e._sideEvent) : null;
+    const supplies = defense ? SIDE_EVENTS.find(point => point.id === defense.id) : null;
+    if (e._sideEvent && (defense?.status !== 'active' || defense.integrity <= 0)) return;
     if (e.state === 'windup') {
       if (t + 1e-8 < e.attackAt) return;
       const a = e._attack;
       for (const p of this.players.values()) {
         if (!p.online || p.knockedUntil || p.mode !== 'ground') continue;
-        if (e._camp && inSafeLanding(p)) continue;
+        if ((e._camp || e._sideEvent) && inSafeLanding(p)) continue;
         if (distance(p, a) < a.radius + 0.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3 && canReach(e, p)) this.damagePlayer(p, e.type === 'tempest' ? 22 : e.type === 'spitter' ? 12 : 10, e.id);
       }
       this.emit({ kind: 'splash', x: a.x, y: heightAt(a.x, a.z) + 0.1, z: a.z, radius: a.radius });
+      if (a.sideEvent === defense?.id && supplies && distance(e, supplies) <= 3 && !inSafeLanding(e) &&
+        Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
+        defense.integrity = Math.max(0, defense.integrity - 8);
+      }
       e.state = 'attack'; e._endAttack = t + 0.3;
-      e._nextAttack = t + (e.type === 'tempest' ? 1.2 : 1.65);
+      e._nextAttack = t + (a.sideEvent || e.type === 'tempest' ? 1.2 : 1.65);
       return;
     }
     if (e.state === 'attack') { if (t < e._endAttack) return; e.state = 'idle'; }
-    const targets = [...this.players.values()].filter(p => p.online && !p.knockedUntil && p.mode === 'ground' && !(e._camp && inSafeLanding(p)) && distance(p, e._home) < (e.type === 'tempest' ? 55 : e._shrine ? 38 : e._camp ? 18 : 24) && canReach(e, p));
+    const targets = [...this.players.values()].filter(p => p.online && p.hp > 0 && !p.knockedUntil && p.mode === 'ground' &&
+      !((e._camp || e._sideEvent) && inSafeLanding(p)) &&
+      (supplies ? distance(p, supplies) < supplies.radius + 8 && distance(p, e) < 18 :
+        distance(p, e._home) < (e.type === 'tempest' ? 55 : e._shrine ? 38 : e._camp ? 18 : 24)) &&
+      canReach(e, p) && (!supplies || sideEventPathClear(e, p)));
     targets.sort((a, b) => distance(a, e) - distance(b, e));
     const target = targets[0];
     if (e.type === 'tempest' && target && t >= e._summonAt) {
@@ -454,7 +609,17 @@ export class Game {
         this.emit({ kind: 'notice', message: 'Tiny tide crabs have joined the splash party!' });
       }
     }
-    let destination = target ?? e._home;
+    let destination = target ?? (supplies ? this.sideEventDestination(e, supplies) : e._home);
+    if (!target && supplies && distance(e, supplies) <= 2.8 && Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
+      e.yaw = Math.atan2(-(supplies.x - e.x), -(supplies.z - e.z));
+      if (t >= e._nextAttack) {
+        e._attack = { x: supplies.x, z: supplies.z, radius: e.attackRadius, sideEvent: defense.id };
+        e.state = 'windup'; e.attackAt = t + 0.8;
+        this.emit({ kind: 'telegraph', id: e.id, x: supplies.x, y: heightAt(supplies.x, supplies.z) + 0.08,
+          z: supplies.z, radius: e.attackRadius, duration: 0.8, style: e.type === 'spitter' ? 'splash' : 'swipe' });
+      } else e.state = 'idle';
+      return;
+    }
     if (!target && e._camp) {
       const angle = e._patrolIndex * Math.PI * 2 / 3 + Number(e.id.split('-')[1]) * 0.7;
       destination = { x: e._home.x + Math.cos(angle) * 2.4, z: e._home.z + Math.sin(angle) * 2.4 };
@@ -478,7 +643,7 @@ export class Game {
       if ((ranged && d < 13) || (!ranged && d < (e.type === 'tempest' ? 4.5 : 1.8))) { e.state = 'idle'; return; }
     }
     if (d < 0.5) { e.state = 'idle'; return; }
-    e.state = target ? 'chase' : 'idle';
+    e.state = target || supplies ? 'chase' : 'idle';
     const speed = !target && e._camp ? 1.15 : e.type === 'tempest' ? 3 : e.type === 'spitter' ? 2.7 : 3.6;
     if (!target) e.yaw = Math.atan2(-(destination.x - e.x), -(destination.z - e.z));
     const previous = { x: e.x, z: e.z };
@@ -486,7 +651,7 @@ export class Game {
     e.z += (destination.z - e.z) / d * Math.min(d, speed * dt);
     e.y = heightAt(e.x, e.z);
     resolveWorldCollision(e, e.radius * 0.7);
-    if (e._camp && inSafeLanding(e)) {
+    if ((e._camp || e._sideEvent) && inSafeLanding(e)) {
       // Reject this step, so a wall beside the boundary cannot push a guard
       // back into the protected area after a radial correction.
       e.x = previous.x; e.z = previous.z;
@@ -510,6 +675,7 @@ export class Game {
     return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
       players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
+      sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
       pings: this.pings.map(p => ({ ...p })), stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };

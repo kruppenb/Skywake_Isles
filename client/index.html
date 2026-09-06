@@ -55,14 +55,23 @@
       <p class="lobby-controls"><kbd>WASD</kbd> walk the deck <span>·</span> Click the world to look around</p>
     </section>
     <section id="hud" class="hud" aria-label="Game information" hidden>
-      <div class="quest-panel">
-        <div class="quest-heading"><span class="quest-star" aria-hidden="true">✦</span><span id="quest-region">Sunwake Strand</span></div>
-        <h2 id="quest-title">Jump from the ship</h2>
-        <p id="quest-detail">Press Space to open your glider.</p>
-        <div class="quest-progress"><div class="shard-slots" id="shard-slots" aria-label="0 of 3 compass shards"><span>◆</span><span>◆</span><span>◆</span></div><span id="pearl-count">0 pearls</span></div>
-        <div id="shrine-progress" class="shrine-progress" hidden><div><span id="shrine-label">Restoring the compass…</span><strong id="shrine-percent">0%</strong></div><progress id="shrine-meter" max="1" value="0"></progress></div>
+      <div class="quest-crew-column">
+        <div class="quest-panel">
+          <div class="quest-heading"><span class="quest-star" aria-hidden="true">✦</span><span id="quest-region">Sunwake Strand</span></div>
+          <h2 id="quest-title">Jump from the ship</h2>
+          <p id="quest-detail">Press Space to open your glider.</p>
+          <div class="quest-progress"><div class="shard-slots" id="shard-slots" aria-label="0 of 3 compass shards"><span>◆</span><span>◆</span><span>◆</span></div><span id="pearl-count">0 pearls</span></div>
+          <div id="shrine-progress" class="shrine-progress" hidden><div><span id="shrine-label">Restoring the compass…</span><strong id="shrine-percent">0%</strong></div><progress id="shrine-meter" max="1" value="0"></progress></div>
+          <section id="side-event-status" class="side-event-status" aria-labelledby="side-event-heading side-event-name" hidden>
+            <div id="side-event-heading" class="side-event-heading"><span class="defense-shield" aria-hidden="true"></span> Optional event</div>
+            <h3 id="side-event-name"></h3>
+            <p id="side-event-detail"></p>
+            <div id="side-event-supplies" class="side-event-supplies" hidden><div><span>Supplies</span><strong id="side-event-percent">100%</strong></div><progress id="side-event-meter" max="100" value="100" aria-label="Supplies integrity"></progress></div>
+            <p id="side-event-hint" class="side-event-hint"></p>
+          </section>
+        </div>
+        <ul id="crew-hud" class="crew-hud" aria-label="Crew health"></ul>
       </div>
-      <ul id="crew-hud" class="crew-hud" aria-label="Crew health"></ul>
       <div id="compass" class="compass" aria-label="Compass"><div id="compass-strip" class="compass-strip"></div><span class="compass-needle" aria-hidden="true">▼</span></div>
       <button id="minimap-button" class="minimap-wrap" type="button" aria-label="Open island map (M)"><canvas id="minimap" width="220" height="220"></canvas><span id="minimap-caption">Island map <kbd>M</kbd></span></button>
       <div id="objective-marker" class="objective-marker" hidden><span>◆</span><strong></strong></div>
@@ -95,9 +104,9 @@
     <div id="toast-stack" class="toast-stack" role="status" aria-live="polite" aria-atomic="false"></div>
     <section id="map-overlay" class="modal map-modal" role="dialog" aria-modal="true" aria-labelledby="map-title" hidden>
       <div class="map-panel"><div class="map-heading"><div><span class="panel-kicker">Your shared adventure</span><h2 id="map-title">Chart the isles.</h2></div><button id="close-map" class="icon-button" type="button" aria-label="Close island map">✕</button></div>
-      <div class="map-content"><canvas id="large-map" width="750" height="650" aria-label="Island chart showing regions, walking paths, buildings, eight named places, compass shrines, lighthouse, and your crew" aria-describedby="places-count"></canvas>
+      <div class="map-content"><canvas id="large-map" width="750" height="650" aria-label="Island chart showing regions, walking paths, buildings, eight named places, optional defenses, compass shrines, lighthouse, and your crew" aria-describedby="places-count"></canvas>
       <aside class="map-places" aria-labelledby="places-count"><span class="map-journal-kicker">Your voyage journal</span><h3 id="places-count">Places discovered 0 / 8</h3><p>Follow the paths and visit on foot.</p><ul id="places-list" aria-label="Your discovered places this voyage"></ul><p class="map-journal-note">A fresh chart for every voyage.</p></aside></div>
-      <div class="map-legend"><span><b class="legend-diamond">◆</b> Compass shard</span><span><b>✦</b> Lighthouse</span><span><b>●</b> Your crew</span><span><b class="legend-place">○</b> Places</span><span><b class="legend-path" aria-hidden="true"></b> Walking paths</span><span><b class="legend-door" aria-hidden="true"></b> Open doorway</span><span><kbd>G</kbd> Share your location</span></div><p>Collect the three shards in any order. Gold beams guide you to each shrine.</p></div>
+      <div class="map-legend"><span><b class="legend-diamond">◆</b> Compass shard</span><span><b>✦</b> Lighthouse</span><span><b class="defense-shield" aria-hidden="true"></b> Optional defense</span><span><b>●</b> Your crew</span><span><b class="legend-place">○</b> Places</span><span><b class="legend-path" aria-hidden="true"></b> Walking paths</span><span><b class="legend-door" aria-hidden="true"></b> Open doorway</span><span><kbd>G</kbd> Share your location</span></div><p>Collect the three shards in any order. Gold beams guide you to each shrine. Cyan supplies offer optional crab defenses.</p></div>
     </section>
     <section id="pause-overlay" class="modal" aria-labelledby="pause-title" hidden>
       <div class="panel pause-panel"><span class="panel-kicker">Take a breather</span><h2 id="pause-title">Captain’s quarters</h2><p>Your crew’s adventure continues while this menu is open.</p><button id="resume-button" class="primary" type="button">Back to the adventure</button>

@@ -18,3 +18,25 @@
 @media(max-width:1050px){.loadout{width:450px;right:22px;bottom:24px}.player-hud{width:280px}.loadout .weapon-slot{font-size:9px}.loadout .weapon-icon{width:53px}.look-hint{bottom:163px;right:22px}.discovery-notice{bottom:184px}}
 @media(max-width:800px){.loadout{width:calc(100vw - 30px);right:15px;bottom:15px}.loadout .weapon-slot{min-height:69px}.loadout .weapon-icon{height:23px;width:52px;margin:1px 0 3px}.player-hud{bottom:154px;left:15px;width:255px}.loadout .equipped-line{padding:5px 9px}.loadout .ammo>strong{font-size:21px}.loadout .ammo>span{max-width:none}.interact-hint{bottom:255px;font-size:12px;padding:9px 12px}.look-hint{display:none}.discovery-notice{bottom:252px}.ship-banner{bottom:258px}}
 @media(max-width:420px){.loadout .weapon-slot{font-size:8px}.loadout .weapon-rarity{font-size:8px}.loadout .empty .weapon-rarity{font-size:7px}.loadout .weapon-icon{width:46px}#equipped-name{font-size:10px}.loadout .ammo{gap:6px}.loadout .ammo>span{font-size:8px}}
+
+/* Optional defenses share the quest card; crew health follows its real height. */
+.quest-crew-column{position:absolute;top:91px;left:28px;width:305px;max-height:calc(100% - 300px);display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.quest-crew-column>.quest-panel{position:static;width:100%;flex:none}
+.quest-crew-column>.crew-hud{position:static;min-height:0;flex:0 1 auto;overflow:auto;pointer-events:auto;scrollbar-width:thin;scrollbar-color:#79f5ff66 transparent}
+.quest-crew-column>.crew-hud:empty{display:none}
+.side-event-status{margin-top:12px;padding-top:11px;border-top:1px solid #79f5ff55}
+.side-event-heading{display:flex;align-items:center;gap:6px;color:#79f5ff;font-size:10px;font-weight:900}
+.defense-shield{display:inline-block;width:12px;height:14px;background:#79f5ff;clip-path:polygon(8% 0,92% 0,85% 63%,50% 100%,15% 63%);vertical-align:-2px}
+.side-event-status h3{font-size:14px;line-height:1.25;color:var(--cream);margin:6px 0}
+.quest-panel .side-event-status p{font-size:11px;line-height:1.4;margin:0 0 7px}
+.quest-panel .side-event-status .side-event-hint{font-size:10px;color:#a5f8ff;margin:5px 0 0}
+.side-event-supplies>div{display:flex;justify-content:space-between;font-size:10px;margin:8px 0 5px;color:#d9f9fa}
+.side-event-supplies progress{width:100%;height:6px;accent-color:#79f5ff}
+.side-event-supplies progress::-webkit-progress-value{background:#79f5ff}.side-event-supplies progress::-moz-progress-bar{background:#79f5ff}
+.side-event-status[data-status=failed] h3{color:#c9e5ec}
+.map-legend .defense-shield{background:#79f5ff;filter:drop-shadow(0 0 1px #123c51)}
+@media(min-width:1700px){.quest-crew-column{width:325px}}
+@media(max-width:1050px){.quest-crew-column{width:250px}}
+@media(max-width:800px){.quest-crew-column{max-height:calc(100% - 381px)}}
+@media(max-width:720px){.quest-crew-column{top:71px;left:14px;width:215px;max-height:calc(100% - 361px);gap:9px}.side-event-status{margin-top:9px;padding-top:8px}.side-event-status h3{font-size:12px}.quest-panel .side-event-status p{font-size:10px}.quest-panel .side-event-status .side-event-hint{font-size:9px}.quest-crew-column>.crew-hud{max-width:200px}}
+@media(max-height:700px){.quest-crew-column{gap:7px}.quest-crew-column .quest-panel{padding:9px 12px}.quest-crew-column .quest-panel h2{font-size:16px;margin:4px 0}.quest-crew-column .quest-panel p{font-size:10px;line-height:1.3;margin-bottom:6px}.quest-crew-column .side-event-status{margin-top:7px;padding-top:7px}.quest-crew-column .side-event-status h3{font-size:12px;margin:5px 0}.quest-crew-column .shrine-progress{margin-top:7px;padding-top:7px}.quest-crew-column .crew-hud{gap:4px}.quest-crew-column .crew-hud li{padding-top:3px;padding-bottom:3px}}

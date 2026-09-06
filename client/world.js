@@ -7,6 +7,8 @@ import { hasWorldLineOfSight } from '../shared/collision.js';
 import { cameraTravel } from './camera.js';
 import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
+import { SIDE_EVENTS, SIDE_EVENT_COLOR } from '../shared/side-events.js';
+import { createObjectiveMarker, updateObjectiveMarker } from './objective-markers.js';
 
 const TAU = Math.PI * 2;
 const COLORS = { beach: '#e6d394', jungle: '#5aab70', volcano: '#c08d67', moon: '#839fa0', haven: '#81b57a' };
@@ -44,10 +46,35 @@ function makeBeam(color, height = 12, radius = .40) {
   const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
   const column = new THREE.Mesh(new THREE.CylinderGeometry(radius * .6, radius, height, 12, 1, true), material);
   column.position.y = height / 2; group.add(column);
-  const ring = meshRing(1.12, .11, color, .8); ring.position.y = .08; group.add(ring);
+  const ring = meshRing(1.12, .22, color, .95); ring.position.y = .16; ring.material.toneMapped = false; group.add(ring);
   const star = new THREE.Mesh(new THREE.OctahedronGeometry(.25, 0), new THREE.MeshBasicMaterial({ color }));
   star.position.y = 2.0; group.add(star);
   group.userData = { column, ring, star, baseHeight: height };
+  return group;
+}
+
+function buildDefenseSupplies(palette, event) {
+  const group = new THREE.Group(); group.name = 'supplies-' + event.id;
+  group.position.set(event.x, heightAt(event.x, event.z), event.z);
+  const batch = new GeoBatch(palette);
+  const crate = (x, y, z, size) => {
+    batch.add('box', [x, y + size * .42, z], [size * .9, size * .84, size * .8], [0, 0, 0], '#c49864');
+    for (const h of [.08, .74]) batch.add('box', [x, y + size * h, z], [size * .96, size * .1, size * .86], [0, 0, 0], '#94633f');
+    for (const side of [-1, 1]) {
+      batch.line([x - size * .38, y + size * .12, z + side * size * .42], [x + size * .38, y + size * .7, z + side * size * .42], size * .045, '#94633f');
+      batch.add('box', [x, y + size * .44, z + side * size * .425], [size * .16, size * .65, size * .025], [0, 0, 0], SIDE_EVENT_COLOR);
+    }
+  };
+  crate(-.38, 0, .02, .85); crate(.38, 0, .08, .72); crate(-.3, .715, .02, .6);
+  batch.line([.62, 0, -.34], [.62, 1.58, -.34], .035, '#123c51');
+  group.add(batch.mesh());
+  const pennantGeometry = new THREE.BufferGeometry();
+  pennantGeometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    .65, 1.53, -.34, 1.15, 1.53, -.34, 1.03, 1.32, -.34, 1.15, 1.1, -.34, .65, 1.1, -.34,
+  ], 3));
+  pennantGeometry.setIndex([0, 1, 2, 0, 2, 4, 4, 2, 3]);
+  pennantGeometry.computeBoundingSphere();
+  group.add(new THREE.Mesh(pennantGeometry, new THREE.MeshBasicMaterial({ color: SIDE_EVENT_COLOR, side: THREE.DoubleSide, toneMapped: false })));
   return group;
 }
 
@@ -293,7 +320,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const settlements = buildSettlements(palette), reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
   scene.add(settlements.group);
   const ship = buildGalleon(palette); scene.add(ship.group);
-  const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), pingModels = new Map(), dropModels = new Map();
+  const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
   let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
@@ -314,15 +341,25 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   }
   for (const shrine of SHRINES) {
     const color = shrine.color || REGIONS.find(r => r.id === shrine.region)?.accent || '#f8d778';
-    const model = buildShrine(palette, color), beam = makeBeam(color, 18, .7), ring = meshRing(8.9, .14, color, .3);
+    const model = buildShrine(palette, color), beam = makeBeam('#ffd16c', 18, .7);
+    const availableRing = createObjectiveMarker({ ...shrine, radius: 4, name: 'shrine-available-' + shrine.id });
+    const activeRing = createObjectiveMarker({ ...shrine, radius: 9, name: 'shrine-active-' + shrine.id });
     model.group.position.set(shrine.x, heightAt(shrine.x, shrine.z), shrine.z);
-    beam.position.copy(model.group.position); ring.position.copy(model.group.position); ring.position.y += .065; ring.visible = false;
-    scene.add(model.group, beam, ring); shrineModels.set(shrine.id, { ...model, beam, ring });
+    beam.position.copy(model.group.position); activeRing.visible = false;
+    scene.add(model.group, beam, availableRing, activeRing); shrineModels.set(shrine.id, { ...model, beam, availableRing, activeRing });
   }
   const beaconModel = buildShrine(palette, '#ffd36e'), beaconBeam = makeBeam('#ffe292', 35, .85);
   beaconModel.group.position.set(BEACON.x, heightAt(BEACON.x, BEACON.z), BEACON.z);
   beaconBeam.position.copy(beaconModel.group.position); scene.add(beaconModel.group, beaconBeam);
-  const beaconHalo = meshRing(3.2, .11, '#ffe6a1', .70); beaconHalo.position.copy(beaconModel.group.position); beaconHalo.position.y += .1; scene.add(beaconHalo);
+  const beaconHalo = createObjectiveMarker({ ...BEACON, radius: 4, name: 'beacon-interaction-ring' }); scene.add(beaconHalo);
+  for (const event of SIDE_EVENTS) {
+    const group = buildDefenseSupplies(palette, event), beam = makeBeam(SIDE_EVENT_COLOR, 5.5, .19);
+    const availableRing = createObjectiveMarker({ ...event, radius: event.interactionRange, coreColor: SIDE_EVENT_COLOR, haloColor: SIDE_EVENT_COLOR, name: 'side-event-available-' + event.id });
+    const activeRing = createObjectiveMarker({ ...event, radius: event.radius, coreColor: SIDE_EVENT_COLOR, haloColor: SIDE_EVENT_COLOR, name: 'side-event-active-' + event.id });
+    beam.name = 'side-event-beam-' + event.id; beam.position.copy(group.position); beam.userData.star.visible = false;
+    group.visible = beam.visible = availableRing.visible = activeRing.visible = false;
+    scene.add(group, beam, availableRing, activeRing); sideEventModels.set(event.id, { group, beam, availableRing, activeRing });
+  }
   const lantern = new THREE.Mesh(new THREE.SphereGeometry(.8, 10, 8), new THREE.MeshBasicMaterial({ color: '#fff1b0' }));
   lantern.position.set(BEACON.x, heightAt(BEACON.x, BEACON.z - 24) + 26, BEACON.z - 24); scene.add(lantern);
   const lighthouseRay = new THREE.Mesh(new THREE.ConeGeometry(8, 62, 20, 1, true), new THREE.MeshBasicMaterial({ color: '#fff1be', transparent: true, opacity: .065, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -564,6 +601,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     for (const [id, model] of enemies) if (!seen.has(id)) { disposeObject(model.group, preserve); disposeObject(model.hpGroup, preserve); enemies.delete(id); }
   }
   function updateObjectives(state, time) {
+    const reducedMotion = reducedMotionPreference.matches, objectiveTime = reducedMotion ? 0 : time;
     const seenDrops = new Set();
     for (const drop of state?.drops || []) {
       if (!WEAPONS[drop.weapon]) continue;
@@ -596,17 +634,26 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     }
     for (const shrine of SHRINES) {
       const model = shrineModels.get(shrine.id), status = state?.shrines?.find(s => s.id === shrine.id);
-      model.animate(time, status); model.beam.visible = status?.status !== 'cleared';
-      model.ring.visible = status?.status === 'active';
-      model.ring.material.opacity = .24 + Math.sin(time * 2) * .06;
-      model.ring.scale.setScalar(status?.charge ? .5 + status.charge * .5 : 1);
+      const active = status?.status === 'active', cleared = status?.status === 'cleared';
+      model.animate(objectiveTime, status); model.beam.visible = !cleared;
+      updateObjectiveMarker(model.availableRing, { visible: !active && !cleared, time, reducedMotion });
+      updateObjectiveMarker(model.activeRing, { visible: active, active: true, time, reducedMotion });
       model.beam.userData.star.visible = false;
-      model.beam.userData.column.material.opacity = status?.status === 'active' ? .21 : .105;
+      model.beam.userData.column.material.opacity = active ? .21 : .105;
+    }
+    for (const event of SIDE_EVENTS) {
+      const model = sideEventModels.get(event.id), status = (state?.sideEvents || []).find(s => s.id === event.id);
+      const voyage = state?.phase === 'voyage', active = status?.status === 'active', available = status?.status === 'available';
+      model.group.visible = voyage;
+      model.beam.visible = voyage && (active || available);
+      model.beam.userData.column.material.opacity = active ? .19 : .1;
+      updateObjectiveMarker(model.availableRing, { visible: voyage && available, time, reducedMotion });
+      updateObjectiveMarker(model.activeRing, { visible: voyage && active, active: true, time, reducedMotion });
     }
     const shards = Array.isArray(state?.shards) ? state.shards.length : (state?.shards || 0), unlocked = shards >= 3;
-    beaconModel.animate(time, null); beaconModel.gem.rotation.y = -time * .3;
+    beaconModel.animate(objectiveTime, null); beaconModel.gem.rotation.y = -objectiveTime * .3;
     beaconBeam.visible = unlocked || !state || state.phase === 'lobby'; beaconBeam.userData.star.visible = false;
-    beaconHalo.material.opacity = unlocked ? .7 + Math.sin(time * 3) * .2 : .24;
+    updateObjectiveMarker(beaconHalo, { active: unlocked, muted: !unlocked, time, reducedMotion });
     lantern.scale.setScalar(state?.phase === 'victory' ? 1.6 : 1 + Math.sin(time * 1.3) * .07);
     lighthousePivot.rotation.y = time * .20; lighthouseRay.material.opacity = state?.phase === 'victory' ? .13 : .04;
     const seen = new Set();
@@ -755,7 +802,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   function dispose() {
     if (disposed) return; disposed = true;
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
-    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
+    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
   resize(); update(0, null, null, { menu: true, time: 0 });
   return { scene, camera, renderer, update, render, resize, setQuality, dispose, handleEvent, project, projectPlayer, aimRay, getStats };
