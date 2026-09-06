@@ -86,6 +86,8 @@ Names and colors are saved only in each browser. Aggregate wins, voyages, and be
 
 Node.js 22 or later is required. Dependencies are pinned and served locally; there is no bundler, CDN, or external runtime download. The browser loads the shared Old Watch library and Windward Farm's smaller geometry kit from the local game server, with visible procedural scenery while assets load. See [ENVIRONMENT_PIPELINE.md](docs/ENVIRONMENT_PIPELINE.md) for asset regeneration, shared ownership, validation and the remaining regional rollout.
 
+Environment progress and the next area are tracked in [ENVIRONMENT_ROLLOUT.md](docs/ENVIRONMENT_ROLLOUT.md). With this repository open, say **"upgrade next zone"** to resume one milestone in a fresh window; the tracked handoff supplies the context.
+
 ```powershell
 npm ci
 npm start

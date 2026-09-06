@@ -22,3 +22,15 @@ The user has authorized this completion workflow for changes in this repository:
 These commit, push, and local deployment steps are standing user instructions;
 do not ask for routine confirmation again. Required tool/sandbox approvals
 still apply. Never commit credentials, local saves, dependencies, or QA output.
+
+# Environment rollout shortcut
+
+When the user says **"upgrade next zone"**, read
+[docs/ENVIRONMENT_ROLLOUT.md](docs/ENVIRONMENT_ROLLOUT.md) as the authoritative
+status and handoff, then follow its one-milestone resume workflow and the
+detailed [environment pipeline](docs/ENVIRONMENT_PIPELINE.md). Inspect current
+repository, remote and deployment state first. Resume in-progress work before
+starting the first planned milestone. Complete and verify that one milestone,
+update the tracked handoff and evidence, and follow the completion workflow
+above. Do not automatically start the following milestone. This shortcut must
+work in a fresh window without previous chat history or local QA helpers.
