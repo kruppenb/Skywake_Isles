@@ -1,0 +1,50 @@
+import * as THREE from 'three';
+import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
+import { windwardFarmWeight } from '../shared/windward-farm.js';
+
+// Profiles are immutable color strings/scalars. Each frame is evaluated from
+// the captured island baseline, never from another area's last frame.
+export const ENVIRONMENT_PROFILES = Object.freeze({
+  oldWatch: Object.freeze({ sky: '#abc6cc', skyStrength: .8, fog: '#b0c8ca', near: 72, far: 340, skyLight: '#d2dce1', groundLight: '#77765e', ambient: 1.5, sunColor: '#f5ddba', sunIntensity: 2.25 }),
+  windwardFarm: Object.freeze({ sky: '#b9cecd', skyStrength: .8, fog: '#c0cebf', near: 88, far: 385, skyLight: '#e0dfcf', groundLight: '#858063', ambient: 1.7, sunColor: '#f8e2be', sunIntensity: 2.4 }),
+});
+
+export function environmentWeights(player, { oldWatchReady = false, farmReady = false } = {}) {
+  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0 };
+  const oldWatch = oldWatchReady ? (farmReady ? oldWatchRadialWeight : oldWatchWeight)(player.x, player.z) : 0;
+  const windwardFarm = farmReady ? windwardFarmWeight(player.x, player.z) : 0;
+  const total = oldWatch + windwardFarm, scale = total > 1 ? 1 / total : 1;
+  return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale };
+}
+
+export function createEnvironmentLighting({ scene, hemisphere = null, sun = null }) {
+  const baseline = { sky: scene.background?.isColor ? scene.background.clone() : null, fog: scene.fog?.color.clone(), near: scene.fog?.near, far: scene.fog?.far,
+    skyLight: hemisphere?.color.clone(), groundLight: hemisphere?.groundColor.clone(), ambient: hemisphere?.intensity, sunColor: sun?.color.clone(), sunIntensity: sun?.intensity };
+  const profiles = Object.fromEntries(Object.entries(ENVIRONMENT_PROFILES).map(([name, value]) => [name, { ...value,
+    ...Object.fromEntries(['sky', 'fog', 'skyLight', 'groundLight', 'sunColor'].map(key => [key, new THREE.Color(value[key])])),
+  }]));
+  let disposed = false;
+  function color(target, key, weights) {
+    if (!target || !baseline[key]) return;
+    target.copy(baseline[key]);
+    for (const [name, profile] of Object.entries(profiles)) {
+      const weight = weights[name] * (key === 'sky' ? profile.skyStrength : 1);
+      target.r += (profile[key].r - baseline[key].r) * weight;
+      target.g += (profile[key].g - baseline[key].g) * weight;
+      target.b += (profile[key].b - baseline[key].b) * weight;
+    }
+  }
+  function scalar(key, weights) {
+    return baseline[key] + Object.entries(profiles).reduce((sum, [name, profile]) => sum + (profile[key] - baseline[key]) * weights[name], 0);
+  }
+  function apply(weights) {
+    if (scene.background?.isColor) color(scene.background, 'sky', weights);
+    if (scene.fog) { color(scene.fog.color, 'fog', weights); scene.fog.near = scalar('near', weights); scene.fog.far = scalar('far', weights); }
+    if (hemisphere) { color(hemisphere.color, 'skyLight', weights); color(hemisphere.groundColor, 'groundLight', weights); hemisphere.intensity = scalar('ambient', weights); }
+    if (sun) { color(sun.color, 'sunColor', weights); sun.intensity = scalar('sunIntensity', weights); }
+  }
+  return { update(player, ready) { if (!disposed) apply(environmentWeights(player, ready)); }, dispose() {
+    if (disposed) return;
+    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0 }); disposed = true;
+  } };
+}

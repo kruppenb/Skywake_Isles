@@ -20,8 +20,13 @@ export const OLD_WATCH_PROPS = [
 
 export function oldWatchWeight(x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
+  return oldWatchRadialWeight(x, z) * oldWatchFarmClearance(x, z);
+}
+
+export function oldWatchRadialWeight(x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
   const t = Math.max(0, Math.min(1, (OLD_WATCH.radius - Math.hypot(x - OLD_WATCH.x, z - OLD_WATCH.z)) / 10));
-  return t * t * (3 - 2 * t) * oldWatchFarmClearance(x, z);
+  return t * t * (3 - 2 * t);
 }
 
 export function oldWatchFarmClearance(x, z) {

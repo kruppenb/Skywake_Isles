@@ -4,6 +4,8 @@ Skywake Isles is an original game created for this project with Codex. The islan
 
 The Old Watch pilot's masonry, timber barracks, slate roof, boulders, fir trees, grass, ferns and soil are original Skywake Isles assets generated offline from `tools/build-old-watch.py`. Their mesh shapes, UVs, surface textures and weathering patterns were authored for this project using Blender and deterministic procedural functions; no commercial game assets, third-party texture packs, scans or external model downloads were used. The editable source, exported GLB and material manifest are included in the repository. Blender is an authoring tool and is not required by the running game. See `docs/ENVIRONMENT_PIPELINE.md` for regeneration and extension instructions.
 
+Windward Farm's tapered plaster-and-stone windmill, framed rotating sails, timber-and-stone barn, russet roof tiles, wheat, leafy vegetables, split-rail fences and tied hay are original models from `tools/build-windward-farm.py`. Their UVs and vertex weathering use the same authored material language as Old Watch, with warm farm colors. Shared offline mesh/material/export helpers live in `tools/environment_kit.py`; the farm GLB contains geometry and named material slots, with no copied texture images. The browser binds those slots to the original Old Watch material library and reuses its stones and ground plants. No additional external art sources or licenses were introduced.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |

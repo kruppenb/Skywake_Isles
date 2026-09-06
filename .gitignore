@@ -1,6 +1,7 @@
 node_modules/
 data/
 .qa/
+tools/__pycache__/
 screenshots/
 *.log
 .DS_Store

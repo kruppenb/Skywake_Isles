@@ -54,7 +54,7 @@ Branching footpaths lead to eight places with their own daily bustle: Saltwind H
 
 Visit each place on foot to add it to your voyage journal. Press M for named destinations, building footprints, walking paths, and your personal discovery count. Discoveries begin afresh each voyage. Treasure tucked around the settlements still belongs to the whole crew, and the three shrines remain your shared objective.
 
-Northwest of Windward Farm, Old Watch is the weathered environment pilot: mossy masonry, aged timber, pines, and worn stone paths surround its tower and furnished barracks.
+Northwest of Windward Farm, Old Watch establishes the weathered environment style: mossy masonry, aged timber, pines, and worn stone paths surround its tower and furnished barracks. That material quality continues down the walking trail to Windward Farm's worn plaster windmill, turning timber sails, russet barn roof, crop rows and field edges. The barn retains its furnished interior, chest, paired entrances and roof cutaway.
 
 Open chests for shared pearls, nearby healing, and one random gun. Its floating model and glow show where it landed; approach and press E again to pick it up. Guns roll Common, Uncommon, Rare, Epic, or Legendary rarity, shown by both name and color. Better rarities increase damage. Your five slots hold one of each gun; higher rarity loot upgrades a slot and equips it. Equal or lower duplicates stay for another crewmate. Everyone shares pearls, while the first pirate to claim a gun keeps it.
 
@@ -84,7 +84,7 @@ Names and colors are saved only in each browser. Aggregate wins, voyages, and be
 
 ## Run without Docker and verify
 
-Node.js 22 or later is required. Dependencies are pinned and served locally; there is no bundler, CDN, or external runtime download. The browser loads Old Watch's GLB assets from the local game server. See [ENVIRONMENT_PIPELINE.md](docs/ENVIRONMENT_PIPELINE.md) for asset regeneration and extending the pilot.
+Node.js 22 or later is required. Dependencies are pinned and served locally; there is no bundler, CDN, or external runtime download. The browser loads the shared Old Watch library and Windward Farm's smaller geometry kit from the local game server, with visible procedural scenery while assets load. See [ENVIRONMENT_PIPELINE.md](docs/ENVIRONMENT_PIPELINE.md) for asset regeneration, shared ownership, validation and the remaining regional rollout.
 
 ```powershell
 npm ci

@@ -1,37 +1,14 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { heightAt, seededRandom, CHESTS, OBSTACLES, WORLD_RADIUS } from '../shared/world.js';
+import { heightAt, seededRandom, CHESTS, OBSTACLES } from '../shared/world.js';
 import { BUILDINGS, RESIDENTS, EXPLORATION_TRAILS, trailDistance, buildingLocalPoint, buildingWorldPoint } from '../shared/exploration.js';
 import { OLD_WATCH, OLD_WATCH_PROPS, oldWatchWeight, oldWatchFarmClearance } from '../shared/old-watch.js';
+import { createEnvironmentAssets, disposeOwnedResources } from './environment-assets.js';
+import { renderedHeightAt, TERRAIN_ORIGIN } from './environment-geometry.js';
+export { renderedHeightAt } from './environment-geometry.js';
 
 export const OLD_WATCH_PREFABS = ['watch_tower', 'barracks_base', 'barracks_wall_east', 'barracks_wall_west', 'barracks_wall_front', 'barracks_wall_back', 'barracks_roof', 'ruin_wall', 'rock_a', 'rock_b', 'pine_a', 'pine_b', 'grass_clump', 'fern_clump', 'ground_sample'];
 const TAU = Math.PI * 2;
 const clamp = THREE.MathUtils.clamp;
-const TERRAIN_ORIGIN = -Math.ceil(WORLD_RADIUS + 12);
-
-// Interpolate the exact alternating 2 m triangles used by world.buildTerrain.
-// Sampling only the height function between grid vertices can float plants.
-export function renderedHeightAt(x, z) {
-  const origin = TERRAIN_ORIGIN;
-  const ix = Math.floor((x - origin) / 2), iz = Math.floor((z - origin) / 2);
-  const xx = origin + ix * 2, zz = origin + iz * 2, u = (x - xx) / 2, v = (z - zz) / 2;
-  const a = heightAt(xx, zz), b = heightAt(xx + 2, zz), c = heightAt(xx, zz + 2), d = heightAt(xx + 2, zz + 2);
-  if ((ix + iz) % 2) return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
-  return u >= v ? a + (b - a) * u + (d - b) * v : a + (d - c) * u + (c - a) * v;
-}
-
-function disposeResources(...roots) {
-  const geometries = new Set(), materials = new Set(), textures = new Set(), images = new Set();
-  for (const root of roots) root?.traverse(object => {
-    if (object.geometry) geometries.add(object.geometry);
-    for (const material of !object.material ? [] : Array.isArray(object.material) ? object.material : [object.material]) {
-      materials.add(material);
-      for (const value of Object.values(material)) if (value?.isTexture) { textures.add(value); if (value.source?.data?.close) images.add(value.source.data); }
-    }
-  });
-  geometries.forEach(value => value.dispose()); materials.forEach(value => value.dispose());
-  textures.forEach(value => value.dispose()); images.forEach(value => value.close());
-}
 
 function terrainPatch(material) {
   const positions = [], colors = [], uvs = [], indices = [], count = 28, minX = OLD_WATCH.x - 28, minZ = OLD_WATCH.z - 28;
@@ -59,7 +36,7 @@ function terrainPatch(material) {
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); geometry.setIndex(indices); geometry.computeVertexNormals(); geometry.computeBoundingSphere();
   const surface = material.clone(); surface.vertexColors = true; surface.transparent = true; surface.depthWrite = false;
   surface.polygonOffset = true; surface.polygonOffsetFactor = -1; surface.polygonOffsetUnits = -1;
-  for (const texture of [surface.map, surface.normalMap, surface.roughnessMap]) if (texture) { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.needsUpdate = true; }
+  // The source GLB sampler already repeats. Keep borrowed texture state intact.
   const mesh = new THREE.Mesh(geometry, surface); mesh.name = 'old-watch-earth-and-gravel'; mesh.receiveShadow = true; mesh.renderOrder = 1;
   return mesh;
 }
@@ -165,44 +142,49 @@ export function buildOldWatchKit(gltf, { propSites = [] } = {}) {
   prefabs.ground_sample.traverse(object => { if (object.material?.name === 'ground_earth') groundMaterial = object.material; });
   if (!groundMaterial) throw new Error('Old Watch kit is missing ground_earth');
   const group = new THREE.Group(); group.name = 'old-watch-weathered-pilot';
-  let agedTimber; root.traverse(object => { if (object.material?.name === 'aged_timber') agedTimber = object.material; });
-  const tower = BUILDINGS.find(b => b.id === 'signal-tower'), room = BUILDINGS.find(b => b.id === 'watch-barracks');
-  const floor = heightAt(room.x, room.z);
-  let towerY = renderedHeightAt(tower.x, tower.z);
-  for (let i = 0; i < 12; i++) towerY = Math.max(towerY, renderedHeightAt(tower.x + Math.sin(i / 12 * TAU) * 2.7, tower.z + Math.cos(i / 12 * TAU) * 2.7));
-  const towerObject = placePrefab(prefabs.watch_tower, tower.x, tower.z, tower.yaw, towerY);
-  // Fit the same collision roof height even on the uphill foundation edge.
-  towerObject.scale.y = Math.min(1, (heightAt(tower.x, tower.z) + tower.height - towerY) / 10); group.add(towerObject);
-  group.add(placePrefab(prefabs.barracks_base, room.x, room.z, room.yaw, floor));
-  const walls = new THREE.Group(); walls.name = 'watch-barracks-authored-cutaway-walls';
-  const normals = [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }];
-  ['east', 'west', 'front', 'back'].forEach((face, index) => {
-    const wall = placePrefab(prefabs['barracks_wall_' + face], room.x, room.z, room.yaw, floor); wall.userData.normal = normals[index]; walls.add(wall);
-  });
-  const roof = placePrefab(prefabs.barracks_roof, room.x, room.z, room.yaw, floor); roof.name = 'watch-barracks-authored-cutaway-roof'; group.add(walls, roof);
-  for (const site of propSites.filter(p => p.poiId === 'old-watch')) {
-    if (site.prefab === 'ruin_wall') group.add(placePrefab(prefabs.ruin_wall, site.x, site.z, site.yaw));
-    if (site.prefab === 'lantern') addLantern(group, site, agedTimber);
+  try {
+    let agedTimber; root.traverse(object => { if (object.material?.name === 'aged_timber') agedTimber = object.material; });
+    const tower = BUILDINGS.find(b => b.id === 'signal-tower'), room = BUILDINGS.find(b => b.id === 'watch-barracks');
+    const floor = heightAt(room.x, room.z);
+    let towerY = renderedHeightAt(tower.x, tower.z);
+    for (let i = 0; i < 12; i++) towerY = Math.max(towerY, renderedHeightAt(tower.x + Math.sin(i / 12 * TAU) * 2.7, tower.z + Math.cos(i / 12 * TAU) * 2.7));
+    const towerObject = placePrefab(prefabs.watch_tower, tower.x, tower.z, tower.yaw, towerY);
+    // Fit the same collision roof height even on the uphill foundation edge.
+    towerObject.scale.y = Math.min(1, (heightAt(tower.x, tower.z) + tower.height - towerY) / 10); group.add(towerObject);
+    group.add(placePrefab(prefabs.barracks_base, room.x, room.z, room.yaw, floor));
+    const walls = new THREE.Group(); walls.name = 'watch-barracks-authored-cutaway-walls';
+    const normals = [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }];
+    ['east', 'west', 'front', 'back'].forEach((face, index) => {
+      const wall = placePrefab(prefabs['barracks_wall_' + face], room.x, room.z, room.yaw, floor); wall.userData.normal = normals[index]; walls.add(wall);
+    });
+    const roof = placePrefab(prefabs.barracks_roof, room.x, room.z, room.yaw, floor); roof.name = 'watch-barracks-authored-cutaway-roof'; group.add(walls, roof);
+    for (const site of propSites.filter(p => p.poiId === 'old-watch')) {
+      if (site.prefab === 'ruin_wall') group.add(placePrefab(prefabs.ruin_wall, site.x, site.z, site.yaw));
+      if (site.prefab === 'lantern') addLantern(group, site, agedTimber);
+    }
+    for (const prop of OLD_WATCH_PROPS) {
+      const object = placePrefab(prefabs[prop.prefab], prop.x, prop.z, prop.yaw, heightAt(prop.x, prop.z));
+      const baseHeight = prop.prefab === 'pine_a' ? 8 : prop.prefab === 'pine_b' ? 10 : 1.25;
+      const widthScale = prop.type === 'tree' ? prop.radius / (prop.prefab === 'pine_a' ? .28 : .32) : prop.radius;
+      object.scale.set(widthScale, prop.height / baseHeight, widthScale); object.name = prop.id; group.add(object);
+    }
+    group.add(terrainPatch(groundMaterial));
+    const flagstones = addFlagstones(prefabs.rock_a, group, propSites);
+    const random = seededRandom(80211), grass = [], ferns = [];
+    for (let i = 0; i < 1900; i++) {
+      const a = random() * TAU, r = Math.sqrt(random()) * 26, x = OLD_WATCH.x + Math.sin(a) * r, z = OLD_WATCH.z + Math.cos(a) * r;
+      if (random() > oldWatchWeight(x, z) || !plantClearance(x, z, propSites)) continue;
+      const patch = Math.sin(x * .48 + z * .13) + Math.sin(z * .51 - x * .23);
+      if (patch < -.35 || (r < 9 && random() < .65)) continue;
+      const fern = patch > .95 && random() < .24;
+      (fern ? ferns : grass).push({ x, z, yaw: random() * TAU, scale: fern ? .7 + random() * .5 : .5 + random() * .8 });
+    }
+    const wind = { value: 0 }, foliage = [...foliageInstances(prefabs.grass_clump, grass, group, wind), ...foliageInstances(prefabs.fern_clump, ferns, group, wind)];
+    return { group, walls, roof, foliage, wind, counts: { prefabs: OLD_WATCH_PREFABS.length, collidableProps: OLD_WATCH_PROPS.length, grass: grass.length, ferns: ferns.length, flagstones, foliageMeshes: foliage.length } };
+  } catch (error) {
+    disposeOwnedResources([group], [root]);
+    throw error;
   }
-  for (const prop of OLD_WATCH_PROPS) {
-    const object = placePrefab(prefabs[prop.prefab], prop.x, prop.z, prop.yaw, heightAt(prop.x, prop.z));
-    const baseHeight = prop.prefab === 'pine_a' ? 8 : prop.prefab === 'pine_b' ? 10 : 1.25;
-    const widthScale = prop.type === 'tree' ? prop.radius / (prop.prefab === 'pine_a' ? .28 : .32) : prop.radius;
-    object.scale.set(widthScale, prop.height / baseHeight, widthScale); object.name = prop.id; group.add(object);
-  }
-  group.add(terrainPatch(groundMaterial));
-  const flagstones = addFlagstones(prefabs.rock_a, group, propSites);
-  const random = seededRandom(80211), grass = [], ferns = [];
-  for (let i = 0; i < 1900; i++) {
-    const a = random() * TAU, r = Math.sqrt(random()) * 26, x = OLD_WATCH.x + Math.sin(a) * r, z = OLD_WATCH.z + Math.cos(a) * r;
-    if (random() > oldWatchWeight(x, z) || !plantClearance(x, z, propSites)) continue;
-    const patch = Math.sin(x * .48 + z * .13) + Math.sin(z * .51 - x * .23);
-    if (patch < -.35 || (r < 9 && random() < .65)) continue;
-    const fern = patch > .95 && random() < .24;
-    (fern ? ferns : grass).push({ x, z, yaw: random() * TAU, scale: fern ? .7 + random() * .5 : .5 + random() * .8 });
-  }
-  const wind = { value: 0 }, foliage = [...foliageInstances(prefabs.grass_clump, grass, group, wind), ...foliageInstances(prefabs.fern_clump, ferns, group, wind)];
-  return { group, walls, roof, foliage, wind, counts: { prefabs: OLD_WATCH_PREFABS.length, collidableProps: OLD_WATCH_PROPS.length, grass: grass.length, ferns: ferns.length, flagstones, foliageMeshes: foliage.length } };
 }
 
 function fallbackProps() {
@@ -223,40 +205,40 @@ function fallbackProps() {
   return group;
 }
 
-export function createOldWatch({ scene, settlements, legacyVegetation = null, hemisphere = null, sun = null, load = () => new GLTFLoader().loadAsync('/assets/old-watch/kit.glb') }) {
+export function createOldWatch({ scene, settlements, legacyVegetation = null, assets = null, load }) {
   const fallback = fallbackProps(); scene.add(fallback);
+  const cache = assets ?? createEnvironmentAssets(load ? { load } : {}), lease = cache.acquire('/assets/old-watch/kit.glb');
   let disposed = false, kit = null, gltf = null, status = 'loading', failure = null;
-  const original = { sky: scene.background?.isColor ? scene.background.clone() : null, fog: scene.fog?.color.clone(), near: scene.fog?.near, far: scene.fog?.far,
-    skyLight: hemisphere?.color.clone(), groundLight: hemisphere?.groundColor.clone(), ambient: hemisphere?.intensity, sunColor: sun?.color.clone(), sunIntensity: sun?.intensity };
-  const coolSky = new THREE.Color('#abc6cc'), coolFog = new THREE.Color('#b0c8ca'), coolAmbient = new THREE.Color('#d2dce1'), earthBounce = new THREE.Color('#77765e'), warmSun = new THREE.Color('#f5ddba');
-  const ready = Promise.resolve().then(load).then(asset => {
-    if (disposed) { disposeResources(asset.scene); return false; }
+  const ready = lease.ready.then(asset => {
+    if (disposed) return false;
     gltf = asset; kit = buildOldWatchKit(asset, { propSites: settlements.group.userData.propSites });
     scene.add(kit.group); settlements.setOldWatchKit(kit); fallback.visible = false;
     if (legacyVegetation) legacyVegetation.visible = false;
     status = 'ready'; return true;
   }).catch(error => {
-    if (gltf) disposeResources(gltf.scene, kit?.group);
+    if (kit) {
+      kit.group.removeFromParent();
+      try { settlements.setOldWatchKit(null); } catch (rollbackError) { error = new Error(`${error.message}; restoring fallback: ${rollbackError.message}`); }
+      disposeOwnedResources([kit.group], [gltf.scene]);
+    }
+    fallback.visible = true;
+    if (legacyVegetation) legacyVegetation.visible = true;
+    lease.release();
     gltf = null; kit = null; failure = String(error?.message ?? error); if (!disposed) status = 'fallback';
     return false;
   });
   function animate(time, { player = null, lowQuality = false, reducedMotion = false } = {}) {
     if (disposed) return;
-    const weight = kit && player && player.mode !== 'aboard' ? oldWatchWeight(player.x, player.z) : 0;
-    if (original.sky) scene.background.copy(original.sky).lerp(coolSky, weight * .8);
-    if (scene.fog && original.fog) { scene.fog.color.copy(original.fog).lerp(coolFog, weight); scene.fog.near = THREE.MathUtils.lerp(original.near, 72, weight); scene.fog.far = THREE.MathUtils.lerp(original.far, 340, weight); }
-    if (hemisphere) { hemisphere.color.copy(original.skyLight).lerp(coolAmbient, weight); hemisphere.groundColor.copy(original.groundLight).lerp(earthBounce, weight); hemisphere.intensity = THREE.MathUtils.lerp(original.ambient, 1.5, weight); }
-    if (sun) { sun.color.copy(original.sunColor).lerp(warmSun, weight); sun.intensity = THREE.MathUtils.lerp(original.sunIntensity, 2.25, weight); }
     if (!kit) return;
     kit.wind.value = reducedMotion ? 0 : time * 1.3;
     const distance = player ? Math.hypot(player.x - OLD_WATCH.x, player.z - OLD_WATCH.z) : Infinity;
     for (const mesh of kit.foliage) { mesh.visible = distance < (lowQuality ? 60 : 110); mesh.count = Math.floor(mesh.userData.fullCount * (lowQuality ? .36 : 1)); }
   }
-  return { ready, animate, getStats: () => ({ status, loading: status === 'loading', fallback: status !== 'ready', error: failure, ...(kit?.counts ?? {}) }), dispose() {
+  return { ready, animate, isReady: () => status === 'ready', getStats: () => ({ status, ready: status === 'ready', loading: status === 'loading', fallback: status !== 'ready', error: failure, ...(kit?.counts ?? {}) }), dispose() {
     if (disposed) return;
-    // Restore the island before releasing this controller's independently owned resources.
-    animate(0); disposed = true; status = 'disposed'; settlements.setOldWatchKit(null);
+    disposed = true; status = 'disposed'; settlements.setOldWatchKit(null);
     if (legacyVegetation) legacyVegetation.visible = true;
-    fallback.removeFromParent(); kit?.group.removeFromParent(); disposeResources(fallback, gltf?.scene, kit?.group); gltf = null; kit = null;
+    fallback.removeFromParent(); kit?.group.removeFromParent(); disposeOwnedResources([fallback, kit?.group], [gltf?.scene]);
+    lease.release(); if (!assets) cache.dispose(); gltf = null; kit = null;
   } };
 }

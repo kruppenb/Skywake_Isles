@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GeoBatch } from './models.js';
 import { heightAt, OBSTACLES, CHESTS, SHRINES, SPAWN, BEACON } from '../shared/world.js';
 import { POINTS_OF_INTEREST, BUILDINGS, RESIDENTS, trailDistance, buildingLocalPoint, buildingWalls, buildingFurnishings } from '../shared/exploration.js';
+import { WINDWARD_FARM_FENCE_CANDIDATES } from '../shared/windward-farm.js';
 
 const TAU = Math.PI * 2;
 const C = { wood: '#94633f', paleWood: '#c49864', dark: '#4a5556', cream: '#f5dca0', teal: '#399d9a', coral: '#c86f59', stone: '#b2ad97', metal: '#52646a', gold: '#dfbb6b' };
@@ -91,6 +92,9 @@ export function buildSettlements(palette) {
   const batches = new Map(POINTS_OF_INTEREST.map(p => [p.id, new GeoBatch(palette)]));
   const oldWatchFallback = new THREE.Group(); oldWatchFallback.name = 'old-watch-original-exterior'; group.add(oldWatchFallback);
   const oldWatchTower = new GeoBatch(palette);
+  const farmFallback = new THREE.Group(); farmFallback.name = 'windward-farm-original-exterior'; group.add(farmFallback);
+  const farmMill = new GeoBatch(palette), farmField = new GeoBatch(palette), farmFenceSites = [];
+  let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
 
@@ -105,8 +109,8 @@ export function buildSettlements(palette) {
 
   function furnishedBuilding(building) {
     const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
-    const pilot = building.id === 'watch-barracks';
-    const floorY = heightAt(x, z), source = pilot ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
+    const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', authored = pilot || farm;
+    const floorY = heightAt(x, z), source = authored ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
     const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
     const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
     let floor = frame(source, x, floorY, z, yaw);
@@ -148,7 +152,7 @@ export function buildSettlements(palette) {
       wall.add('ring', [width * .33, wallHeight * .82, depth / 2 + .25], [.16, .16, .16], [0, 0, 0], C.cream);
     }
     // Furnishings remain visible when the authored shell replaces the fallback.
-    if (pilot) floor = frame(batches.get(building.poiId), x, floorY, z, yaw);
+    if (authored) floor = frame(batches.get(building.poiId), x, floorY, z, yaw);
     for (const item of buildingFurnishings(building)) {
       const { x: fx, z: fz, width: fw, depth: fd, top } = item;
       const add = (shape, p, s, color, rotation = [0, 0, 0]) => floor.add(shape, [fx + p[0], p[1], fz + p[2]], s, rotation, color);
@@ -187,8 +191,9 @@ export function buildSettlements(palette) {
       face.userData.normal = normals[index]; wallsMesh.add(face);
     });
     wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
-    (pilot ? oldWatchFallback : group).add(wallsMesh, roofMesh);
-    if (pilot) { const base = source.mesh(); base.name = 'watch-barracks-original-base'; oldWatchFallback.add(base); }
+    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : group;
+    exterior.add(wallsMesh, roofMesh);
+    if (authored) { const base = source.mesh(); base.name = building.id + '-original-base'; exterior.add(base); }
     interiors.push({ building, walls: wallsMesh, roof: roofMesh, originalWalls: wallsMesh, originalRoof: roofMesh });
     let visualRadius = 0, visualHeight = 0;
     for (const [batch, first] of [[source, firstVertex], ...upper.map(batch => [batch, 0]), [roof, 0]]) for (let index = first; index < batch.positions.length; index += 3) {
@@ -201,7 +206,7 @@ export function buildSettlements(palette) {
   for (const building of BUILDINGS) {
     if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
-    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
+    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
     let high = ground, low = ground;
     for (let i = 0; i < 12; i++) {
@@ -238,7 +243,8 @@ export function buildSettlements(palette) {
       }
       sails.add('cylinder', [0, 0, .08], [.22, .3, .22], [Math.PI / 2, 0, 0], C.wood);
       rotor.add(sails.mesh());
-      const mount = new THREE.Group(); mount.name = 'windward-mill-rotor-mount'; mount.position.copy(f.point(0, h * .66, r * .62)); mount.rotation.y = yaw; mount.add(rotor); group.add(mount);
+      const mount = new THREE.Group(); mount.name = 'windward-mill-rotor-mount'; mount.position.copy(f.point(0, h * .66, r * .62)); mount.rotation.y = yaw; mount.add(rotor); farmFallback.add(mount);
+      farmRotorIndex = rotors.length; originalFarmRotor = rotor;
       rotors.push(rotor);
     } else if (kind === 'watchtower') {
       f.add('cylinder', [0, h * .37, 0], [r * .74, h * .74, r * .74], [0, 0, 0], color);
@@ -322,7 +328,7 @@ export function buildSettlements(palette) {
     return true;
   }
 
-  function site(place, dx, dz, radius, build, yaw = 0, prefab = null) {
+  function site(place, dx, dz, radius, build, yaw = 0, prefab = null, farmExterior = false) {
     for (let attempt = 0; attempt < 90; attempt++) {
       const angle = attempt * 2.39996, search = attempt ? .7 * Math.sqrt(attempt) : 0;
       const x = place.x + dx + Math.sin(angle) * search, z = place.z + dz + Math.cos(angle) * search;
@@ -330,7 +336,7 @@ export function buildSettlements(palette) {
       const y = heightAt(x, z);
       const slope = Math.max(...[0, 1, 2, 3].map(i => Math.abs(heightAt(x + Math.sin(i * Math.PI / 2) * radius, z + Math.cos(i * Math.PI / 2) * radius) - y)));
       if (slope > .7) continue;
-      const source = prefab ? new GeoBatch(palette) : batches.get(place.id);
+      const source = prefab ? new GeoBatch(palette) : farmExterior ? farmField : batches.get(place.id);
       build(frame(source, x, y, z, yaw), x, y, z);
       if (prefab) { const mesh = source.mesh(); mesh.name = 'old-watch-original-' + prefab; oldWatchFallback.add(mesh); }
       occupied.push({ x, z, radius }); propSites.push({ poiId: place.id, x, z, radius, ...(prefab ? { prefab, yaw } : {}) }); stats.propClusters++;
@@ -382,24 +388,25 @@ export function buildSettlements(palette) {
       site(place, 8, 1, 4.0, (f, x, y, z) => {
         for (let row = 0; row < 4; row++) for (let i = 0; i < 7; i++) {
           const xx = x + (row - 1.5) * 1.25, zz = z + (i - 3) * .85, yy = heightAt(xx, zz);
-          const plant = frame(batches.get(place.id), xx, yy, zz);
+          const plant = frame(farmField, xx, yy, zz);
           plant.add('sphere', [0, .025, 0], [.40, .08, .4], [0, 0, 0], '#9a7751');
           plant.line([0, .04, 0], [0, .70 + row % 2 * .14, 0], .035, '#839f5a');
           for (const side of [-1, 1]) plant.add('sphere', [side * .14, .39, 0], [.26, .08, .10], [0, 0, side * .5], '#76ac68');
           plant.add('sphere', [0, .73 + row % 2 * .14, 0], [.12, .20, .13], [0, 0, 0], '#dfc872');
         }
-      });
+      }, 0, null, true);
       site(place, -7, -10, 1.9, f => {
         for (const side of [-1, 1]) f.add('cylinder', [side * .67, .55, 0], [.55, 1.2, .55], [Math.PI / 2, 0, 0], '#d1bc77');
         f.add('cylinder', [0, 1.42, 0], [.52, 1.2, .52], [Math.PI / 2, 0, 0], '#ddc780');
         for (const z of [-.4, .4]) f.add('box', [0, .86, z], [2.3, .065, .065], [0, 0, 0], '#a8965c');
-      });
+      }, 0, null, true);
       // Short terrain-following sections suggest a field boundary, with generous
       // gaps wherever a trail, worker route, building or chest passes through it.
-      for (let i = 0; i < 7; i++) {
-        const x = place.x - 7 + i * 2.3, z = place.z + 9.7;
+      for (const candidate of WINDWARD_FARM_FENCE_CANDIDATES) {
+        const { x, z } = candidate;
         if (!clearForProp(x, z, 1.2)) continue;
-        const aY = heightAt(x - 1, z), bY = heightAt(x + 1, z), b = batches.get(place.id);
+        farmFenceSites.push({ ...candidate });
+        const aY = heightAt(x - 1, z), bY = heightAt(x + 1, z), b = farmField;
         for (const [px, py] of [[x - 1, aY], [x + 1, bY]]) b.line([px, py, z], [px, py + 1.05, z], .065, C.wood);
         for (const h of [.43, .86]) b.line([x - 1, aY + h, z], [x + 1, bY + h, z], .055, C.paleWood);
       }
@@ -487,6 +494,8 @@ export function buildSettlements(palette) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
   }
   const towerFallbackMesh = oldWatchTower.mesh(); towerFallbackMesh.name = 'signal-tower-original'; oldWatchFallback.add(towerFallbackMesh);
+  const millFallbackMesh = farmMill.mesh(); millFallbackMesh.name = 'windward-mill-original'; farmFallback.add(millFallbackMesh);
+  const fieldFallbackMesh = farmField.mesh(); fieldFallbackMesh.name = 'windward-farm-original-crops-hay-fences'; farmFallback.add(fieldFallbackMesh);
 
   // Fishing skiffs lie beyond the actual scalloped shoreline, at sea level.
   for (let i = 0; i < 2; i++) {
@@ -553,12 +562,22 @@ export function buildSettlements(palette) {
     residents.animate(reducedMotion ? 0 : t);
   }
   group.userData.propSites = propSites; group.userData.buildingBounds = buildingBounds;
+  group.userData.farmFenceSites = farmFenceSites;
   animate(0);
   return { group, animate, stats, setOldWatchKit(kit = null) {
     const interior = interiors.find(item => item.building.id === 'watch-barracks');
     interior.walls = kit?.walls ?? interior.originalWalls;
     interior.roof = kit?.roof ?? interior.originalRoof;
     oldWatchFallback.visible = !kit;
+  }, setWindwardFarmKit(kit = null) {
+    const interior = interiors.find(item => item.building.id === 'harvest-barn');
+    interior.walls = kit?.walls ?? interior.originalWalls;
+    interior.roof = kit?.roof ?? interior.originalRoof;
+    rotors[farmRotorIndex] = kit?.rotor ?? originalFarmRotor;
+    farmFallback.visible = !kit;
+    // A completed async load must receive the current motion settings even if
+    // it lands between ambient ticks.
+    lastAmbientTick = -1;
   } };
 }
 

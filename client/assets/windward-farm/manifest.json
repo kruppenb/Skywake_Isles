@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "generator": "tools/build-windward-farm.py",
+  "seed": 735194,
+  "blenderVersion": "5.2.1 LTS",
+  "coordinateSystem": "Y-up, meters, +Z front",
+  "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
+  "file": "kit.glb",
+  "bytes": 2459180,
+  "sha256": "497bdfe9022365f4a77713f2c8b21ff53eb44c4c43fed50d962fd620e828d6ef",
+  "dependencies": [
+    {
+      "url": "/assets/old-watch/kit.glb",
+      "sha256": "3fce2c1f50178bf0a681fdec6aafba86b98140cc108ce6ae522b45e6370f152b",
+      "ownership": "Shared cache owns original material textures and reusable props"
+    }
+  ],
+  "materialBindings": {
+    "watch_stone": {
+      "source": "watch_stone"
+    },
+    "aged_timber": {
+      "source": "aged_timber"
+    },
+    "forged_iron": {
+      "source": "forged_iron"
+    },
+    "recess_shadow": {
+      "source": "recess_shadow"
+    },
+    "farm_plaster": {
+      "source": "watch_stone",
+      "color": [
+        1.65,
+        1.48,
+        1.2
+      ]
+    },
+    "farm_roof": {
+      "source": "dark_slate",
+      "color": [
+        3.4,
+        1.22,
+        0.69
+      ]
+    },
+    "crop_straw": {
+      "source": "needle_foliage",
+      "color": [
+        3.0,
+        1.65,
+        0.62
+      ]
+    },
+    "crop_leaf": {
+      "source": "needle_foliage",
+      "color": [
+        0.91,
+        1.16,
+        0.68
+      ]
+    },
+    "hay_straw": {
+      "source": "aged_timber",
+      "color": [
+        2.2,
+        1.68,
+        0.74
+      ]
+    }
+  },
+  "prefabs": {
+    "barn_base": {
+      "bounds": {
+        "min": [
+          -2.485,
+          -0.3,
+          -2.065
+        ],
+        "max": [
+          2.485,
+          0.474,
+          2.065
+        ]
+      },
+      "dimensions": [
+        4.97,
+        0.774,
+        4.13
+      ],
+      "horizontalRadius": 3.21002,
+      "triangles": 1584,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "watch_stone"
+      ]
+    },
+    "barn_roof": {
+      "bounds": {
+        "min": [
+          -2.59996,
+          3.47,
+          -2.235
+        ],
+        "max": [
+          2.59996,
+          5.86149,
+          2.235
+        ]
+      },
+      "dimensions": [
+        5.19992,
+        2.39149,
+        4.47
+      ],
+      "horizontalRadius": 3.40176,
+      "triangles": 5588,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "farm_roof"
+      ]
+    },
+    "barn_wall_back": {
+      "bounds": {
+        "min": [
+          -2.245,
+          0.486,
+          -2.065
+        ],
+        "max": [
+          2.245,
+          3.48,
+          -1.825
+        ]
+      },
+      "dimensions": [
+        4.49,
+        2.994,
+        0.24
+      ],
+      "horizontalRadius": 3.03813,
+      "triangles": 1012,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "watch_stone"
+      ]
+    },
+    "barn_wall_east": {
+      "bounds": {
+        "min": [
+          2.245,
+          0.486,
+          -2.065
+        ],
+        "max": [
+          2.485,
+          3.48,
+          2.065
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.994,
+        4.13
+      ],
+      "horizontalRadius": 3.22081,
+      "triangles": 2112,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    },
+    "barn_wall_front": {
+      "bounds": {
+        "min": [
+          -2.245,
+          0.486,
+          1.825
+        ],
+        "max": [
+          2.245,
+          3.48,
+          2.065
+        ]
+      },
+      "dimensions": [
+        4.49,
+        2.994,
+        0.24
+      ],
+      "horizontalRadius": 3.03813,
+      "triangles": 1012,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "forged_iron",
+        "watch_stone"
+      ]
+    },
+    "barn_wall_west": {
+      "bounds": {
+        "min": [
+          -2.485,
+          0.486,
+          -2.065
+        ],
+        "max": [
+          -2.245,
+          3.48,
+          2.065
+        ]
+      },
+      "dimensions": [
+        0.24,
+        2.994,
+        4.13
+      ],
+      "horizontalRadius": 3.22081,
+      "triangles": 2112,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    },
+    "crop_leafy": {
+      "bounds": {
+        "min": [
+          -0.26943,
+          0.025,
+          -0.28471
+        ],
+        "max": [
+          0.29711,
+          0.27239,
+          0.22146
+        ]
+      },
+      "dimensions": [
+        0.56654,
+        0.24739,
+        0.50617
+      ],
+      "horizontalRadius": 0.29711,
+      "triangles": 144,
+      "primitives": 1,
+      "materials": [
+        "crop_leaf"
+      ]
+    },
+    "crop_wheat": {
+      "bounds": {
+        "min": [
+          -0.31095,
+          -0.00077,
+          -0.28664
+        ],
+        "max": [
+          0.28238,
+          0.85368,
+          0.32567
+        ]
+      },
+      "dimensions": [
+        0.59334,
+        0.85445,
+        0.61231
+      ],
+      "horizontalRadius": 0.33963,
+      "triangles": 1120,
+      "primitives": 1,
+      "materials": [
+        "crop_straw"
+      ]
+    },
+    "fence_section": {
+      "bounds": {
+        "min": [
+          -1.00005,
+          -0.27,
+          -0.07
+        ],
+        "max": [
+          1.00005,
+          1.0475,
+          0.07
+        ]
+      },
+      "dimensions": [
+        2.0001,
+        1.3175,
+        0.14
+      ],
+      "horizontalRadius": 1.00111,
+      "triangles": 308,
+      "primitives": 1,
+      "materials": [
+        "aged_timber"
+      ]
+    },
+    "hay_bale": {
+      "bounds": {
+        "min": [
+          -0.4535,
+          0.0,
+          -0.31
+        ],
+        "max": [
+          0.4535,
+          0.536,
+          0.31
+        ]
+      },
+      "dimensions": [
+        0.907,
+        0.536,
+        0.62
+      ],
+      "horizontalRadius": 0.50675,
+      "triangles": 836,
+      "primitives": 2,
+      "materials": [
+        "aged_timber",
+        "hay_straw"
+      ]
+    },
+    "windmill_body": {
+      "bounds": {
+        "min": [
+          -2.65082,
+          -0.65,
+          -2.65082
+        ],
+        "max": [
+          2.65082,
+          11.75,
+          2.65082
+        ]
+      },
+      "dimensions": [
+        5.30164,
+        12.4,
+        5.30164
+      ],
+      "horizontalRadius": 2.66351,
+      "triangles": 8968,
+      "primitives": 6,
+      "materials": [
+        "aged_timber",
+        "farm_plaster",
+        "farm_roof",
+        "forged_iron",
+        "recess_shadow",
+        "watch_stone"
+      ]
+    },
+    "windmill_sails": {
+      "bounds": {
+        "min": [
+          -2.35,
+          -2.35,
+          -0.16
+        ],
+        "max": [
+          2.35,
+          2.35,
+          0.215
+        ]
+      },
+      "dimensions": [
+        4.7,
+        4.7,
+        0.375
+      ],
+      "horizontalRadius": 2.35031,
+      "triangles": 1944,
+      "primitives": 3,
+      "materials": [
+        "aged_timber",
+        "farm_plaster",
+        "forged_iron"
+      ]
+    }
+  },
+  "textures": [],
+  "embeddedImageCount": 0,
+  "decodedTextureBytes": 0,
+  "windmillRotorPivot": [
+    0,
+    7.82,
+    2.108
+  ],
+  "totalTriangles": 26740,
+  "totalPrimitives": 30
+}

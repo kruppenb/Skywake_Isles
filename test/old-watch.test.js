@@ -9,6 +9,7 @@ import { hasWorldLineOfSight, resolveWorldCollision } from '../shared/collision.
 import { OLD_WATCH_PREFABS, buildOldWatchKit, createOldWatch, renderedHeightAt } from '../client/old-watch.js';
 import { buildSettlements } from '../client/settlement.js';
 import { makePalette } from '../client/models.js';
+import { createEnvironmentAssets } from '../client/environment-assets.js';
 
 function fixtureAsset() {
   const scene = new THREE.Group(), geometry = new THREE.BoxGeometry(.2, .5, .2), material = new THREE.MeshStandardMaterial();
@@ -60,7 +61,7 @@ test('terrain interpolation lies on both diagonals of the actual rendered terrai
   assert.ok(oldWatchWeight(-66 + 26.99, -76) < .00001);
 });
 
-test('atomic installation preserves furnished cutaways, quality density and restores island lighting', async () => {
+test('atomic installation preserves furnished cutaways and quality density without owning global lighting', async () => {
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#85d9ee'); scene.fog = new THREE.Fog('#a2def0', 180, 610);
   const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2), sun = new THREE.DirectionalLight('#fff0d0', 2.7);
   const settlements = buildSettlements(makePalette()); scene.add(settlements.group);
@@ -69,6 +70,8 @@ test('atomic installation preserves furnished cutaways, quality density and rest
   const pilot = createOldWatch({ scene, settlements, legacyVegetation, hemisphere, sun, load: async () => { loads++; return fixtureAsset(); } });
   assert.equal(pilot.getStats().status, 'loading'); assert.equal(scene.getObjectByName('old-watch-original-exterior').visible, true);
   assert.equal(await pilot.ready, true); assert.equal(loads, 1); assert.equal(legacyVegetation.visible, false);
+  const counts = pilot.getStats();
+  assert.deepEqual([counts.grass, counts.ferns, counts.flagstones], [559, 54, 12], 'approved pilot planting density and original prop-site exclusions');
   assert.equal(scene.getObjectByName('old-watch-original-exterior').visible, false);
   const b = BUILDINGS.find(p => p.id === 'watch-barracks'), player = { x: b.x, z: b.z, y: heightAt(b.x, b.z), mode: 'ground' };
   const roof = scene.getObjectByName('watch-barracks-authored-cutaway-roof'), walls = scene.getObjectByName('watch-barracks-authored-cutaway-walls');
@@ -76,7 +79,7 @@ test('atomic installation preserves furnished cutaways, quality density and rest
   settlements.animate(1, { player, camera }); assert.equal(roof.visible, false); assert.deepEqual(walls.children.map(p => p.visible), [false, true, false, true]);
   settlements.animate(2, { player: { ...player, mode: 'gliding', y: player.y + 4 }, camera }); assert.equal(roof.visible, false);
   settlements.animate(3, { player: { ...player, x: 0, z: 0 }, camera }); assert.equal(roof.visible, true); assert.ok(walls.children.every(p => p.visible));
-  pilot.animate(2, { player }); assert.equal(hemisphere.intensity, 1.5);
+  pilot.animate(2, { player }); assert.equal(hemisphere.intensity, 2.2);
   const plants = []; scene.traverse(p => { if (p.isInstancedMesh && p.name.startsWith('old-watch-instanced')) plants.push(p); });
   assert.ok(plants.length >= 2); assert.ok(plants.reduce((n, p) => n + p.count, 0) > 100);
   pilot.animate(20, { player, lowQuality: true, reducedMotion: true }); assert.ok(plants.every(p => p.count < p.userData.fullCount));
@@ -98,11 +101,57 @@ test('failed and late loads keep visible solids and dispose shared asset resourc
   assert.throws(() => buildOldWatchKit(incomplete), /missing barracks_roof/);
 });
 
+test('late installation failure rolls back staging while another area retains the source lease', async () => {
+  const asset = fixtureAsset(), source = asset.scene.children[0].children[0].geometry;
+  let sourceDisposed = 0, patchDisposed = 0, foliageDisposed = 0;
+  source.addEventListener('dispose', () => sourceDisposed++);
+  const assets = createEnvironmentAssets({ load: async () => asset }), survivor = assets.acquire('/assets/old-watch/kit.glb');
+  const scene = new THREE.Scene(), settlements = buildSettlements(makePalette()), legacyVegetation = new THREE.Group(); scene.add(settlements.group, legacyVegetation);
+  const install = settlements.setOldWatchKit;
+  settlements.setOldWatchKit = kit => {
+    install(kit);
+    if (kit) {
+      kit.group.getObjectByName('old-watch-earth-and-gravel').geometry.addEventListener('dispose', () => patchDisposed++);
+      kit.foliage[0].material.addEventListener('dispose', () => foliageDisposed++);
+      throw new Error('installation rejected after staging');
+    }
+  };
+  const pilot = createOldWatch({ scene, settlements, assets, legacyVegetation });
+  assert.equal(await pilot.ready, false); assert.match(pilot.getStats().error, /installation rejected/);
+  assert.equal(scene.getObjectByName('old-watch-weathered-pilot'), undefined);
+  assert.equal(scene.getObjectByName('old-watch-original-exterior').visible, true); assert.equal(legacyVegetation.visible, true);
+  assert.equal(patchDisposed, 1); assert.equal(foliageDisposed, 1); assert.equal(sourceDisposed, 0);
+  pilot.dispose(); pilot.dispose(); assert.equal(patchDisposed, 1); assert.equal(assets.getStats().leases, 1);
+  survivor.release(); assets.dispose(); assert.equal(sourceDisposed, 1);
+});
+
+test('partial kit construction releases staged surfaces without touching borrowed sources', () => {
+  const asset = fixtureAsset(), tower = asset.scene.getObjectByName('watch_tower'), cloneTower = tower.clone;
+  let patchDisposed = 0, staged = null, sourceDisposed = 0;
+  asset.scene.children[0].children[0].geometry.addEventListener('dispose', () => sourceDisposed++);
+  tower.clone = function (...args) {
+    const result = cloneTower.apply(this, args);
+    result.addEventListener('added', () => {
+      staged = result.parent;
+      staged.addEventListener('childadded', event => {
+        if (event.child.name === 'old-watch-earth-and-gravel') event.child.geometry.addEventListener('dispose', () => patchDisposed++);
+      });
+    });
+    return result;
+  };
+  asset.scene.getObjectByName('rock_a').updateMatrixWorld = () => { throw new Error('invalid path source transform'); };
+  assert.throws(() => buildOldWatchKit(asset), /invalid path source transform/);
+  assert.ok(staged?.getObjectByName('old-watch-earth-and-gravel')); assert.equal(patchDisposed, 1); assert.equal(sourceDisposed, 0);
+});
+
 test('shipping GLB contains self-contained textured prefabs with the declared material and triangle budget', async () => {
   const bytes = await readFile(new URL('../client/assets/old-watch/kit.glb', import.meta.url));
   assert.equal(bytes.toString('ascii', 0, 4), 'glTF'); assert.equal(bytes.readUInt32LE(4), 2); assert.equal(bytes.readUInt32LE(8), bytes.length); assert.ok(bytes.length < 8 * 1024 * 1024);
   const jsonSize = bytes.readUInt32LE(12); assert.equal(bytes.readUInt32LE(16), 0x4e4f534a);
   const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + jsonSize));
+  for (const sampler of gltf.samplers) {
+    assert.equal(sampler.wrapS ?? 10497, 10497); assert.equal(sampler.wrapT ?? 10497, 10497);
+  }
   for (const name of OLD_WATCH_PREFABS) assert.ok(gltf.nodes.some(n => n.name === name), name);
   assert.ok(gltf.materials.some(m => m.name === 'ground_earth' && m.pbrMetallicRoughness.baseColorTexture));
   assert.ok(gltf.images.length >= 3); assert.ok(gltf.images.every(i => Number.isInteger(i.bufferView) && !i.uri)); assert.ok(gltf.buffers.every(b => !b.uri));
