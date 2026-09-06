@@ -14,7 +14,7 @@ Windward Farm is shipped and validated at `8b66888`; that records implementation
 | --- | --- | --- | --- |
 | 1 | The Old Watch pilot | Complete | `2c2d3fe`; explicit user style approval; reproducible original kit. |
 | 2 | Windward Farm and Old Watch connector | Complete | `8b66888`; pushed to canonical `main`, Docker deployed and verified; evidence below. |
-| 3 | Tideglass Market and central Haven | Planned — next | Existing coastal settlement buildings, market detail and connecting public spaces. |
+| 3 | Tideglass Market and central Haven | In progress | Implementation and QA complete; publication and Docker verification pending. |
 | 4 | Saltwind Harbor, Driftwood Yard and Sunwake Strand | Planned | Coastal working waterfront and beach identity. |
 | 5 | Palmheart Camp and Wilds | Planned | Jungle settlement and vegetation identity. |
 | 6 | Cinderworks and Emberpeak | Planned | Volcanic architecture, terrain and atmosphere. |
@@ -23,12 +23,14 @@ Windward Farm is shipped and validated at `8b66888`; that records implementation
 
 ## Active handoff
 
-- **Active milestone:** None. The next art milestone has not started.
-- **Latest shipped environment implementation:** `8b66888` on canonical GitHub `main`.
-- **Last confirmed deployment:** Local Docker game at `http://localhost:3400`, healthy after the Farm deployment on 2026-09-05. Recheck current reality before working.
-- **Next objective:** Bring Tideglass Market and the immediate central-Haven settlement to Old Watch's material quality. Improve existing market architecture, stalls/awnings, ground, walking routes and vegetation while preserving coastal colors, resident activity, furnished interiors, paired doors, loot and cutaways. Bound the work to this milestone and its necessary transitions; later coastal areas remain planned.
-- **Known blocker:** None recorded. Inspect the current tree and remote for subsequent work.
-- **Next action:** Read the sources below, inspect repository/remote/deployment state, and capture walking, close and aerial baselines for the next area and an already-finished comparison view.
+- **Active milestone:** Tideglass Market and central Haven — in progress, 2026-09-05.
+- **Scope:** Weathered market cottage, fruit/sailcloth stalls, the two existing central-Haven huts, market square and immediate connecting paths/planting. Preserve gameplay and later coastal regions.
+- **Source state:** Started from `8890454`; concurrent unrelated pickup work was committed and pushed as `be58b78`, now the implementation base on `main`. Preserve that history. Only milestone art/runtime/tests and documentation are being changed.
+- **Deployment at start:** Docker service and `/health` healthy at `be58b78`; 13 served environment assets matched committed source, and the persistent volume mount was recorded.
+- **Completed work:** Original cottage/stalls/huts, bounded ground/planting/paving and cached runtime integration are complete. Walking, close, interior, aerial, glider, low/reduced and asset-failure views passed review. Five-client gameplay checked both doors, chests, cutaway and the connecting trail. All three kits independently regenerated with identical GLB/manifest bytes. Final full suite passed 152 tests; diff and independent implementation review passed. Detailed measurements and recreation instructions are in the pipeline.
+- **Remaining work:** Commit and push the completed implementation, deploy Docker, verify health, served hashes and deployed browser views, then record actual publication evidence here.
+- **Known blocker:** None. No environment changes were in progress at start.
+- **Next action:** Publish and verify this milestone, update the completed handoff, and stop with milestone 4 still planned.
 
 When work is interrupted, replace the active handoff with concrete current facts:
 

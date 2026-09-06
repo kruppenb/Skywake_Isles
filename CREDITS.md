@@ -6,6 +6,8 @@ The Old Watch pilot's masonry, timber barracks, slate roof, boulders, fir trees,
 
 Windward Farm's tapered plaster-and-stone windmill, framed rotating sails, timber-and-stone barn, russet roof tiles, wheat, leafy vegetables, split-rail fences and tied hay are original models from `tools/build-windward-farm.py`. Their UVs and vertex weathering use the same authored material language as Old Watch, with warm farm colors. Shared offline mesh/material/export helpers live in `tools/environment_kit.py`; the farm GLB contains geometry and named material slots, with no copied texture images. The browser binds those slots to the original Old Watch material library and reuses its stones and ground plants. No additional external art sources or licenses were introduced.
 
+Tideglass Market's limewashed cottage, closed Haven huts, teal tiled roofs, timber fruit and sailcloth stalls, tied scalloped canvas, fruit, spiraled cloth rolls, worn paving and broadleaf shrubs are original geometry from `tools/build-tideglass-market.py`. The deterministic Blender source, GLB and validation manifest ship together. This extension borrows the same original stone, timber, slate, earth and foliage textures with recorded linear material tints; it adds no texture images or external art dependencies. Existing resident models, furniture, palms, gameplay layout and lighthouse remain part of the original game.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |

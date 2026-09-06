@@ -10,7 +10,7 @@ import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
 import { heightAt, seededRandom, SEED } from '../shared/world.js';
 import { makePalette } from '../client/models.js';
 
-const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb';
+const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb', marketURL = '/assets/tideglass-market/kit.glb';
 function fixture() {
   const counts = { geometry: 0, material: 0, texture: 0, image: 0 };
   const geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
@@ -80,7 +80,7 @@ test('one lighting owner preserves the approved core and restores its immutable 
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#85d9ee'); scene.fog = new THREE.Fog('#a2def0', 180, 610);
   const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2), sun = new THREE.DirectionalLight('#fff0d0', 2.7);
   const lighting = createEnvironmentLighting({ scene, hemisphere, sun });
-  const ready = { oldWatchReady: true, farmReady: true };
+  const ready = { oldWatchReady: true, farmReady: true, tideglassReady: true };
   lighting.update({ x: -66, z: -76, mode: 'ground' }, ready);
   assert.equal(hemisphere.intensity, 1.5); assert.equal(sun.intensity, 2.25); assert.equal(scene.fog.near, 72); assert.equal(scene.fog.far, 340);
   const expectedSky = new THREE.Color('#85d9ee').lerp(new THREE.Color('#abc6cc'), .8);
@@ -104,7 +104,7 @@ test('lighting normalizes overlaps and retains the farm exclusion only when the 
   const ready = environmentWeights(player, { oldWatchReady: true, farmReady: true });
   assert.ok(ready.oldWatch > 0 && ready.windwardFarm > 0); assert.equal(ready.baseline, 0);
   assert.ok(Math.abs(ready.oldWatch + ready.windwardFarm - 1) < 1e-12);
-  assert.deepEqual(environmentWeights({ x: NaN, z: 0 }, { oldWatchReady: true, farmReady: true }), { baseline: 1, oldWatch: 0, windwardFarm: 0 });
+  assert.deepEqual(environmentWeights({ x: NaN, z: 0 }, { oldWatchReady: true, farmReady: true }), { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0 });
   let last;
   for (let i = 0; i <= 330; i++) {
     const t = i / 330, weights = environmentWeights({ x: -66 + 24 * t, z: -76 + 23 * t }, { oldWatchReady: true, farmReady: true });
@@ -112,6 +112,31 @@ test('lighting normalizes overlaps and retains the farm exclusion only when the 
     if (last != null) assert.ok(Math.abs(ambient - last) < .01, 'continuous walking transition');
     last = ambient;
   }
+});
+
+test('coastal lighting depends on market readiness and restores the baseline aboard and beyond the bounded area', () => {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#85d9ee'); scene.fog = new THREE.Fog('#a2def0', 180, 610);
+  const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2), sun = new THREE.DirectionalLight('#fff0d0', 2.7);
+  const lighting = createEnvironmentLighting({ scene, hemisphere, sun }), ready = { oldWatchReady: true, farmReady: true, tideglassReady: true };
+  const player = { x: -29, z: 39, mode: 'ground' }, baseline = { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0 };
+  assert.deepEqual(environmentWeights(player, { ...ready, tideglassReady: false }), baseline);
+  assert.deepEqual(environmentWeights(player, ready), { ...baseline, baseline: 0, tideglassMarket: 1 });
+  lighting.update(player, ready); assert.equal(hemisphere.intensity, 1.85); assert.equal(sun.intensity, 2.5); assert.equal(scene.fog.near, 95); assert.equal(scene.fog.far, 405);
+  const sky = scene.background.toArray(); let lastAmbient;
+  for (let step = 0; step <= 1000; step++) {
+    const weights = environmentWeights({ x: -29 + step * .1, z: 39 }, ready);
+    assert.ok(Object.values(weights).every(value => Number.isFinite(value) && value >= 0 && value <= 1));
+    assert.ok(Math.abs(Object.values(weights).reduce((sum, value) => sum + value, 0) - 1) < 1e-12);
+    lighting.update({ x: -29 + step * .1, z: 39 }, ready);
+    if (lastAmbient != null) assert.ok(Math.abs(hemisphere.intensity - lastAmbient) < .01, 'coastal walk has continuous lighting');
+    lastAmbient = hemisphere.intensity;
+  }
+  lighting.update(player, ready); assert.deepEqual(scene.background.toArray(), sky, 'returning does not accumulate color drift');
+  for (const outside of [{ ...player, mode: 'aboard' }, { x: -68, z: 12 }, { x: -15, z: 96 }, { x: 30, z: 96 }, { x: 76, z: 32 }]) {
+    assert.deepEqual(environmentWeights(outside, ready), baseline); lighting.update(outside, ready);
+    assert.equal(scene.background.getHexString(), '85d9ee'); assert.equal(hemisphere.intensity, 2.2); assert.equal(sun.intensity, 2.7);
+  }
+  lighting.update(player, ready); lighting.dispose(); lighting.dispose(); assert.equal(scene.background.getHexString(), '85d9ee'); assert.equal(scene.fog.near, 180);
 });
 
 test('terrain helper follows the actual grid, including off-diagonal barycentric samples', () => {
@@ -129,7 +154,7 @@ test('terrain helper follows the actual grid, including off-diagonal barycentric
 });
 
 test('registered island payload and texture costs match the committed kit manifests', async () => {
-  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL]);
+  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL, marketURL]);
   for (const [url, cost] of Object.entries(ENVIRONMENT_ASSET_REGISTRY)) {
     const manifest = JSON.parse(await readFile(new URL('../client' + url.replace('/kit.glb', '/manifest.json'), import.meta.url)));
     const bytes = await readFile(new URL('../client' + url, import.meta.url));
@@ -157,6 +182,15 @@ test('routing scenery into area batches preserves all original geometry and the 
   assert.equal(triangles.length, 141650);
   assert.equal(createHash('sha256').update(triangles.sort().join('')).digest('hex'), 'e736a67408d0084a776ac3764d157715b251f4f7be410279181fefa9c562080c');
   assert.equal(random(), .017430383479222655);
+  assert.deepEqual(scenery.tideglassHutSites.map(({ id, x, z, radius, height, yaw }) => ({ id, x, z, radius, height, yaw })), [
+    { id: 'prop-16', x: -20, z: 15, radius: 3.2, height: 5, yaw: .19684114179108292 },
+    { id: 'prop-17', x: 18, z: 27, radius: 3.2, height: 5, yaw: .014833393855951726 },
+  ], 'replacement huts retain the original layout and random yaws');
+  assert.equal(scenery.group.userData.tideglassHutSites, scenery.tideglassHutSites);
+  assert.equal(scenery.tideglassHutFallback.visible, true); assert.equal(scenery.tideglassLegacyVegetation.visible, true);
+  assert.ok(scenery.tideglassHutFallback.geometry.attributes.position.count > 0);
+  const plants = scenery.tideglassLegacyVegetation.geometry.attributes.position;
+  for (let index = 0; index < plants.count; index++) assert.ok(plants.getY(index) < heightAt(plants.getX(index), plants.getZ(index)) + 1.2, 'coastal replacement only hides small ground vegetation, retaining palms');
   disposeOwnedResources(scenery.group);
   for (const geometry of Object.values(palette.geometry)) geometry.dispose();
 });

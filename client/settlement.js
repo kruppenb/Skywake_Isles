@@ -94,6 +94,8 @@ export function buildSettlements(palette) {
   const oldWatchTower = new GeoBatch(palette);
   const farmFallback = new THREE.Group(); farmFallback.name = 'windward-farm-original-exterior'; group.add(farmFallback);
   const farmMill = new GeoBatch(palette), farmField = new GeoBatch(palette), farmFenceSites = [];
+  const tideglassFallback = new THREE.Group(); tideglassFallback.name = 'tideglass-market-original-exterior'; group.add(tideglassFallback);
+  const tideglassStalls = new GeoBatch(palette);
   let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
@@ -109,7 +111,7 @@ export function buildSettlements(palette) {
 
   function furnishedBuilding(building) {
     const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
-    const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', authored = pilot || farm;
+    const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', market = building.id === 'market-cottage', authored = pilot || farm || market;
     const floorY = heightAt(x, z), source = authored ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
     const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
     const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
@@ -191,7 +193,7 @@ export function buildSettlements(palette) {
       face.userData.normal = normals[index]; wallsMesh.add(face);
     });
     wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
-    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : group;
+    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : market ? tideglassFallback : group;
     exterior.add(wallsMesh, roofMesh);
     if (authored) { const base = source.mesh(); base.name = building.id + '-original-base'; exterior.add(base); }
     interiors.push({ building, walls: wallsMesh, roof: roofMesh, originalWalls: wallsMesh, originalRoof: roofMesh });
@@ -206,7 +208,7 @@ export function buildSettlements(palette) {
   for (const building of BUILDINGS) {
     if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
-    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
+    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : ['fruit-stall', 'sailcloth-stall'].includes(building.id) ? tideglassStalls : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
     let high = ground, low = ground;
     for (let i = 0; i < 12; i++) {
@@ -496,6 +498,7 @@ export function buildSettlements(palette) {
   const towerFallbackMesh = oldWatchTower.mesh(); towerFallbackMesh.name = 'signal-tower-original'; oldWatchFallback.add(towerFallbackMesh);
   const millFallbackMesh = farmMill.mesh(); millFallbackMesh.name = 'windward-mill-original'; farmFallback.add(millFallbackMesh);
   const fieldFallbackMesh = farmField.mesh(); fieldFallbackMesh.name = 'windward-farm-original-crops-hay-fences'; farmFallback.add(fieldFallbackMesh);
+  const stallsFallbackMesh = tideglassStalls.mesh(); stallsFallbackMesh.name = 'tideglass-market-original-stalls'; tideglassFallback.add(stallsFallbackMesh);
 
   // Fishing skiffs lie beyond the actual scalloped shoreline, at sea level.
   for (let i = 0; i < 2; i++) {
@@ -578,6 +581,11 @@ export function buildSettlements(palette) {
     // A completed async load must receive the current motion settings even if
     // it lands between ambient ticks.
     lastAmbientTick = -1;
+  }, setTideglassMarketKit(kit = null) {
+    const interior = interiors.find(item => item.building.id === 'market-cottage');
+    interior.walls = kit?.walls ?? interior.originalWalls;
+    interior.roof = kit?.roof ?? interior.originalRoof;
+    tideglassFallback.visible = !kit;
   } };
 }
 
