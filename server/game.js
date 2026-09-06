@@ -4,7 +4,8 @@ import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
-import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, seawardBearing, sideEventWave } from '../shared/side-events.js';
+import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
+import { FINALE_STAGES, FINALE_STAGE_DELAY, FINALE_FRONT, FINALE_ELITE_FRONT, FINALE_ARC, FINALE_RANK_SIZE, FINALE_DIRECTION_DELAY, shardBearing, finaleStageRoster } from '../shared/finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
 const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
@@ -85,48 +86,107 @@ export function sideEventWaypoint(from, point, radius = 0.85) {
   return null;
 }
 
-export function sideEventSpawns(id, playerCount, wave, occupied = []) {
-  const point = SIDE_EVENTS.find(event => event.id === id);
-  const roster = sideEventWave(wave, playerCount);
-  if (!point || !roster || playerCount > MAX_PLAYERS ||
+// Deeper fallbacks first, then shallower ones: a rank that cannot fit behind a
+// short front (the yard forms on the surf line) falls back toward the objective
+// instead of stepping out to sea and failing the whole formation.
+const FORMATION_FALLBACKS = [0, 2, -2, 4, -4, 6, -6, 8, -8, 12, -12, 16, -16, 20, -20];
+// Routes are accepted with a slightly wider body than the walkers carry, so a
+// spawn never hands an attacker a route that grazes a prop on the way in.
+const FORMATION_ROUTE_MARGIN = 0.05;
+
+// Lay `count` units of one type across `ranks` rows facing `point`: each row is
+// a rank deeper, every other unit in a row stands staggered further out, and a
+// row surges SIDE_EVENT_RANK_DELAY after the one in front of it.
+export function rankUnits(type, count, firstRank, ranks, { bearing, arc, delay = 0 }) {
+  const units = [], perRank = Math.ceil(count / Math.max(1, ranks));
+  for (let index = 0; index < count; index++) {
+    const row = Math.floor(index / perRank), inRow = Math.min(perRank, count - row * perRank);
+    units.push({ type, rank: firstRank + row, angle: bearing + ((index % perRank + 0.5) / inRow - 0.5) * arc * 2,
+      stagger: (index % perRank) % 2 ? SIDE_EVENT_RANK_STAGGER : 0, delay: (firstRank + row) * SIDE_EVENT_RANK_DELAY + delay });
+  }
+  return units;
+}
+
+// Place a formation of ranked units on an arc around `bearing`, `front` metres
+// out from `point`, checking that every unit stands clear and can walk in.
+export function formationSpawns({ point, bearing, arc, front, region, units, occupied = [] }) {
+  if (![point?.x, point?.z, bearing, arc, front].every(Number.isFinite) || !Array.isArray(units) ||
     !Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
-  // Ranks form on the seaward side: crabs lead in up to three ranks, spitters
-  // follow, and the Tidebreakers anchor the centre of the rearmost rank.
-  const bearing = seawardBearing(point), units = [];
-  const rank = (type, count, rankIndex, ranks = 1) => {
-    const perRank = Math.ceil(count / ranks);
-    for (let index = 0; index < count; index++) {
-      const row = Math.floor(index / perRank), inRow = Math.min(perRank, count - row * perRank);
-      units.push({ type, rank: rankIndex + row, angle: bearing + ((index % perRank + 0.5) / inRow - 0.5) * SIDE_EVENT_ARC * 2 });
-    }
-  };
-  const crabRanks = Math.min(3, Math.ceil(roster.crab / 4));
-  rank('tidebreaker', roster.tidebreaker, crabRanks);
-  rank('spitter', roster.spitter, crabRanks);
-  rank('crab', roster.crab, 0, crabRanks);
   const result = [];
   for (const unit of units) {
     const radius = routeRadius(enemyStats(unit.type)), spacing = unit.type === 'tidebreaker' ? 3.6 : 2.8;
     let spawn = null;
-    // Nudge along the front first, then further out. Every fallback passes the
-    // same checks; exhausting candidates fails safely instead of spawning the
-    // last rejected point.
-    search: for (const extra of [0, 2, -2, 4, 6, 8]) for (let attempt = 0; attempt < 29; attempt++) {
-      const sway = Math.ceil(attempt / 2) * (attempt % 2 ? 1 : -1) * Math.PI / 36;
-      const angle = unit.angle + sway, out = point.front + unit.rank * SIDE_EVENT_RANK_SPACING + extra;
-      if (Math.abs(angle - bearing) > SIDE_EVENT_ARC + Math.PI / 36) continue;
-      const candidate = { x: point.x + Math.cos(angle) * out, z: point.z + Math.sin(angle) * out };
-      if (heightAt(candidate.x, candidate.z) < 1.1 || !sideEventStandingClear(candidate, radius)) continue;
-      if ([...occupied, ...result].some(other => distance(other, candidate) < Math.max(spacing, other.type === 'tidebreaker' ? 3.6 : 0))) continue;
-      if ([BEACON, ...CHESTS, ...SHRINES].some(other => distance(other, candidate) < 3.6)) continue;
-      const direct = sideEventPathClear(candidate, point, radius);
-      const waypoint = direct ? null : sideEventWaypoint(candidate, point, radius);
-      if (!direct && !waypoint) continue;
-      spawn = { ...candidate, type: unit.type, zone: point.region, ...(waypoint ? { waypoint } : {}) };
-      break search;
+    // Nudge along the front first, then deeper or shallower. Every fallback
+    // passes the same checks; exhausting candidates fails safely instead of
+    // spawning the last rejected point.
+    search: for (const extra of FORMATION_FALLBACKS) {
+      const out = front + unit.rank * SIDE_EVENT_RANK_SPACING + (unit.stagger ?? 0) + extra;
+      if (out < front - 2) continue;
+      for (let attempt = 0; attempt < 29; attempt++) {
+        const sway = Math.ceil(attempt / 2) * (attempt % 2 ? 1 : -1) * Math.PI / 36;
+        const angle = unit.angle + sway;
+        if (Math.abs(angle - bearing) > arc + Math.PI / 36) continue;
+        const candidate = { x: point.x + Math.cos(angle) * out, z: point.z + Math.sin(angle) * out };
+        if (heightAt(candidate.x, candidate.z) < 1.1 || !sideEventStandingClear(candidate, radius)) continue;
+        if ([...occupied, ...result].some(other => distance(other, candidate) < Math.max(spacing, other.type === 'tidebreaker' ? 3.6 : 0))) continue;
+        if ([BEACON, ...CHESTS, ...SHRINES].some(other => distance(other, candidate) < 3.6)) continue;
+        const route = radius + FORMATION_ROUTE_MARGIN;
+        const direct = sideEventPathClear(candidate, point, route);
+        const waypoint = direct ? null : sideEventWaypoint(candidate, point, route);
+        if (!direct && !waypoint) continue;
+        spawn = { ...candidate, type: unit.type, zone: region, delay: Math.max(0, Number(unit.delay) || 0), ...(waypoint ? { waypoint } : {}) };
+        break search;
+      }
     }
     if (!spawn) return null;
     result.push(spawn);
+  }
+  return result;
+}
+
+export function sideEventSpawns(id, playerCount, wave, occupied = []) {
+  const point = SIDE_EVENTS.find(event => event.id === id);
+  const roster = sideEventWave(wave, playerCount);
+  if (!point || !roster || playerCount > MAX_PLAYERS) return null;
+  // Ranks form on the seaward side: crabs lead in up to three ranks, spitters
+  // follow one rank behind them, and the Tidebreakers anchor a rank of their
+  // own so the slow mini bosses arrive last and never crowd the spitters.
+  const bearing = seawardBearing(point), arc = SIDE_EVENT_ARC;
+  const crabRanks = Math.min(3, Math.ceil(roster.crab / 4));
+  const units = [
+    ...rankUnits('tidebreaker', roster.tidebreaker, crabRanks + (roster.spitter ? 1 : 0), 1, { bearing, arc }),
+    ...rankUnits('spitter', roster.spitter, crabRanks, 1, { bearing, arc }),
+    ...rankUnits('crab', roster.crab, 0, crabRanks, { bearing, arc }),
+  ];
+  return formationSpawns({ point, bearing, arc, front: point.front, region: point.region, units, occupied });
+}
+
+// Each stage of the final battle. Wave stages march in from the bearing of each
+// shrine the crew looted a shard from, one direction after another; the boss
+// stage claims the arena in front of the lighthouse with no placement checks.
+export function finaleStageSpawns(stage, playerCount, occupied = []) {
+  const roster = finaleStageRoster(stage, playerCount);
+  if (!roster || !Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
+  if (roster.tempest) return [{ type: 'tempest', x: BEACON.x, z: BEACON.z - 16, zone: 'haven', delay: 0 }];
+  const result = [];
+  for (let direction = 0; direction < roster.groups.length; direction++) {
+    const group = roster.groups[direction], shrine = SHRINES.find(s => s.id === group.from);
+    if (!shrine) return null;
+    const bearing = shardBearing(shrine), delay = direction * FINALE_DIRECTION_DELAY;
+    const crabRanks = Math.ceil(group.crab / FINALE_RANK_SIZE);
+    // Tidebreakers form a column of their own closer in, so each one is a rank
+    // deeper and a beat later than the elite ahead of it.
+    const fronts = [
+      { front: FINALE_ELITE_FRONT, units: rankUnits('tidebreaker', group.tidebreaker, 0, group.tidebreaker, { bearing, arc: FINALE_ARC, delay }) },
+      { front: FINALE_FRONT, units: [...rankUnits('spitter', group.spitter, crabRanks, 1, { bearing, arc: FINALE_ARC, delay }),
+        ...rankUnits('crab', group.crab, 0, crabRanks, { bearing, arc: FINALE_ARC, delay })] },
+    ];
+    for (const { front, units } of fronts) {
+      if (!units.length) continue;
+      const spawns = formationSpawns({ point: BEACON, bearing, arc: FINALE_ARC, front, region: 'haven', units, occupied: [...occupied, ...result] });
+      if (!spawns) return null;
+      for (const spawn of spawns) result.push({ ...spawn, from: group.from });
+    }
   }
   return result;
 }
@@ -178,6 +238,9 @@ export class Game {
     this.sideEvents = SIDE_EVENTS.map(event => ({ id: event.id, status: 'available', wave: 0, remaining: 0,
       integrity: 100, maxIntegrity: 100, startedAt: 0, endsAt: 0, finishedAt: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
+    // Stage 0 means the beacon is unlit; `stages` travels in the snapshot so a
+    // client can label "stage 2/3" without importing the stage table.
+    this.finale = { stage: 0, stages: FINALE_STAGES.length, remaining: 0, _nextStageAt: 0, _crewCount: 1, _pending: [], _mark: null };
     this.pings = []; this.drops = []; this.enemies.clear();
     for (const p of this.players.values()) this.resetPlayer(p);
   }
@@ -412,7 +475,12 @@ export class Game {
     const p = this.players.get(sourceId); if (p) p.kills++;
     this.pearls += enemyStats(e.type).pearls;
     this.emit({ kind: 'defeated', id: e.id, x: e.x, y: e.y, z: e.z, type: e.type });
-    if (e.type === 'tempest') this.win();
+    // Minions are conjured by the boss rather than by a stage, so they leave
+    // with it and never hold a stage open.
+    if (e.type === 'tempest') for (const minion of [...this.enemies.values()]) if (minion._bossMinion) this.enemies.delete(minion.id);
+    // Settle here as well as on tick, so killing the last enemy of the last
+    // stage wins in the same call.
+    if (e._finale) this.settleFinale();
   }
 
   heal(p) {
@@ -470,10 +538,10 @@ export class Game {
     } else if (option.kind === 'beacon') {
       this.phase = 'finale';
       for (const event of this.sideEvents) if (event.status === 'active') this.finishSideEvent(event, 'cancelled');
-      const boss = this.spawnEnemy('tempest', BEACON.x, BEACON.z - 16, 'haven');
-      this.bossId = boss.id;
+      // The crew that lights the beacon is the crew every stage is sized for.
+      this.finale._crewCount = Math.max(1, this.onlineCount);
       this.emit({ kind: 'phase', phase: 'finale' });
-      this.emit({ kind: 'notice', message: 'The Tempest Crab has the final compass! Watch the splash circles.' });
+      this.startFinaleStage(1);
     }
     return good();
   }
@@ -499,18 +567,41 @@ export class Game {
     const spawns = sideEventSpawns(id, crewCount, 1, [...this.enemies.values()]);
     if (!spawns) return bad('The supplies need a clear approach. Try again in a moment.');
     Object.assign(event, { status: 'active', wave: 1, integrity: 100, startedAt: this.elapsed,
-      endsAt: this.elapsed + SIDE_EVENT_DURATION, finishedAt: 0, _crewCount: crewCount, _nextWaveAt: 0 });
+      endsAt: this.elapsed + SIDE_EVENT_DURATION, finishedAt: 0, _crewCount: crewCount, _nextWaveAt: 0, _pending: [] });
     this.spawnSideEventWave(event, spawns);
     this.notifySideEvent(event, `${point.name}: crabs are surging in from the sea! Keep them off the cyan supplies.`, undefined, spawns);
     return good();
   }
 
-  spawnSideEventWave(event, spawns) {
+  // A surge arrives rank by rank: the front rank lands now and the rest wait on
+  // the holder (a defense event or the finale) until their delay elapses, so a
+  // wave streams onto the objective instead of landing as one clump.
+  queueSpawns(holder, spawns, mark) {
+    holder._pending = []; holder._mark = mark;
     for (const spawn of spawns) {
-      const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone, null, event._crewCount);
-      enemy._sideEvent = event.id;
-      enemy._sideWaypoint = spawn.waypoint ? { x: spawn.waypoint.x, z: spawn.waypoint.z, waypoint: true } : null;
+      if (spawn.delay > 0) holder._pending.push({ ...spawn, at: this.elapsed + spawn.delay });
+      else this.placeSpawn(holder, spawn, mark);
     }
+  }
+
+  placeSpawn(holder, spawn, mark = holder._mark) {
+    const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone, null, holder._crewCount);
+    Object.assign(enemy, mark);
+    enemy._sideWaypoint = spawn.waypoint ? { x: spawn.waypoint.x, z: spawn.waypoint.z, waypoint: true } : null;
+    // The boss is the only enemy the snapshot names, whichever stage brings it.
+    if (enemy.type === 'tempest') this.bossId = enemy.id;
+    return enemy;
+  }
+
+  releaseSpawns(holder, until = this.elapsed) {
+    const pending = holder?._pending;
+    if (!pending?.length) return;
+    holder._pending = pending.filter(spawn => spawn.at > until + 1e-8);
+    for (const spawn of pending) if (spawn.at <= until + 1e-8) this.placeSpawn(holder, spawn, holder._mark);
+  }
+
+  spawnSideEventWave(event, spawns) {
+    this.queueSpawns(event, spawns, { _sideEvent: event.id });
     event.remaining = spawns.length;
   }
 
@@ -519,14 +610,14 @@ export class Game {
   notifySideEvent(event, message, reward, spawns) {
     this.emit({ kind: 'side-event', id: event.id, status: event.status, wave: event.wave,
       ...(reward === undefined ? {} : { reward }),
-      ...(spawns ? { spawns: spawns.map(spawn => ({ type: spawn.type, x: Math.round(spawn.x * 10) / 10, z: Math.round(spawn.z * 10) / 10 })) } : {}) });
+      ...(spawns ? { spawns: spawns.map(spawn => ({ type: spawn.type, x: Math.round(spawn.x * 10) / 10, z: Math.round(spawn.z * 10) / 10, delay: Math.round(spawn.delay * 10) / 10 })) } : {}) });
     if (message) this.emit({ kind: 'notice', message });
   }
 
   finishSideEvent(event, status) {
     if (event.status !== 'active') return;
     const point = SIDE_EVENTS.find(definition => definition.id === event.id);
-    event.status = status; event.remaining = 0; event.finishedAt = this.elapsed; event._nextWaveAt = 0;
+    event.status = status; event.remaining = 0; event.finishedAt = this.elapsed; event._nextWaveAt = 0; event._pending = [];
     for (const enemy of this.enemies.values()) if (enemy._sideEvent === event.id) this.enemies.delete(enemy.id);
     if (status === 'completed') {
       this.pearls += point.reward;
@@ -543,7 +634,10 @@ export class Game {
       if (event.status !== 'active') continue;
       if (this.phase !== 'voyage') { this.finishSideEvent(event, 'cancelled'); continue; }
       if (event.integrity <= 0 || this.elapsed + 1e-8 >= event.endsAt) { this.finishSideEvent(event, 'failed'); continue; }
-      event.remaining = [...this.enemies.values()].filter(enemy => enemy._sideEvent === event.id).length;
+      this.releaseSpawns(event);
+      // Ranks still forming up count as remaining, so a wave never completes
+      // while part of it has yet to surge in.
+      event.remaining = [...this.enemies.values()].filter(enemy => enemy._sideEvent === event.id).length + event._pending.length;
       if (!advanceWaves || event.remaining) continue;
       if (event.wave === SIDE_EVENT_WAVES) { this.finishSideEvent(event, 'completed'); continue; }
       if (!event._nextWaveAt) event._nextWaveAt = this.elapsed + 3;
@@ -556,7 +650,44 @@ export class Game {
     }
   }
 
-  sideEventDestination(enemy, point) {
+  // Stage numbers index FINALE_STAGES, so a new stage is added by appending to
+  // that table: nothing here knows which stage brings the boss.
+  startFinaleStage(n) {
+    const definition = FINALE_STAGES[n - 1];
+    if (!definition) return;
+    const spawns = finaleStageSpawns(n, this.finale._crewCount, [...this.enemies.values()]);
+    // A crowded lighthouse can block every candidate; retry a second later
+    // rather than skipping a stage or throwing mid-tick.
+    if (!spawns) { this.finale._nextStageAt = this.elapsed + 1; return; }
+    this.finale.stage = n; this.finale._nextStageAt = 0;
+    this.queueSpawns(this.finale, spawns, { _finale: n });
+    this.finale.remaining = spawns.length;
+    this.emit({ kind: 'finale', stage: n, stages: FINALE_STAGES.length,
+      spawns: spawns.map(spawn => ({ type: spawn.type, x: Math.round(spawn.x * 10) / 10, z: Math.round(spawn.z * 10) / 10,
+        delay: Math.round(spawn.delay * 10) / 10, ...(spawn.from ? { from: spawn.from } : {}) })) });
+    this.emit({ kind: 'notice', message: definition.notice });
+  }
+
+  tickFinale() {
+    // Stage 0 with a retry pending is a first stage that had no room yet; a
+    // finale phase with no stage and no retry stays inert.
+    if (this.phase !== 'finale' || (this.finale.stage < 1 && !this.finale._nextStageAt)) return;
+    this.releaseSpawns(this.finale);
+    this.settleFinale();
+  }
+
+  // A stage ends only when everything it brought is gone, pending ranks
+  // included; the voyage is won when the last stage in the table is cleared.
+  settleFinale() {
+    const finale = this.finale;
+    finale.remaining = [...this.enemies.values()].filter(enemy => enemy._finale === finale.stage).length + finale._pending.length;
+    if (finale.remaining) return;
+    if (finale.stage >= finale.stages) { this.win(); return; }
+    if (!finale._nextStageAt) finale._nextStageAt = this.elapsed + FINALE_STAGE_DELAY;
+    else if (this.elapsed + 1e-8 >= finale._nextStageAt) this.startFinaleStage(finale.stage + 1);
+  }
+
+  routeDestination(enemy, point) {
     const radius = routeRadius(enemy);
     if (sideEventPathClear(enemy, point, radius)) { enemy._sideWaypoint = null; return point; }
     if (enemy._sideWaypoint && distance(enemy, enemy._sideWaypoint) > 0.2) return enemy._sideWaypoint;
@@ -642,6 +773,7 @@ export class Game {
     if (this.phase !== 'voyage' && this.phase !== 'finale') return;
     this.tickSideEvents(false);
     for (const e of [...this.enemies.values()]) this.tickEnemy(e, dt);
+    this.tickFinale();
     this.tickSideEvents();
     for (const shrine of this.shrines) {
       if (shrine.status !== 'active') continue;
@@ -685,11 +817,15 @@ export class Game {
       return;
     }
     if (e.state === 'attack') { if (t < e._endAttack) return; e.state = 'idle'; }
+    // Stage attackers converge on the lighthouse, not on the point they spawned
+    // at, and only chase a pirate they can actually walk to.
+    const stageAttacker = !!e._finale && e.type !== 'tempest';
     const targets = [...this.players.values()].filter(p => p.online && p.hp > 0 && !p.knockedUntil && p.mode === 'ground' &&
       !((e._camp || e._sideEvent) && inSafeLanding(p)) &&
       (supplies ? distance(p, supplies) < supplies.radius + 8 && distance(p, e) < 18 :
+        stageAttacker ? distance(p, BEACON) < 60 && distance(p, e) < 30 :
         distance(p, e._home) < (e.type === 'tempest' ? 55 : e._shrine ? 38 : e._camp ? 18 : 24)) &&
-      canReach(e, p) && (!supplies || sideEventPathClear(e, p)));
+      canReach(e, p) && ((!supplies && !stageAttacker) || sideEventPathClear(e, p)));
     targets.sort((a, b) => distance(a, e) - distance(b, e));
     const target = targets[0];
     if (e.type === 'tempest' && target && t >= e._summonAt) {
@@ -703,7 +839,9 @@ export class Game {
         this.emit({ kind: 'notice', message: 'Tiny tide crabs have joined the splash party!' });
       }
     }
-    let destination = target ?? (supplies ? this.sideEventDestination(e, supplies) : e._home);
+    // Attackers that reached the dais hold it instead of stacking on one point.
+    if (!target && stageAttacker && distance(e, BEACON) <= 4) { e.state = 'idle'; return; }
+    let destination = target ?? (supplies ? this.routeDestination(e, supplies) : stageAttacker ? this.routeDestination(e, BEACON) : e._home);
     if (!target && supplies && distance(e, supplies) <= 2.8 + (stats.miniBoss ? 1 : 0) && Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
       e.yaw = Math.atan2(-(supplies.x - e.x), -(supplies.z - e.z));
       if (t >= e._nextAttack) {
@@ -737,7 +875,7 @@ export class Game {
       if ((ranged && d < 13) || (!ranged && d < (e.type === 'tempest' ? 4.5 : e.attackRadius - 0.5))) { e.state = 'idle'; return; }
     }
     if (d < (destination.waypoint ? 0.2 : 0.5)) { e.state = 'idle'; return; }
-    e.state = target || supplies ? 'chase' : 'idle';
+    e.state = target || supplies || stageAttacker ? 'chase' : 'idle';
     const speed = !target && e._camp ? 1.15 : stats.speed;
     if (!target) e.yaw = Math.atan2(-(destination.x - e.x), -(destination.z - e.z));
     const previous = { x: e.x, z: e.z };
@@ -770,6 +908,7 @@ export class Game {
       players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), collectedDropIds: [...p.collectedDropIds], inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
       sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
+      finale: cleanObject(this.finale, ['stage', 'stages', 'remaining']),
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
       pings: this.pings.map(p => ({ ...p })), stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };

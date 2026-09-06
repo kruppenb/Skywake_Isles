@@ -136,7 +136,11 @@ Late joins allowed; drop from safe area then join the current shared progress.
 State shape, all fields always present:
 {phase:'lobby'|'voyage'|'finale'|'victory',elapsed,seed,round,hostId,
  players:[],enemies:[],shrines:[],chests:[],pearls,shards,bossId:null|string,
+ finale:{stage,stages,remaining},
  pings:[],stats:{wins,voyages,bestPearls},victory:null|{pearls,duration,rescues,kills}}
+finale.stage is 0 until the beacon is lit, then the 1-based index into
+shared/finale.js FINALE_STAGES; stages is that list's length; remaining counts
+the stage's living and still-forming enemies (boss minions excluded).
 Player public fields:
 {id,name,color,online,ready,x,y,z,yaw,pitch,vy,mode,jumpHeld,grounded,
  deckX,deckZ,hp,maxHp,ammo,maxAmmo,weapon,reloadUntil,healUntil,
@@ -160,9 +164,11 @@ equal or better gun walked over drop id; it is hidden for them and the crew
 gained pearls), shrine {id,status}, heal {playerId},
 downed {playerId}, revive {playerId,by?}, ping {playerId,x,z},
 phase {phase}, notice {message}, victory {pearls,duration,rescues,kills},
-side-event {id,status,wave,reward?,spawns?:[{type,x,z}]} (spawns only when a
-wave forms; clients stage the surge and its banner from this event, never
-from snapshots).
+side-event {id,status,wave,reward?,spawns?:[{type,x,z,delay}]} (spawns only
+when a wave forms; delay is the seconds until that rank breaks the surface;
+clients stage the surge and its banner from this event, never from
+snapshots), finale {stage,stages,spawns:[{type,x,z,delay,from?}]} (one per
+stage start; from names the shrine whose direction a wave unit comes from).
 World/client tolerate extra fields and unknown events.
 
 Loop: host presses Set sail (launch) in lobby, all online crew begin aboard,
@@ -176,9 +182,13 @@ stay away from the initial beach. Optional defenses (shared/side-events.js):
 E at the cyan supplies of the market, farm or yard starts a once-per-voyage,
 three-wave surge that never touches the shard quest. Attackers form ranks on
 the seaward side of the supplies (bearing from the island centre, a 60 degree
-half-arc, first rank at the site's front distance, later ranks 3m further
-out, the yard's front on the surf line) and walk the two-leg route the
-server validated at spawn when a building blocks the straight approach.
+half-arc, first rank at the site's front distance, later ranks 5m further
+out with every other unit 2.5m deeper still, the yard's front on the surf
+line) and walk the two-leg route the server validated at spawn when a
+building blocks the straight approach. Ranks break the surface 2.5s apart
+(spawns queue on the event and count toward remaining until they appear), so
+a wave arrives as a stream rather than a clump; spitters form a rank behind
+the crabs and Tidebreakers a rank behind the spitters.
 Rosters latch to the starting crew: wave 1 crabs only, wave 2 adds spitters,
 the final wave adds one Tidebreaker mini boss per two pirates. Supplies
 hold 100 integrity, crabs strip 8 and Tidebreakers 14 per hit, the deadline
@@ -190,8 +200,19 @@ on the chest and is collected by walking within 2m, usually on the same tick.
 A pirate already carrying an equal or better copy salvages it instead: the
 drop is added to their collectedDropIds (hidden for them only) and the crew
 gains SALVAGE_PEARLS (5); no competition for loot. Three shards unlock BEACON.
-E at BEACON starts finale with Tempest Crab. Boss has telegraphed swipes and
-ranged splashes (events acceptable for visuals) and minion summons with cap.
+E at BEACON starts the finale, which runs through shared/finale.js
+FINALE_STAGES in order with a 4s pause between stages; the voyage is won when
+the last stage is cleared, and a stage is appended (never inserted before
+the boss by assumption) to extend the battle. Rosters latch to the crew that
+lit the beacon. Stage 1: crabs form ranks 38m out along the bearing from the
+lighthouse toward each shard's shrine (3 per shrine +1 per extra pirate,
+ranks 2.5s apart, each shrine direction 1.5s after the last) and march on
+the dais, chasing pirates within 30m that they can reach. Stage 2: the
+Tidebreaker elites from the optional defenses' final wave (2 + one per two
+pirates, dealt across the shrine directions, 32m out). Stage 3: the Tempest
+Crab spawns 16m in front of the beacon. A fourth stage is reserved. Boss has
+telegraphed swipes and ranged splashes (events acceptable for visuals) and
+minion summons with cap; its minions leave with it.
 Boss 650HP solo +180 per additional player; normal crabs ~45–65HP.
 Defeat boss -> victory tableau + all-player results -> host New voyage resets
 to lobby for replay. Persist aggregate victories and best pearls.

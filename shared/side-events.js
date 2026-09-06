@@ -3,8 +3,14 @@ export const SIDE_EVENT_DURATION = 180;
 export const SIDE_EVENT_COLOR = '#79f5ff';
 // Attackers form ranks on the seaward side of the supplies, inside this arc
 // around the bearing from the island's centre, starting `front` metres out.
+// Ranks stand SIDE_EVENT_RANK_SPACING apart, every other unit in a rank stands
+// SIDE_EVENT_RANK_STAGGER further out, and each rank surges in
+// SIDE_EVENT_RANK_DELAY seconds after the one before it, so a wave arrives as a
+// stream rather than a clump.
 export const SIDE_EVENT_ARC = Math.PI / 3;
-export const SIDE_EVENT_RANK_SPACING = 3;
+export const SIDE_EVENT_RANK_SPACING = 5;
+export const SIDE_EVENT_RANK_STAGGER = 2.5;
+export const SIDE_EVENT_RANK_DELAY = 2.5;
 
 // Optional, once-per-voyage defenses; these never contribute compass shards.
 export const SIDE_EVENTS = Object.freeze([

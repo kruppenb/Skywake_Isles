@@ -8,6 +8,7 @@ import { WebSocket } from 'ws';
 import { createGameServer } from '../server/index.js';
 import { COLORS, SPAWN, BEACON, SHRINES, CHESTS } from '../shared/world.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
+import { FINALE_STAGES, finaleStageRoster } from '../shared/finale.js';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, timeout = 5000, label = 'condition', details = () => '') {
@@ -52,7 +53,7 @@ function request(port, pathname) {
   });
 }
 
-test('real five-client voyage, reconnect/late join, guarded progression, victory/replay, and restart persistence', { timeout: 240000 }, async t => {
+test('real five-client voyage, reconnect/late join, guarded progression, victory/replay, and restart persistence', { timeout: 480000 }, async t => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'skywake-e2e-'));
   let server, restarted, controller;
   const allSockets = [], crew = [];
@@ -200,11 +201,26 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     await until(() => gathered(BEACON), 22000, 'return to lighthouse', details);
     crew[1].action('interact', BEACON.id);
     await until(() => crew[1].state.phase === 'finale', 4000, 'finale begins');
-    assert.equal(crew[1].state.enemies.find(e => e.id === crew[1].state.bossId).maxHp, 1370);
-    await until(() => crew.every(b => b.state.phase === 'victory'), 35000, 'five-pirate Tempest Crab victory', details);
+    // The final battle runs in stages: shrine crabs, Tidebreaker elites, then
+    // the boss. Every stage is cleared by the same aimed fire the bots use.
+    const bossStage = FINALE_STAGES.findIndex(stage => stage.kind === 'boss') + 1;
+    const stageOne = finaleStageRoster(1, 5).groups.reduce((sum, group) => sum + group.crab + group.spitter + group.tidebreaker, 0);
+    assert.equal(crew[1].state.finale.stage, 1); assert.equal(crew[1].state.finale.stages, FINALE_STAGES.length);
+    assert.equal(crew[1].state.bossId, null); assert.equal(crew[1].state.finale.remaining, stageOne);
+    assert.ok(crew[1].events.some(e => e.kind === 'finale' && e.stage === 1 && e.spawns.length === stageOne && e.spawns.every(s => SHRINES.some(shrine => shrine.id === s.from))));
+    await until(() => crew.every(b => b.state.finale?.stage === 2), 120000, 'stage one shrine crabs cleared', details);
+    t.diagnostic('Stage one: shrine crabs cleared at the lighthouse dais.');
+    const bossHp = await until(() => {
+      const state = crew[1].state, boss = state.enemies.find(e => e.id === state.bossId);
+      return state.finale.stage === bossStage && boss ? boss.maxHp : null;
+    }, 120000, 'stage two Tidebreakers cleared and the Tempest Crab arrives', details);
+    assert.equal(bossHp, 1370);
+    assert.ok(crew[1].events.some(e => e.kind === 'finale' && e.stage === 2 && e.spawns.every(s => s.type === 'tidebreaker')));
+    await until(() => crew.every(b => b.state.phase === 'victory'), 120000, 'five-pirate Tempest Crab victory', details);
     clearInterval(controller); controller = null;
     const results = crew[1].state.victory;
-    assert.ok(results.kills >= 16); assert.ok(results.pearls >= 192); assert.ok(results.duration > 40);
+    assert.ok(crew.every(b => b.state.finale.stage === FINALE_STAGES.length && b.state.finale.remaining === 0));
+    assert.ok(results.kills >= 16 + stageOne); assert.ok(results.pearls >= 192 + stageOne * 3); assert.ok(results.duration > 40);
     assert.ok(crew.every(b => b.state.stats.wins === 1));
     assert.ok(crew.every(b => b.events.some(e => e.kind === 'victory')));
     assert.deepEqual(crew[0].state.victory, crew[4].state.victory);
@@ -214,6 +230,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     await until(() => crew.every(b => b.state.phase === 'lobby' && b.state.round === 2), 5000, 'all-player replay lobby');
     assert.ok(crew.every(b => b.player.mode === 'aboard' && b.player.hp === 100));
     assert.equal(crew[0].state.shards, 0); assert.equal(crew[0].state.pearls, 0); assert.equal(crew[0].state.stats.wins, 1);
+    assert.equal(crew[0].state.finale.stage, 0); assert.equal(crew[0].state.bossId, null);
     assert.ok(crew.every(b => b.state.drops.length === 0 && b.player.inventory.longshot === undefined));
     for (const b of allSockets) b.close();
     await server.close(); server = null;

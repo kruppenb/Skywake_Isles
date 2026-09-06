@@ -3,6 +3,7 @@ import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } 
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
+import { FINALE_STAGES } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
 import { createLootReveal } from './loot-reveal.js';
 
@@ -49,6 +50,20 @@ export function sideEventAnnouncement(event) {
   const subtitle = final ? (bosses ? `${bosses} Tidebreaker${bosses === 1 ? ' rises' : 's rise'} from the deep!` : 'The tide throws everything it has!')
     : event.wave === 1 ? 'Crabs surge in from the sea!' : 'The tide brings more crabs!';
   return { kicker: definition.name, title: final ? 'Final wave' : `Wave ${event.wave}`, subtitle, final };
+}
+
+// Big top-of-screen call-out for each stage of the final battle. Like the
+// side-event banner, this is driven only by the event, never inferred from
+// the snapshot, so a late joiner does not see a stale banner.
+export function finaleAnnouncement(event) {
+  if (!event || event.kind !== 'finale' || !Number.isInteger(event.stage) || event.stage < 1) return null;
+  const stage = FINALE_STAGES[event.stage - 1];
+  if (!stage) return null;
+  const stages = Number.isInteger(event.stages) ? event.stages : FINALE_STAGES.length;
+  const spawns = Array.isArray(event.spawns) ? event.spawns : [];
+  const tidebreakers = spawns.filter((spawn) => spawn?.type === 'tidebreaker').length;
+  const subtitle = tidebreakers > 0 ? `${tidebreakers} Tidebreaker${tidebreakers === 1 ? ' marches' : 's march'} on the lighthouse!` : stage.banner;
+  return { kicker: 'Tideglass Lighthouse', title: `Stage ${event.stage}`, subtitle, final: event.stage >= stages };
 }
 
 export function findInteractable(state, player) {
@@ -622,7 +637,15 @@ export function createUI(callbacks = {}) {
       } else if (player.mode === 'gliding') {
         title = 'Glide onto the island'; detail = 'Steer with WASD. Sunwake Strand is a friendly landing spot.';
       } else if (state.phase === 'finale') {
-        title = 'Free the compass'; detail = 'Defeat the Tempest Crab. Keep clear of its glowing attacks!';
+        const stage = FINALE_STAGES[(state.finale?.stage || 0) - 1];
+        const boss = state.enemies.find((enemy) => enemy.id === state.bossId && enemy.hp > 0);
+        if (!stage || stage.kind === 'boss' || boss) {
+          title = 'Free the compass'; detail = 'Defeat the Tempest Crab. Keep clear of its glowing attacks!';
+        } else {
+          const remaining = state.finale.remaining, stages = state.finale.stages;
+          title = stage.objective;
+          detail = remaining > 0 ? `Stage ${state.finale.stage}/${stages} · ${remaining} ${stage.unit}${remaining === 1 ? '' : 's'} remaining` : `Stage ${state.finale.stage} cleared! The next stage gathers…`;
+        }
       } else if (state.shards >= 3) {
         title = 'Return to the lighthouse'; detail = `Tideglass Haven · ${objectiveDistance} m away`;
       } else {

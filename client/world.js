@@ -367,7 +367,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const driftwoodYard = createDriftwoodYard({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.driftwoodLegacyVegetation, landingFallback: scenery.sunwakeLandingFallback });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
-  const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
+  const effects = [], pendingSurges = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
   let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
   let cameraShipPose = null, cameraFollowPose = null;
@@ -447,6 +447,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const ring = meshRing(1, .06, color, .8); ring.position.set(x, heightAt(x, z) + .14, z);
     addEffect(ring, duration, (object, age) => { object.scale.setScalar(.3 + radius * age / duration); object.material.opacity = (1 - age / duration) * .85; });
   }
+  // A surge's spawns break the surface one rank at a time; each spawn's foam
+  // waits for its own delay instead of firing all at once with the event.
+  function scheduleSurge(delay, fn) { pendingSurges.push({ at: clockTime + Math.max(0, delay || 0), fn }); }
   function speechPop(text, x, y, z, color = '#ffe7a6') {
     const surface = document.createElement('canvas'); surface.width = 256; surface.height = 128;
     const context = surface.getContext('2d'); if (!context) return;
@@ -557,6 +560,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
 
   function handleEvent(event) {
     if (!event || disposed) return;
+    // A new phase (finale start, victory, restart) drops any surge foam still
+    // waiting on its delay, so a fresh round never pops old ranks late.
+    if (event.kind === 'phase') pendingSurges.length = 0;
     if (event.kind === 'shot' && event.from && event.to) {
       if (![event.from.x, event.from.y, event.from.z, event.to.x, event.to.y, event.to.z].every(Number.isFinite)) return;
       showShot(event);
@@ -589,12 +595,31 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       const player = latestState?.players?.find(p => p.id === event.playerId);
       if (player) { pulse(player.x, player.z, '#9ef5c5', event.kind === 'heal' ? 9 : 3, 1.2); burst(player.x, player.y + 1, player.z, '#bafadb', 14, 1.2); }
     } else if (event.kind === 'side-event' && Array.isArray(event.spawns)) {
-      // Each attacker breaks the surface in a burst of foam where it spawned.
+      // Each attacker breaks the surface in a burst of foam where it spawned,
+      // timed to its own delay so a wave's ranks surge in rather than pop at once.
       for (const spawn of event.spawns) {
         if (!Number.isFinite(spawn?.x) || !Number.isFinite(spawn?.z)) continue;
         const big = spawn.type === 'tidebreaker', y = heightAt(spawn.x, spawn.z);
-        pulse(spawn.x, spawn.z, '#c9f4ff', big ? 4.5 : 2.6, big ? 1.1 : .8);
-        burst(spawn.x, y + .35, spawn.z, '#eafcff', big ? 30 : 16, big ? 2.2 : 1.5);
+        scheduleSurge(spawn.delay, () => {
+          pulse(spawn.x, spawn.z, '#c9f4ff', big ? 4.5 : 2.6, big ? 1.1 : .8);
+          burst(spawn.x, y + .35, spawn.z, '#eafcff', big ? 30 : 16, big ? 2.2 : 1.5);
+        });
+      }
+    } else if (event.kind === 'finale' && Array.isArray(event.spawns)) {
+      // The lighthouse stages surge from each shrine's bearing (or, for the
+      // boss, straight from the deep); reuse the side-event foam sizes.
+      for (const spawn of event.spawns) {
+        if (!Number.isFinite(spawn?.x) || !Number.isFinite(spawn?.z)) continue;
+        const y = heightAt(spawn.x, spawn.z);
+        if (spawn.type === 'tempest') {
+          scheduleSurge(spawn.delay, () => { pulse(spawn.x, spawn.z, '#ffd478', 9, 1.2); burst(spawn.x, y + .8, spawn.z, '#ffe295', 40, 3); });
+        } else {
+          const color = SHRINES.find((shrine) => shrine.id === spawn.from)?.color || '#c9f4ff', big = spawn.type === 'tidebreaker';
+          scheduleSurge(spawn.delay, () => {
+            pulse(spawn.x, spawn.z, color, big ? 4.5 : 2.6, big ? 1.1 : .8);
+            burst(spawn.x, y + .35, spawn.z, color, big ? 30 : 16, big ? 2.2 : 1.5);
+          });
+        }
       }
     } else if (event.kind === 'telegraph') makeTelegraph(event);
     else if (event.kind === 'splash') {
@@ -827,6 +852,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   function update(dt, state, localPlayer, view = {}) {
     if (disposed) return;
     dt = clamp(Number.isFinite(dt) ? dt : .016, 0, .1); clockTime += dt;
+    for (let i = pendingSurges.length - 1; i >= 0; i--) if (pendingSurges[i].at <= clockTime) pendingSurges.splice(i, 1)[0].fn();
     elapsed = state?.elapsed || 0; latestState = state; latestLocal = localPlayer;
     const time = Number.isFinite(view.time) ? view.time : clockTime;
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
@@ -883,7 +909,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     oldWatch.dispose();
     windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
-    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
+    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
   resize(); update(0, null, null, { menu: true, time: 0 });
   return { scene, camera, renderer, update, render, resize, setQuality, dispose, handleEvent, project, projectPlayer, aimRay, getStats };

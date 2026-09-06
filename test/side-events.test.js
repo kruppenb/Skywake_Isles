@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, sideEventSpawns, sideEventPathClear, sideEventWaypoint } from '../server/game.js';
-import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, seawardBearing, sideEventWave } from '../shared/side-events.js';
+import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
+import { FINALE_STAGES, FINALE_STAGE_DELAY } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
 import { BEACON, CHESTS, SHRINES, COLORS, heightAt } from '../shared/world.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
@@ -12,8 +13,12 @@ const ticks = (game, seconds) => { for (let i = 0; i < Math.ceil(seconds / 0.05)
 const locate = (p, point) => Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, vy: 0 });
 const enemiesFor = (game, id) => [...game.enemies.values()].filter(enemy => enemy._sideEvent === id);
 const eventFor = (game, id) => game.sideEvents.find(event => event.id === id);
-const killAll = (game, id, p) => { for (const enemy of enemiesFor(game, id)) game.damageEnemy(enemy, enemy.hp, p.id); };
+// Later ranks surge in seconds after the first; materialise the whole wave so
+// an assertion sees the formation the server placed rather than its front rank.
+const release = (game, id) => game.releaseSpawns(eventFor(game, id), Infinity);
+const killAll = (game, id, p) => { release(game, id); for (const enemy of enemiesFor(game, id)) game.damageEnemy(enemy, enemy.hp, p.id); };
 const rosterTotal = roster => roster.crab + roster.spitter + roster.tidebreaker;
+const nearestNeighbours = points => points.map(point => Math.min(...points.filter(other => other !== point).map(other => distance(point, other))));
 const bearingOffset = (point, spawn) => {
   const delta = Math.atan2(spawn.z - point.z, spawn.x - point.x) - seawardBearing(point);
   return Math.abs(Math.atan2(Math.sin(delta), Math.cos(delta)));
@@ -42,6 +47,7 @@ function assertWalkable(from, to, radius, label) {
 }
 
 function assertSeawardWave(game, point, wave, count) {
+  release(game, point.id);
   const roster = sideEventWave(wave, count), enemies = enemiesFor(game, point.id);
   assert.equal(enemies.length, rosterTotal(roster), `${point.id} wave ${wave}: roster size`);
   for (const type of ['crab', 'spitter', 'tidebreaker']) assert.equal(enemies.filter(enemy => enemy.type === type).length, roster[type], `${point.id} wave ${wave}: ${type} count`);
@@ -49,7 +55,8 @@ function assertSeawardWave(game, point, wave, count) {
     const stats = ENEMY_TYPES[enemy.type];
     assert.equal(enemy.hp, stats.hp + (stats.hpPerExtraPlayer ?? 0) * (count - 1)); assert.equal(enemy.radius, stats.radius); assert.equal(enemy.scale, stats.scale);
     const out = distance(enemy, point);
-    assert.ok(out >= point.front - 2.5 && out <= point.front + 20.5, `${point.id}: ${enemy.type} forms up on the seaward front (${out.toFixed(1)}m)`);
+    assert.ok(out >= point.front - 2.5 && out <= point.front + 4 * SIDE_EVENT_RANK_SPACING + SIDE_EVENT_RANK_STAGGER + 20.5,
+      `${point.id}: ${enemy.type} forms up on the seaward front (${out.toFixed(1)}m)`);
     assert.ok(bearingOffset(point, enemy) <= SIDE_EVENT_ARC + Math.PI / 30, `${point.id}: ${enemy.type} attacks from the seaward arc`);
     assert.equal(inSafeLanding(enemy), false);
     assert.ok([BEACON, ...CHESTS, ...SHRINES].every(loot => distance(enemy, loot) >= 3.6));
@@ -133,10 +140,11 @@ test('routed attackers walk their two-leg route to the supplies instead of pushi
   for (const point of SIDE_EVENTS) {
     const { game, p } = setup(5);
     locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
+    release(game, point.id);
     const routed = enemiesFor(game, point.id).filter(enemy => enemy._sideWaypoint);
     assert.ok(routed.length > 0, `${point.id}: some attackers start behind cover and route around it`);
     for (const enemy of enemiesFor(game, point.id)) if (!routed.includes(enemy)) game.damageEnemy(enemy, enemy.hp, p.id);
-    ticks(game, 25);
+    ticks(game, 30);
     for (const enemy of routed) assert.ok(distance(enemy, point) < 3.2, `${point.id}: ${enemy.id} reached the supplies (${distance(enemy, point).toFixed(1)}m)`);
     assert.ok(eventFor(game, point.id).integrity < 100);
   }
@@ -199,11 +207,11 @@ test('player count is latched for all three waves despite disconnects and reconn
   locate(p, point); game.action(p.id, 'interact', point.id);
   for (let i = 1; i < 5; i++) game.disconnect(`p${i}`);
   killAll(game, point.id, p);
-  p.mode = 'aboard'; ticks(game, 3.1);
+  p.mode = 'aboard'; ticks(game, 3.1); release(game, point.id);
   assert.equal(game.onlineCount, 1); assert.equal(enemiesFor(game, point.id).length, rosterTotal(sideEventWave(2, 5)));
   const before = game.snapshot().sideEvents;
   assert.ok(game.reconnect('p1')); assert.deepEqual(game.snapshot().sideEvents, before);
-  killAll(game, point.id, p); ticks(game, 3.1);
+  killAll(game, point.id, p); ticks(game, 3.1); release(game, point.id);
   const finalWave = enemiesFor(game, point.id);
   assert.equal(finalWave.length, rosterTotal(sideEventWave(3, 5)));
   assert.equal(finalWave.filter(enemy => enemy.type === 'tidebreaker').length, 3);
@@ -216,18 +224,57 @@ test('wave events carry rounded spawn points and Tidebreakers, while snapshots s
   const waves = () => events.filter(event => event.kind === 'side-event' && event.status === 'active');
   assert.equal(waves().length, 1); assert.equal(waves()[0].wave, 1);
   assert.equal(waves()[0].spawns.length, rosterTotal(sideEventWave(1, 3)));
+  release(game, point.id);
   for (const spawn of waves()[0].spawns) {
-    assert.deepEqual(Object.keys(spawn).sort(), ['type', 'x', 'z']);
+    assert.deepEqual(Object.keys(spawn).sort(), ['delay', 'type', 'x', 'z']);
     assert.ok(enemiesFor(game, point.id).some(enemy => enemy.type === spawn.type && distance(enemy, spawn) < 0.6));
   }
   killAll(game, point.id, p); ticks(game, 3.1); killAll(game, point.id, p); ticks(game, 3.1);
   assert.equal(waves().length, 3); assert.equal(waves()[2].wave, SIDE_EVENT_WAVES);
   assert.equal(waves()[2].spawns.filter(spawn => spawn.type === 'tidebreaker').length, 2);
   assert.equal(events.filter(event => event.kind === 'notice' && /surging in from the sea/.test(event.message)).length, 1);
+  release(game, point.id);
   const snapshot = game.snapshot();
   assert.ok(snapshot.enemies.every(enemy => Object.keys(enemy).every(key => !key.startsWith('_'))));
   assert.ok(snapshot.sideEvents.every(event => !('spawns' in event)));
   assert.ok(snapshot.enemies.some(enemy => enemy.type === 'tidebreaker' && enemy.scale === ENEMY_TYPES.tidebreaker.scale && enemy.attackRadius === ENEMY_TYPES.tidebreaker.attackRadius));
+});
+
+// A wave used to land on the supplies as one clump. Ranks must now stream in:
+// later ranks stay pending, already counted, and stand spread out on arrival.
+test('waves surge rank by rank, counted while pending, with Tidebreakers arriving last', () => {
+  for (const point of [SIDE_EVENTS[0], SIDE_EVENTS[1]]) {
+    const { game, p, events } = setup(5), event = eventFor(game, point.id);
+    locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
+    const waves = () => events.filter(item => item.kind === 'side-event' && item.status === 'active');
+    for (let wave = 1; wave <= SIDE_EVENT_WAVES; wave++) {
+      if (wave > 1) { killAll(game, point.id, p); ticks(game, 3.1); }
+      const label = `${point.id} wave ${wave}`, total = rosterTotal(sideEventWave(wave, 5)), spawns = waves()[wave - 1].spawns;
+      assert.equal(spawns.length, total, `${label}: the whole roster is announced at once`);
+      const delays = spawns.map(spawn => spawn.delay);
+      for (const delay of delays) {
+        assert.ok(delay >= 0 && delay <= 5 * SIDE_EVENT_RANK_DELAY, `${label}: ${delay}s is inside one surge`);
+        assert.ok(Math.abs(delay / SIDE_EVENT_RANK_DELAY - Math.round(delay / SIDE_EVENT_RANK_DELAY)) < 1e-6, `${label}: delays land on rank beats`);
+      }
+      assert.equal(Math.min(...delays), 0, `${label}: the front rank surges immediately`);
+      assert.ok(new Set(delays).size >= 2, `${label}: the roster spans several ranks`);
+      const crabs = spawns.filter(spawn => spawn.type === 'crab');
+      for (const boss of spawns.filter(spawn => spawn.type === 'tidebreaker')) {
+        assert.ok(crabs.every(crab => crab.delay < boss.delay), `${label}: the mini boss lumbers in behind every crab`);
+      }
+      assert.equal(event.remaining, total, `${label}: ranks still forming up already count as remaining`);
+      assert.ok(enemiesFor(game, point.id).length < total, `${label}: later ranks have not surged yet`);
+      // Silence the attackers while the wave forms: this measures arrival, and
+      // a full wave would otherwise strip the supplies before the last rank.
+      for (let step = 0; step < Math.ceil((Math.max(...delays) + 0.1) / 0.05); step++) {
+        for (const enemy of enemiesFor(game, point.id)) enemy._nextAttack = Infinity;
+        game.tick(0.05);
+      }
+      assert.equal(enemiesFor(game, point.id).length, total, `${label}: every rank arrived on time`);
+      const nearest = nearestNeighbours(spawns), average = nearest.reduce((sum, gap) => sum + gap, 0) / nearest.length;
+      assert.ok(average >= 3.6, `${label}: ranks stand spread out, not at the 2.8m minimum (${average.toFixed(1)}m)`);
+    }
+  }
 });
 
 test('unattended surges visibly damage all three supplies and fail with event-only cleanup', () => {
@@ -255,7 +302,7 @@ test('unattended surges visibly damage all three supplies and fail with event-on
 test('Tidebreakers hit supplies harder with a wide swipe, and their pearls and damage follow the archetype', () => {
   const { game, p, events } = setup(), point = SIDE_EVENTS[1];
   locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
-  killAll(game, point.id, p); ticks(game, 3.1); killAll(game, point.id, p); ticks(game, 3.1);
+  killAll(game, point.id, p); ticks(game, 3.1); killAll(game, point.id, p); ticks(game, 3.1); release(game, point.id);
   const boss = enemiesFor(game, point.id).find(enemy => enemy.type === 'tidebreaker'), event = eventFor(game, point.id);
   assert.ok(boss); assert.equal(boss.hp, ENEMY_TYPES.tidebreaker.hp);
   for (const enemy of enemiesFor(game, point.id)) if (enemy !== boss) game.damageEnemy(enemy, enemy.hp, p.id);
@@ -280,7 +327,7 @@ test('spitters advance to supplies, while walls, elevation and landing protectio
   const { game, p } = setup(), point = SIDE_EVENTS[2];
   locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
   killAll(game, point.id, p);
-  ticks(game, 3.1);
+  ticks(game, 3.1); release(game, point.id);
   const [spitter, ...others] = enemiesFor(game, point.id).filter(enemy => enemy.type === 'spitter');
   for (const enemy of enemiesFor(game, point.id)) if (enemy !== spitter) game.damageEnemy(enemy, enemy.hp, p.id);
   assert.ok(spitter && others.length >= 1, 'the second wave carries several spitters');
@@ -308,6 +355,7 @@ test('spitters advance to supplies, while walls, elevation and landing protectio
 test('a crab displaced behind the market cottage finds a clear return route and resumes supply attacks', () => {
   const { game, p } = setup(), point = SIDE_EVENTS[0];
   locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
+  release(game, point.id);
   const [crab, ...others] = enemiesFor(game, point.id);
   for (const enemy of others) game.damageEnemy(enemy, enemy.hp, p.id);
   Object.assign(crab, { x: -47, z: 41, y: heightAt(-47, 41), _sideWaypoint: null });
@@ -366,6 +414,7 @@ test('a finite deadline fails safely, preserving unrelated enemies and denying r
   const unrelated = game.spawnEnemy('crab', 0, 50, 'haven', 'palm');
   locate(p, point); game.action(p.id, 'interact', point.id); p.mode = 'aboard';
   assert.equal(eventFor(game, point.id).endsAt, game.elapsed + SIDE_EVENT_DURATION);
+  release(game, point.id);
   for (const enemy of enemiesFor(game, point.id)) enemy._nextAttack = Infinity;
   ticks(game, SIDE_EVENT_DURATION - 0.1); assert.equal(eventFor(game, point.id).status, 'active');
   ticks(game, 0.15);
@@ -383,9 +432,21 @@ test('reconnect preserves defense state; finale cancels before boss; abandon and
   assert.deepEqual(game.snapshot().sideEvents, state); assert.deepEqual(enemiesFor(game, point.id).map(enemy => enemy.id), enemyIds);
   game.shards = 3; locate(p, BEACON); assert.equal(game.action(p.id, 'interact', BEACON.id).ok, true);
   assert.equal(game.phase, 'finale'); assert.equal(eventFor(game, point.id).status, 'cancelled');
-  assert.equal(enemiesFor(game, point.id).length, 0); assert.equal(game.enemies.get(game.bossId).type, 'tempest'); assert.equal(game.pearls, 0);
+  assert.equal(enemiesFor(game, point.id).length, 0); assert.equal(game.pearls, 0);
+  // The lighthouse now opens with a wave, so the boss arrives only in its own
+  // stage; the defense must already be cancelled and its attackers gone.
+  assert.equal(game.finale.stage, 1); assert.equal(game.bossId, null);
+  p.mode = 'aboard';
+  for (let stage = 0; !game.bossId && stage <= FINALE_STAGES.length; stage++) {
+    game.releaseSpawns(game.finale, Infinity);
+    for (const enemy of [...game.enemies.values()]) if (enemy._finale) game.damageEnemy(enemy, enemy.hp, p.id);
+    ticks(game, FINALE_STAGE_DELAY + 0.1);
+  }
+  assert.equal(game.enemies.get(game.bossId).type, 'tempest');
   game.damageEnemy(game.enemies.get(game.bossId), 10000, p.id);
+  assert.equal(game.phase, 'victory');
   assert.equal(game.action(p.id, 'restart').ok, true);
+  assert.equal(game.finale.stage, 0); assert.equal(game.finale.stages, FINALE_STAGES.length);
   assert.ok(game.sideEvents.every(event => event.status === 'available' && event.wave === 0 && event.startedAt === 0 && event.finishedAt === 0));
   game.action(p.id, 'launch'); locate(p, point); game.action(p.id, 'interact', point.id);
   game.disconnect(p.id, true); game.tick();

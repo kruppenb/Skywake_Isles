@@ -130,3 +130,25 @@ test('wave banners announce each surge from its event, name the place, and flag 
     assert.equal(sideEventAnnouncement(event), null);
   }
 });
+
+test('finale banners announce each stage, name the lighthouse, and flag the last stage', async () => {
+  const { finaleAnnouncement } = await import('../client/ui.js');
+  const { FINALE_STAGES } = await import('../shared/finale.js');
+  const first = finaleAnnouncement({ kind: 'finale', stage: 1, stages: FINALE_STAGES.length, spawns: [{ type: 'crab', x: 0, z: 0, delay: 0 }] });
+  assert.equal(first.title, 'Stage 1'); assert.equal(first.kicker, 'Tideglass Lighthouse'); assert.equal(first.final, false);
+  assert.match(first.subtitle, /three shrines/);
+  const twoTidebreakers = finaleAnnouncement({ kind: 'finale', stage: 2, stages: FINALE_STAGES.length,
+    spawns: [{ type: 'tidebreaker', x: 1, z: 1 }, { type: 'tidebreaker', x: 2, z: 2 }] });
+  assert.match(twoTidebreakers.subtitle, /^2 Tidebreakers march/);
+  const oneTidebreaker = finaleAnnouncement({ kind: 'finale', stage: 2, stages: FINALE_STAGES.length, spawns: [{ type: 'tidebreaker', x: 1, z: 1 }] });
+  assert.match(oneTidebreaker.subtitle, /^1 Tidebreaker marches/);
+  const last = finaleAnnouncement({ kind: 'finale', stage: FINALE_STAGES.length, stages: FINALE_STAGES.length, spawns: [{ type: 'tempest', x: 0, z: -16 }] });
+  assert.equal(last.final, true); assert.match(last.subtitle, /Tempest Crab/);
+  const notFinal = finaleAnnouncement({ kind: 'finale', stage: 3, stages: 4, spawns: [] });
+  assert.equal(notFinal.final, false);
+  for (const event of [null, {}, { kind: 'side-event', id: 'defense-market', status: 'active', wave: 1 },
+    { kind: 'finale', stage: 0, stages: FINALE_STAGES.length }, { kind: 'finale', stage: FINALE_STAGES.length + 1, stages: FINALE_STAGES.length },
+    { kind: 'finale', stage: 'one', stages: FINALE_STAGES.length }]) {
+    assert.equal(finaleAnnouncement(event), null);
+  }
+});

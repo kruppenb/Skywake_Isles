@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Game, sanitizeName } from '../server/game.js';
 import { createStatsStore } from '../server/storage.js';
 import { COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt } from '../shared/world.js';
+import { FINALE_STAGES } from '../shared/finale.js';
 
 function setup(count = 1) {
   const events = [], game = new Game({ onEvent: event => events.push(event) });
@@ -200,20 +201,25 @@ test('three finite shrine quests unlock scaled boss, victory results, and clean 
   }
   assert.equal(game.shards, 3); assert.equal(game.pearls, 102);
   locate(p, BEACON); game.action(p.id, 'interact', BEACON.id);
-  assert.equal(game.phase, 'finale'); const boss = game.enemies.get(game.bossId); assert.equal(boss.maxHp, 650);
-  let ticksTaken = 0;
-  while (game.phase === 'finale' && ticksTaken++ < 2400) {
-    const enemy = game.enemies.get(game.bossId);
-    if (!enemy) break;
-    aim(game, p, enemy); game.action(p.id, 'fire');
+  // The lighthouse is stormed stage by stage; the boss only arrives with its own.
+  assert.equal(game.phase, 'finale'); assert.equal(game.finale.stage, 1); assert.equal(game.bossId, null);
+  let ticksTaken = 0, bossMaxHp = 0;
+  while (game.phase === 'finale' && ticksTaken++ < 6000) {
+    const enemy = [...game.enemies.values()].filter(e => e.hp > 0)
+      .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
+    if (enemy) { aim(game, p, enemy); game.action(p.id, 'fire'); }
     if (p.hp < 75) game.action(p.id, 'heal');
+    if (game.bossId && !bossMaxHp) bossMaxHp = game.enemies.get(game.bossId)?.maxHp ?? 0;
     game.tick(0.05);
   }
+  assert.equal(bossMaxHp, 650);
   assert.equal(game.phase, 'victory'); assert.equal(game.stats.wins, 1); assert.equal(game.stats.voyages, 1);
-  assert.ok(game.victory.kills >= 10); assert.ok(game.victory.pearls >= 162);
+  assert.equal(game.finale.stage, FINALE_STAGES.length); assert.equal(game.finale.remaining, 0);
+  assert.ok(game.victory.kills >= 21); assert.ok(game.victory.pearls >= 162);
   assert.ok(events.some(e => e.kind === 'telegraph')); assert.ok(events.some(e => e.kind === 'victory'));
   assert.equal(game.action(p.id, 'restart').ok, true); assert.equal(game.phase, 'lobby'); assert.equal(game.round, 2);
   assert.equal(game.shards, 0); assert.equal(game.enemies.size, 0); assert.equal(game.stats.wins, 1); assert.equal(p.mode, 'aboard');
+  assert.equal(game.finale.stage, 0); assert.equal(game.finale.stages, FINALE_STAGES.length);
 });
 
 test('aggregate statistics are atomically saved and recovered from a new store', async () => {

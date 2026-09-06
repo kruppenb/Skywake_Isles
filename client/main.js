@@ -1,7 +1,7 @@
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { GameNet } from './net.js';
-import { createUI, findInteractable, sideEventAnnouncement } from './ui.js';
+import { createUI, findInteractable, sideEventAnnouncement, finaleAnnouncement } from './ui.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { weaponPresentation } from './weapon-presentation.js';
@@ -175,7 +175,7 @@ function receiveState(next) {
       input.setView(0, -.16);
       ui.toast('The sails are up! Press Space to jump, then steer your glider with WASD.');
     }
-    if (state.phase === 'finale') ui.toast('The Tempest Crab has the compass! Dodge the glowing splashes and work together.');
+    if (state.phase === 'finale') ui.toast('The final battle begins! Defend the lighthouse with your crew.');
   }
   reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer);
   forcePrediction = false;
@@ -257,6 +257,11 @@ function receiveEvent(event) {
     case 'side-event': {
       const announcement = sideEventAnnouncement(event);
       if (announcement) { ui.announce(announcement); audio.play('surge'); }
+      break;
+    }
+    case 'finale': {
+      const a = finaleAnnouncement(event);
+      if (a) { ui.announce(a); audio.play('surge'); }
       break;
     }
     default: break;
