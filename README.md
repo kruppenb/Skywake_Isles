@@ -23,6 +23,8 @@ The container restarts automatically after Docker restarts. `docker compose down
 
 If another computer cannot load the game, check that it is on the same LAN, the host URL is correct, and the host firewall permits port 3400 on the home network. The game is intended for a trusted local network.
 
+**Mac connection note (confirmed September 6, 2026):** Edge on the family Mac over Wi-Fi could not resolve `http://nickdesktop:3400`, although that hostname worked on a Windows laptop. Opening **http://192.168.1.27:3400** worked on the Mac. If the hostname fails, use the host's LAN IP address with the explicit `http://` prefix and port `3400`. The IP address may change if the router assigns a new one.
+
 ## Controls
 
 Use a desktop or laptop with a keyboard, mouse, and a browser supporting WebGL2. Chrome and Edge are the primary desktop targets; the renderer also uses standard WebGL2 APIs supported by current Firefox. Small touchscreens are not a supported play mode.
