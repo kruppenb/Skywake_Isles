@@ -3,6 +3,7 @@ import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
 import { windwardFarmWeight } from '../shared/windward-farm.js';
 import { tideglassWeight } from '../shared/tideglass-market.js';
 import { saltwindHarborWeight } from '../shared/saltwind-harbor.js';
+import { driftwoodYardWeight, sunwakeStrandWeight } from '../shared/driftwood-yard.js';
 
 // Profiles are immutable color strings/scalars. Each frame is evaluated from
 // the captured island baseline, never from another area's last frame.
@@ -12,16 +13,22 @@ export const ENVIRONMENT_PROFILES = Object.freeze({
   tideglassMarket: Object.freeze({ sky: '#b9dbdc', skyStrength: .65, fog: '#c6ded5', near: 95, far: 405, skyLight: '#e9e9d7', groundLight: '#8d9171', ambient: 1.85, sunColor: '#ffe7c4', sunIntensity: 2.5 }),
   // Airier and warmer than the market: open beach light with pale sand bounce.
   saltwindHarbor: Object.freeze({ sky: '#b7e0e8', skyStrength: .7, fog: '#cbe6e4', near: 100, far: 420, skyLight: '#eef3ec', groundLight: '#a09f85', ambient: 2.0, sunColor: '#fff1cf', sunIntensity: 2.6 }),
+  // Golden working light over the yard; the strand is the airiest of them all.
+  driftwoodYard: Object.freeze({ sky: '#bde0e4', skyStrength: .7, fog: '#d2e4dc', near: 100, far: 420, skyLight: '#f2efe0', groundLight: '#a89a78', ambient: 2.0, sunColor: '#ffefc8', sunIntensity: 2.65 }),
+  sunwakeStrand: Object.freeze({ sky: '#bfe6ee', skyStrength: .65, fog: '#d6ebe8', near: 110, far: 440, skyLight: '#f4f5ee', groundLight: '#b0aa8c', ambient: 2.1, sunColor: '#fff4d6', sunIntensity: 2.7 }),
 });
 
-export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false } = {}) {
-  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0 };
+export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false, driftwoodReady = false } = {}) {
+  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0 };
   const oldWatch = oldWatchReady ? (farmReady ? oldWatchRadialWeight : oldWatchWeight)(player.x, player.z) : 0;
   const windwardFarm = farmReady ? windwardFarmWeight(player.x, player.z) : 0;
   const tideglassMarket = tideglassReady ? tideglassWeight(player.x, player.z) : 0;
   const saltwindHarbor = saltwindReady ? saltwindHarborWeight(player.x, player.z) : 0;
-  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor, scale = total > 1 ? 1 / total : 1;
-  return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale, saltwindHarbor: saltwindHarbor * scale };
+  const driftwoodYard = driftwoodReady ? driftwoodYardWeight(player.x, player.z) : 0;
+  const sunwakeStrand = driftwoodReady ? sunwakeStrandWeight(player.x, player.z) : 0;
+  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor + driftwoodYard + sunwakeStrand, scale = total > 1 ? 1 / total : 1;
+  return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale,
+    saltwindHarbor: saltwindHarbor * scale, driftwoodYard: driftwoodYard * scale, sunwakeStrand: sunwakeStrand * scale };
 }
 
 export function createEnvironmentLighting({ scene, hemisphere = null, sun = null }) {
@@ -52,6 +59,6 @@ export function createEnvironmentLighting({ scene, hemisphere = null, sun = null
   }
   return { update(player, ready) { if (!disposed) apply(environmentWeights(player, ready)); }, dispose() {
     if (disposed) return;
-    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0 }); disposed = true;
+    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0 }); disposed = true;
   } };
 }

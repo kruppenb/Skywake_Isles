@@ -98,6 +98,8 @@ export function buildSettlements(palette) {
   const tideglassStalls = new GeoBatch(palette);
   const saltwindFallback = new THREE.Group(); saltwindFallback.name = 'saltwind-harbor-original-exterior'; group.add(saltwindFallback);
   const saltwindWork = new GeoBatch(palette), saltwindAuthored = new Set(['net-house', 'saltwind-tavern', 'fishers-cottage']);
+  const driftwoodFallback = new THREE.Group(); driftwoodFallback.name = 'driftwood-yard-original-exterior'; group.add(driftwoodFallback);
+  const driftwoodWork = new GeoBatch(palette), driftwoodAuthored = new Set(['timber-shed', 'shipwrights-cottage']);
   let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
@@ -113,7 +115,8 @@ export function buildSettlements(palette) {
 
   function furnishedBuilding(building) {
     const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
-    const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', market = building.id === 'market-cottage', harbor = saltwindAuthored.has(building.id), authored = pilot || farm || market || harbor;
+    const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', market = building.id === 'market-cottage';
+    const harbor = saltwindAuthored.has(building.id), yard = driftwoodAuthored.has(building.id), authored = pilot || farm || market || harbor || yard;
     const floorY = heightAt(x, z), source = authored ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
     const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
     const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
@@ -195,7 +198,7 @@ export function buildSettlements(palette) {
       face.userData.normal = normals[index]; wallsMesh.add(face);
     });
     wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
-    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : market ? tideglassFallback : harbor ? saltwindFallback : group;
+    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : market ? tideglassFallback : harbor ? saltwindFallback : yard ? driftwoodFallback : group;
     exterior.add(wallsMesh, roofMesh);
     if (authored) { const base = source.mesh(); base.name = building.id + '-original-base'; exterior.add(base); }
     interiors.push({ building, walls: wallsMesh, roof: roofMesh, originalWalls: wallsMesh, originalRoof: roofMesh });
@@ -332,7 +335,7 @@ export function buildSettlements(palette) {
     return true;
   }
 
-  function site(place, dx, dz, radius, build, yaw = 0, prefab = null, farmExterior = false, harborWork = false) {
+  function site(place, dx, dz, radius, build, yaw = 0, prefab = null, farmExterior = false, work = null) {
     for (let attempt = 0; attempt < 90; attempt++) {
       const angle = attempt * 2.39996, search = attempt ? .7 * Math.sqrt(attempt) : 0;
       const x = place.x + dx + Math.sin(angle) * search, z = place.z + dz + Math.cos(angle) * search;
@@ -340,7 +343,7 @@ export function buildSettlements(palette) {
       const y = heightAt(x, z);
       const slope = Math.max(...[0, 1, 2, 3].map(i => Math.abs(heightAt(x + Math.sin(i * Math.PI / 2) * radius, z + Math.cos(i * Math.PI / 2) * radius) - y)));
       if (slope > .7) continue;
-      const source = prefab ? new GeoBatch(palette) : farmExterior ? farmField : harborWork ? saltwindWork : batches.get(place.id);
+      const source = prefab ? new GeoBatch(palette) : farmExterior ? farmField : work ?? batches.get(place.id);
       build(frame(source, x, y, z, yaw), x, y, z);
       if (prefab) { const mesh = source.mesh(); mesh.name = 'old-watch-original-' + prefab; oldWatchFallback.add(mesh); }
       occupied.push({ x, z, radius }); propSites.push({ poiId: place.id, x, z, radius, ...(prefab ? { prefab, yaw } : {}) }); stats.propClusters++;
@@ -373,14 +376,14 @@ export function buildSettlements(palette) {
     if (place.kind === 'harbor') {
       // The harbor's work sites keep their original positions and radii; the
       // authored kit replaces their geometry and hides this batch when ready.
-      site(place, -12, 6, 1.9, table, .25, null, false, true);
-      site(place, -1, 9, 1.3, f => { barrel(f, -.55, .1); barrel(f, .45, -.2, .85); crate(f, .40, .7, .65); }, 0, null, false, true);
+      site(place, -12, 6, 1.9, table, .25, null, false, saltwindWork);
+      site(place, -1, 9, 1.3, f => { barrel(f, -.55, .1); barrel(f, .45, -.2, .85); crate(f, .40, .7, .65); }, 0, null, false, saltwindWork);
       site(place, 1, -9, 1.7, f => {
         for (const side of [-1, 1]) f.line([side * 1.4, 0, 0], [side * 1.4, 2.7, 0], .07, C.wood);
         for (let i = 0; i < 9; i++) f.line([-1.32 + i * .33, .45, .06], [-1.32 + i * .33, 2.3, 0], .018, C.cream);
         for (let i = 0; i < 7; i++) f.line([-1.4, .45 + i * .30, .03], [1.4, .45 + i * .30, .03], .018, C.cream);
         barrel(f, 0, .5, .7);
-      }, 0, null, false, true);
+      }, 0, null, false, saltwindWork);
     } else if (place.kind === 'market') {
       site(place, -4, -11, 1.8, f => {
         f.add('box', [0, .67, 0], [2.5, .18, 1.16], [0, 0, 0], C.paleWood);
@@ -481,11 +484,11 @@ export function buildSettlements(palette) {
           }
         }
         for (const z of [-1.6, 1.6]) { f.add('box', [0, .3, z], [2.7, .17, .24], [0, 0, 0], C.wood); for (const side of [-1, 1]) f.add('box', [side * 1.15, .16, z], [.18, .32, .28], [0, 0, 0], C.wood); }
-      }, .3);
+      }, .3, null, false, driftwoodWork);
       site(place, 2, -10, 2.0, f => {
         for (let i = 0; i < 9; i++) f.add('box', [(i % 3 - 1) * .37, .13 + Math.floor(i / 3) * .22, 0], [.32, .19, 3.5], [0, i % 2 * .025, 0], i % 2 ? C.wood : C.paleWood);
         for (const z of [-1.2, 1.2]) f.add('box', [0, .74, z], [1.15, .07, .10], [0, 0, 0], C.dark);
-      });
+      }, 0, null, false, driftwoodWork);
     }
     // Every destination has a modest lantern marker visible from its approach.
     site(place, 5, 5, .55, f => {
@@ -493,9 +496,10 @@ export function buildSettlements(palette) {
       f.add('box', [0, 2.33, 0], [.40, .53, .4], [0, .3, 0], C.cream);
       f.add('cone', [0, 2.67, 0], [.35, .25, .35], [0, 0, 0], C.teal);
       for (const y of [2.06, 2.60]) f.add('box', [0, y, 0], [.44, .07, .44], [0, .3, 0], C.wood);
-    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor');
+    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : null);
   }
   const saltwindWorkMesh = saltwindWork.mesh(); saltwindWorkMesh.name = 'saltwind-harbor-original-work-sites'; saltwindFallback.add(saltwindWorkMesh);
+  const driftwoodWorkMesh = driftwoodWork.mesh(); driftwoodWorkMesh.name = 'driftwood-yard-original-work-sites'; driftwoodFallback.add(driftwoodWorkMesh);
 
   for (const place of POINTS_OF_INTEREST) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
@@ -597,6 +601,12 @@ export function buildSettlements(palette) {
       interior.roof = kit?.buildings[interior.building.id].roof ?? interior.originalRoof;
     }
     saltwindFallback.visible = !kit;
+  }, setDriftwoodYardKit(kit = null) {
+    for (const interior of interiors.filter(item => driftwoodAuthored.has(item.building.id))) {
+      interior.walls = kit?.buildings[interior.building.id].walls ?? interior.originalWalls;
+      interior.roof = kit?.buildings[interior.building.id].roof ?? interior.originalRoof;
+    }
+    driftwoodFallback.visible = !kit;
   } };
 }
 
