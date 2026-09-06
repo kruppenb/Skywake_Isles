@@ -56,6 +56,7 @@ const ui = createUI({
     if (!ui.menuOpen && simulationPlayer && state.phase !== 'victory') input?.focus();
   },
   onSound(muted) { audio.setMuted(muted); ui.setSound(audio.muted); },
+  onLootReveal() { audio.play('upgrade'); },
   onQuality(quality) { world?.setQuality(quality); },
   onLeave() {
     input.reset(); input.releasePointer();
@@ -163,6 +164,7 @@ function receiveState(next) {
   receivedAt = now;
   renderClock.observe(state, now);
   const authoritative = state.players.find((entry) => entry.id === net.id);
+  ui.updateLootContext(state, authoritative);
   if (!authoritative) { simulationPlayer = null; renderedPlayer = null; prediction.reset(); synchronizeInput(); return; }
   if (phaseChanged) {
     accumulator = 0;
@@ -217,13 +219,16 @@ function receiveEvent(event) {
     case 'melee': if (mine) audio.play('melee'); break;
     case 'chest': {
       audio.play('collect', { distant: !mine });
-      const loot = WEAPONS[event.weapon] ? ` Walk over the ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} to equip it. It stays for the whole crew!` : '';
+      const loot = Object.hasOwn(WEAPONS, event.weapon) ? ` Walk over the ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} to equip it. Your copy disappears; the crew's stays.` : '';
       ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!${loot}`);
       break;
     }
     case 'loot':
-      audio.play('collect', { distant: !mine });
-      ui.toast(`${mine ? 'You equipped' : `${name} equipped`} ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon]?.name || 'a gun'}.`);
+      if (mine) ui.revealLoot(event);
+      else if (Object.hasOwn(WEAPONS, event.weapon) && Object.hasOwn(RARITIES, event.rarity)) {
+        audio.play('collect', { distant: true });
+        ui.toast(`${name} equipped ${RARITIES[event.rarity].name} ${WEAPONS[event.weapon].name}.`);
+      }
       break;
     case 'shrine': {
       const shrine = SHRINES.find((entry) => entry.id === event.id);

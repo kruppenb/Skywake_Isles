@@ -81,6 +81,13 @@ export function createAudio() {
       // A breaking wave: a low rumble under two overlapping foam hisses.
       case 'surge': tone(64, 1.1, .16 * v, 'sine', 0, 38); noise(1.15, .2 * v, 520); noise(.75, .14 * v, 1400, .22); noise(.6, .09 * v, 2600, .5); break;
       case 'collect': [660, 880, 1320].forEach((f, i) => tone(f, .19, .14 * v, 'sine', i * .075)); break;
+      case 'upgrade':
+        [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+          tone(f, .34, .12, 'triangle', i * .075);
+          tone(f * 2, .22, .045, 'sine', i * .075);
+        });
+        tone(523.25, .55, .07, 'sine', .25);
+        break;
       case 'shrine': [392, 494, 587, 784].forEach((f, i) => tone(f, .48, .13 * v, 'triangle', i * .12)); break;
       case 'heal': [440, 554, 660].forEach((f, i) => tone(f, .45, .1 * v, 'sine', i * .09)); break;
       case 'ping': tone(880, .18, .12 * v, 'sine'); tone(660, .22, .08 * v, 'sine', .12); break;

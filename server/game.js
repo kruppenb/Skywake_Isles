@@ -182,6 +182,7 @@ export class Game {
     Object.assign(p, makePlayerPosition(), {
       ready: false, hp: 100, maxHp: 100, ammo: 8, maxAmmo: 8, weapon: 'flintlock', rarity: 'common',
       inventory: { flintlock: { rarity: 'common', ammo: 8 }, scatter: { rarity: 'common', ammo: 5 } },
+      collectedDropIds: [],
       reloadUntil: 0, healUntil: 0, knockedUntil: 0, invulnerableUntil: 0,
       lastInputSeq: -1, _receivedInputSeq: -1, kills: 0, rescues: 0, chests: 0,
       _fireAt: 0, _meleeAt: 0, _swapAt: 0, _pingAt: 0, _damageAt: -100, _burst: null,
@@ -321,15 +322,16 @@ export class Game {
 
   pickupWeapon(p, drop) {
     const owned = p.inventory[drop.weapon];
-    if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
+    if (p.collectedDropIds.includes(drop.id) || (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier)) {
       return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}.`, 'DUPLICATE_WEAPON');
     }
-    // Each pirate can use the same drop. Inventory rarity prevents repeat
-    // pickups, while upgrades preserve both active and inactive magazines.
+    // Keep the shared drop for the crew; each pirate records their own pickup.
+    // Upgrades preserve both active and inactive magazines.
     if (p.weapon === drop.weapon) owned.ammo = p.ammo;
     p.inventory[drop.weapon] = { rarity: drop.rarity, ammo: owned?.ammo ?? WEAPONS[drop.weapon].ammo };
     this.equip(p, drop.weapon);
-    this.emit({ kind: 'loot', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity });
+    p.collectedDropIds.push(drop.id);
+    this.emit({ kind: 'loot', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity, upgraded: !!owned });
     return good();
   }
 
@@ -743,7 +745,7 @@ export class Game {
 
   snapshot() {
     return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
-      players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
+      players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), collectedDropIds: [...p.collectedDropIds], inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
       sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),

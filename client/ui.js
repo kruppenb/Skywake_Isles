@@ -4,6 +4,7 @@ import { hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
+import { createLootReveal } from './loot-reveal.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -334,6 +335,23 @@ export function createUI(callbacks = {}) {
   const listen = (element, event, handler) => { element.addEventListener(event, handler); cleanup.push(() => element.removeEventListener(event, handler)); };
   const button = (id, callback) => listen(refs[id], 'click', callback);
   const modalChanged = () => callbacks.onModalChange?.({ paused, mapOpen });
+  let lootState = null;
+  let lootPlayer = null;
+  let lootConnected = false;
+  const lootReveal = createLootReveal({
+    root: refs['loot-reveal'], medallion: refs['loot-medallion'], art: refs['loot-art'], details: refs['loot-details'],
+    kicker: refs['loot-kicker'], name: refs['loot-name'], rarity: refs['loot-rarity'], rays: refs['loot-rays'],
+    getIcon: (weapon) => refs[`weapon-${weapon}`]?.querySelector('.weapon-icon'),
+    onStart: (event) => callbacks.onLootReveal?.(event),
+  });
+  function updateLootContext(state = lootState, player = lootPlayer) {
+    lootState = state; lootPlayer = player;
+    lootReveal.setContext({ round: state?.round ?? null, playerId: player?.id ?? null,
+      active: lootConnected && !!player && ['voyage', 'finale'].includes(state?.phase)
+        && player.mode === 'ground' && player.hp > 0 && player.online !== false
+        && !(player.knockedUntil > state.elapsed) && !paused && !mapOpen && !document.hidden });
+  }
+  listen(document, 'visibilitychange', () => updateLootContext());
 
   for (const place of POINTS_OF_INTEREST) {
     const entry = document.createElement('li');
@@ -465,13 +483,14 @@ export function createUI(callbacks = {}) {
     get quality() { return settings.quality; },
     get menuOpen() { return paused || mapOpen; },
     ready() { show(refs.boot, false); show(refs.topbar, true); show(refs.welcome, true); show(refs['welcome-caption'], true); },
-    fatal(message) { api.clearWeaponPresentation(); show(refs.boot, true); text(refs['boot-title'], 'The island needs a hand.'); text(refs['boot-message'], message); show(refs['boot-retry'], true); },
+    fatal(message) { lootConnected = false; updateLootContext(); api.clearWeaponPresentation(); show(refs.boot, true); text(refs['boot-title'], 'The island needs a hand.'); text(refs['boot-message'], message); show(refs['boot-retry'], true); },
     setJoining(value) {
       refs['join-button'].disabled = !!value; refs['join-button'].setAttribute('aria-busy', String(!!value));
       text(refs['join-button'].firstElementChild, value ? 'Finding your ship…' : 'Board the ship');
     },
     setError(message) { text(refs['join-error'], message); show(refs['join-error'], true); api.setJoining(false); },
     setConnection({ status, message }) {
+      lootConnected = status === 'connected'; updateLootContext();
       if (status !== 'connected') api.clearWeaponPresentation();
       refs.connection.classList.toggle('offline', status === 'reconnecting' || status === 'connecting');
       refs.connection.classList.toggle('error', status === 'error');
@@ -489,6 +508,7 @@ export function createUI(callbacks = {}) {
       if (paused) api.clearWeaponPresentation();
       if (paused) { mapOpen = false; show(refs['map-overlay'], false); }
       if (paused) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
+      updateLootContext();
       show(refs['pause-overlay'], paused); document.body.classList.toggle('paused', paused); document.body.classList.toggle('map-open', mapOpen);
       modalChanged();
       if (paused) refs['resume-button'].focus({ preventScroll: true });
@@ -498,10 +518,12 @@ export function createUI(callbacks = {}) {
       mapOpen = !!value; show(refs['map-overlay'], mapOpen); document.body.classList.toggle('map-open', mapOpen); mapAt = 0;
       if (mapOpen) api.clearWeaponPresentation();
       if (mapOpen) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
+      updateLootContext();
       modalChanged();
       if (mapOpen) refs['close-map'].focus({ preventScroll: true });
     },
     reset() {
+      lootReveal.reset(); lootState = null; lootPlayer = null;
       api.clearWeaponPresentation();
       joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = '';
       discoveryRound = null; clearDiscoveries();
@@ -509,6 +531,8 @@ export function createUI(callbacks = {}) {
       api.announce(null);
       document.body.classList.remove('paused', 'map-open'); plates.forEach((plate) => plate.remove()); plates.clear(); modalChanged();
     },
+    updateLootContext,
+    revealLoot(event) { return lootReveal.enqueue(event); },
     toast(message, warning = false) {
       const now = performance.now();
       if (now - (notices.get(message) || -10000) < 1800) return;
@@ -555,6 +579,7 @@ export function createUI(callbacks = {}) {
           : 'Click to aim · Hold right mouse to look · R reload · Esc menu');
     },
     update(state, player, world, view) {
+      updateLootContext(state, player);
       const now = performance.now();
       joined = !!player;
       const playing = joined && state.phase !== 'lobby' && state.phase !== 'victory';
@@ -731,7 +756,7 @@ export function createUI(callbacks = {}) {
         mapAt = now;
       }
     },
-    dispose() { cleanup.forEach((remove) => remove()); plates.forEach((plate) => plate.remove()); },
+    dispose() { lootReveal.dispose(); cleanup.forEach((remove) => remove()); plates.forEach((plate) => plate.remove()); },
   };
   return api;
 }

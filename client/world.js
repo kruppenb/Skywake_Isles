@@ -3,6 +3,7 @@ import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBS
 import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
 import { makePalette, GeoBatch, buildGalleon, buildPirate, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
+import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { cameraTravel, scopeCameraPose } from './camera.js';
 import { SCOPE_FOV } from './weapon-presentation.js';
@@ -653,7 +654,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const reducedMotion = reducedMotionPreference.matches, objectiveTime = reducedMotion ? 0 : time;
     const seenDrops = new Set();
     for (const drop of state?.drops || []) {
-      if (!WEAPONS[drop.weapon]) continue;
+      if (!isLootVisible(drop, latestLocal) || !Object.hasOwn(WEAPONS, drop.weapon)) continue;
       seenDrops.add(drop.id);
       let model = dropModels.get(drop.id);
       if (!model) {

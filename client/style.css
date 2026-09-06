@@ -48,6 +48,26 @@
 .side-event-supplies progress::-webkit-progress-value{background:#79f5ff}.side-event-supplies progress::-moz-progress-bar{background:#79f5ff}
 .side-event-status[data-status=failed] h3{color:#c9e5ec}
 .map-legend .defense-shield{background:#79f5ff;filter:drop-shadow(0 0 1px #123c51)}
+
+/* A small treasure medallion leaves the island and controls in view. */
+.loot-reveal{position:fixed;inset:0;z-index:25;pointer-events:none;color:#fff6dd;text-align:center}
+.loot-medallion{position:absolute;left:50%;top:50%;width:180px;height:180px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid var(--loot-accent);border-radius:50%;background:radial-gradient(circle at 50% 40%,#285367f5,#0c3044f5 72%);box-shadow:0 0 0 5px #0c304480,0 0 0 6px #ffd16c70,0 8px 30px #0c304450,inset 0 0 28px #fff6dd0d;will-change:transform,opacity}
+.loot-medallion::before{content:"";position:absolute;inset:10px;border:1px solid #ffd16c70;border-radius:50%}
+.loot-compass{position:absolute;top:9px;left:50%;transform:translateX(-50%);color:#ffd16c;font-size:21px;line-height:1}
+.loot-art{display:grid;place-items:center;width:100%;height:100%;color:var(--loot-accent)}
+.loot-art .weapon-icon{width:145px;height:91px;margin:0;filter:drop-shadow(0 5px 3px #061e2d80)}
+.loot-details{position:absolute;left:50%;top:calc(50% + 112px);width:320px;max-width:90vw;transform:translateX(-50%);text-shadow:0 2px 4px #0c3044,0 0 15px #0c3044}
+.loot-kicker{display:block;color:#ffd16c;font-size:12px;font-weight:900}
+.loot-details strong{display:block;margin:6px 0 8px;font-size:27px;line-height:1.12;letter-spacing:-.6px}
+.loot-rarity{display:inline-block;padding:4px 13px;border:1px solid var(--loot-accent);border-radius:12px;background:#0c3044ed;color:var(--loot-accent);font-size:11px;font-weight:900;letter-spacing:.4px;text-shadow:none}
+.loot-rays{position:absolute;left:50%;top:50%;width:270px;height:270px;transform:translate(-50%,-50%);opacity:0;color:#ffd16c}
+.loot-rays i{position:absolute;top:50%;left:50%;width:3px;height:20px;border-radius:2px;background:currentColor;transform:rotate(calc(var(--ray,0) * 45deg)) translateY(-123px);transform-origin:0 0;box-shadow:0 0 7px #ffd16c70}
+.loot-rays i:nth-child(2){--ray:1}.loot-rays i:nth-child(3){--ray:2}.loot-rays i:nth-child(4){--ray:3}.loot-rays i:nth-child(5){--ray:4}.loot-rays i:nth-child(6){--ray:5}.loot-rays i:nth-child(7){--ray:6}.loot-rays i:nth-child(8){--ray:7}
+.loot-rays i:nth-child(even){width:7px;height:7px;border-radius:0;background:var(--loot-accent)}
+.loadout .weapon-slot.loot-arrived{box-shadow:0 0 0 2px var(--loot-accent),0 0 23px var(--loot-accent),inset 0 0 16px #fff6dd25;border-top-color:#fff6dd}
+.loot-reduced .loot-rays{display:none}
+@media(max-width:420px){.loot-medallion{width:152px;height:152px}.loot-art .weapon-icon{width:124px;height:78px}.loot-details{top:calc(50% + 98px)}.loot-details strong{font-size:24px}}
+@media(prefers-reduced-motion:reduce){.loot-rays{display:none}.loadout .weapon-slot.loot-arrived{box-shadow:0 0 0 2px var(--loot-accent);border-top-color:#fff6dd}}
 @media(min-width:1700px){.quest-crew-column{width:325px}}
 @media(max-width:1050px){.quest-crew-column{width:250px}}
 @media(max-width:800px){.quest-crew-column{max-height:calc(100% - 381px)}}

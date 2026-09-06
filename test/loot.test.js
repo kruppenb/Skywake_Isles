@@ -56,8 +56,11 @@ test('a chest rolls once, shares pearls/healing and equips the whole nearby crew
   assert.equal(p.weapon, 'longshot'); assert.equal(p.rarity, 'legendary'); assert.equal(p.ammo, 4);
   assert.equal(ally.weapon, 'longshot'); assert.equal(ally.rarity, 'legendary'); assert.equal(ally.ammo, 4);
   assert.deepEqual(game.drops, [drop]); assert.deepEqual(game.snapshot().drops, [drop]);
+  assert.deepEqual(p.collectedDropIds, [drop.id]); assert.deepEqual(ally.collectedDropIds, [drop.id]);
+  assert.notEqual(p.collectedDropIds, ally.collectedDropIds, 'each pirate owns a separate collection history');
   const pickups = events.filter(e => e.kind === 'loot');
   assert.deepEqual(pickups.map(e => e.playerId), [p.id, ally.id]);
+  assert.deepEqual(pickups.map(e => e.upgraded), [false, false]);
   assert.equal(pickups[0].at, pickups[1].at);
   ticks(game, .5); assert.equal(events.filter(e => e.kind === 'loot').length, 2);
 });
@@ -73,14 +76,18 @@ test('walking into a weapon equips it without interact, with sequential pickups 
   assert.equal(p.weapon, 'repeater'); assert.equal(p.rarity, 'rare');
   assert.equal(p.ammo, WEAPONS.repeater.ammo);
   assert.equal(ally.inventory.repeater, undefined);
+  assert.deepEqual(p.collectedDropIds, [drop.id]); assert.deepEqual(ally.collectedDropIds, []);
   locate(ally, { x: drop.x - 2.1, z: drop.z });
   game.setInput(ally.id, { seq: 0, forward: 0, right: 1, yaw: 0, pitch: 0 });
   game.tick(); assert.equal(ally.weapon, 'repeater');
   const late = game.addPlayer('late', 'Navigator', COLORS[2]);
   assert.equal(late.inventory.repeater, undefined);
+  assert.deepEqual(late.collectedDropIds, []);
+  assert.notEqual(late.collectedDropIds, ally.collectedDropIds);
   locate(late, { x: drop.x - 2.1, z: drop.z });
   game.setInput(late.id, { seq: 0, forward: 0, right: 1, yaw: 0, pitch: 0 });
   game.tick(); assert.equal(late.weapon, 'repeater');
+  for (const pirate of [p, ally, late]) assert.deepEqual(pirate.collectedDropIds, [drop.id]);
   assert.deepEqual(events.filter(e => e.kind === 'loot').map(e => e.playerId), [p.id, ally.id, late.id]);
   assert.deepEqual(game.snapshot().drops, [drop]);
 });
@@ -153,11 +160,12 @@ test('far, malformed, invented and through-wall drop/chest claims cannot grant w
 });
 
 test('duplicate and lower-rarity guns stay for crew; upgrades preserve magazines and cooldown', () => {
-  const { game, p } = setup(); p.ammo = 2;
+  const { game, p, events } = setup(); p.ammo = 2;
   const place = (rarity, id) => game.drops.push({ id, weapon: 'flintlock', rarity, x: p.x, y: p.y, z: p.z });
   place('common', 'same');
   assert.equal(game.action(p.id, 'interact', 'same').code, 'DUPLICATE_WEAPON');
   assert.equal(game.drops.length, 1); assert.equal(p.ammo, 2);
+  assert.deepEqual(p.collectedDropIds, []);
   p._fireAt = game.elapsed + 4;
   place('epic', 'upgrade'); assert.equal(game.action(p.id, 'interact', 'upgrade').ok, true);
   assert.equal(p.rarity, 'epic'); assert.equal(p.inventory.flintlock.rarity, 'epic');
@@ -165,6 +173,9 @@ test('duplicate and lower-rarity guns stay for crew; upgrades preserve magazines
   assert.equal(p._fireAt, game.elapsed + 4);
   assert.equal(game.action(p.id, 'fire').ok, true); assert.equal(p.ammo, 2);
   place('rare', 'lower'); assert.equal(game.action(p.id, 'interact', 'lower').code, 'DUPLICATE_WEAPON');
+  assert.equal(game.action(p.id, 'interact', 'upgrade').code, 'DUPLICATE_WEAPON');
+  assert.deepEqual(p.collectedDropIds, ['upgrade']);
+  assert.deepEqual(events.filter(e => e.kind === 'loot').map(({ id, upgraded }) => ({ id, upgraded })), [{ id: 'upgrade', upgraded: true }]);
   assert.deepEqual(game.drops.map(d => d.id), ['same', 'upgrade', 'lower']);
 });
 
@@ -275,17 +286,30 @@ test('snapshots deeply isolate loadouts/drops, reconnect retains loot and a new 
   assert.equal('_secret' in snapshot.drops[0], false); assert.equal('_secret' in publicPlayer.inventory.flintlock, false);
   assert.ok(!Object.keys(publicPlayer).some(key => key.startsWith('_')));
   snapshot.drops[0].rarity = 'common'; publicPlayer.inventory.flintlock.ammo = -100;
+  publicPlayer.collectedDropIds.push('invented');
   assert.equal(game.drops[0].rarity, 'legendary'); assert.equal(p.inventory.flintlock.ammo, 8);
+  assert.deepEqual(p.collectedDropIds, []);
   game.tick(); game.disconnect(p.id); game.reconnect(p.id);
   assert.equal(p.rarity, 'legendary'); assert.equal(p.inventory.longshot.ammo, 4);
+  const dropId = game.drops[0].id;
+  assert.deepEqual(p.collectedDropIds, [dropId]);
+  const reconnectSnapshot = game.snapshot();
+  assert.deepEqual(reconnectSnapshot.players[0].collectedDropIds, [dropId]);
+  reconnectSnapshot.players[0].collectedDropIds.length = 0;
+  assert.deepEqual(p.collectedDropIds, [dropId], 'snapshot mutation cannot reveal the collected copy');
   const late = game.addPlayer('late', 'Navigator', COLORS[1]); assert.equal(late.mode, 'gliding');
   assert.deepEqual(Object.keys(late.inventory), ['flintlock', 'scatter']); assert.equal(game.drops.length, 1);
+  assert.deepEqual(late.collectedDropIds, []);
   locate(late, CHESTS[0]); game.disconnect(late.id); game.tick(); assert.equal(late.inventory.longshot, undefined);
   game.reconnect(late.id); game.tick(); assert.equal(late.weapon, 'longshot');
+  assert.deepEqual(late.collectedDropIds, [dropId]);
   assert.equal(game.snapshot().drops.length, 1);
   game.resetRound(); snapshot = game.snapshot(); assert.deepEqual(snapshot.drops, []);
   assert.equal(p.rarity, 'common'); assert.deepEqual(Object.keys(p.inventory), ['flintlock', 'scatter']);
   assert.equal(p.inventory.flintlock.ammo, 8); assert.equal(p.inventory.scatter.ammo, 5);
+  assert.deepEqual(p.collectedDropIds, []); assert.deepEqual(late.collectedDropIds, []);
+  assert.notEqual(p.collectedDropIds, late.collectedDropIds);
+  assert.ok(snapshot.players.every(player => player.collectedDropIds.length === 0));
 });
 
 test('shot damage/tracers, cutlass, revives and enemy attacks stop at walls and work through doors', () => {
