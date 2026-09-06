@@ -174,18 +174,18 @@ The aerial view uses player `(-29,39)`, then explicitly sets camera `(-7,30,61)`
 
 The final geometry adds **2,019,240 bytes**, **22,258 source triangles** and **45 material primitives**, with zero texture images. Its SHA-256 is `d43b7c1585bab1b2b6e69db5493189b6a1ba08702fe1409027f5c6bad4510690`. Independent background Blender 5.2.1 LTS regeneration reproduced both GLB and manifest exactly; the manifest SHA-256 is `0a6b32fbec40e901752850f895d55d08ecbdc0792568f4cf88d57866c62bf1a8`. Old Watch and Farm also reproduced their unchanged shipping bytes. The loaded cache reports three URLs, five leases, ten shared texture images and **12,063,040 unique GLB bytes / 9,786,696 estimated decoded texture bytes**.
 
-Using the fixed comparison setup above:
+Using the fixed comparison setup above, with the final sample served from Docker at implementation commit `2e2bc1d`:
 
 | View / quality | Draw calls, baseline → final | Renderer triangles, baseline → final | Final mean / p95 frame time |
 | --- | ---: | ---: | ---: |
-| Old Watch / high | 150 → 150 | 667,618 → 660,922 | 16.67 / 16.8ms |
-| Old Watch / low | 149 → 149 | 497,570 → 490,874 | 16.67 / 16.8ms |
-| Market / high | 178 → 215 | 361,373 → 393,993 | 16.67 / 16.8ms |
-| Market / low | 177 → 214 | 361,213 → 376,689 | 16.67 / 16.8ms |
-| Haven / high | 306 → 326 | 997,949 → 1,034,165 | 16.67 / 16.8ms |
-| Haven / low | 274 → 294 | 636,055 → 652,071 | 16.67 / 16.8ms |
+| Old Watch / high | 150 → 150 | 667,618 → 660,922 | 17.66 / 18.2ms |
+| Old Watch / low | 149 → 149 | 497,570 → 490,874 | 17.73 / 18.4ms |
+| Market / high | 178 → 215 | 361,373 → 393,993 | 17.81 / 18.5ms |
+| Market / low | 177 → 214 | 361,213 → 376,689 | 17.74 / 18.3ms |
+| Haven / high | 306 → 326 | 997,949 → 1,034,165 | 17.65 / 18.3ms |
+| Haven / low | 274 → 294 | 636,055 → 652,071 | 17.76 / 18.6ms |
 
-An earlier first-pass sample ran around 17.5–17.6ms with 18.1–18.3ms p95, illustrating host scheduling variability. These are renderer-frame totals, including other regions and shadows; the Watch change is from other scenery visible to that view, not a changed Watch kit. The comparison remains vsync limited near 60 FPS and is not permission to multiply the new area cost across the island.
+An earlier first-pass sample ran around 17.5–17.6ms with 18.1–18.3ms p95; the final preview before the paving depth-bias correction measured 16.67ms / 16.8ms p95 with identical renderer counts. The deployed repeat above was slower across all views, including Old Watch, illustrating host scheduling variability. These are renderer-frame totals, including other regions and shadows; the Watch triangle change is from other scenery visible to that view, not a changed Watch kit. Samples ran around 56–60 FPS under vsync and are not permission to multiply the new area cost across the island.
 
 An isolated live server used five joined clients: one ordinary browser player and four WebSocket peers. With camp enemies temporarily withheld for navigation checks, browser W movement and E interactions opened chest 20 and the cottage chest, traversed both cottage doors in both directions, checked roof/wall cutaway and restoration, walked the market trail both ways and continued to the beacon. Map, low graphics and reduced motion worked; the new foliage wind uniform became zero, and the existing Farm sails froze. Restore the original enemy collection for the populated sample. The final live scene held **36 enemies**, with **five within 28m of the market** (not necessarily all on screen). Its warm sample averaged **16.67ms / 18.4ms p95**; one renderer snapshot was **301 calls / 455,763 triangles** with five players. Combat/effect timing and stationary peers limit comparability to other sessions.
 
@@ -194,6 +194,8 @@ Walking, close, cottage interior, both Haven huts, aerial/glider and Old Watch c
 To reproduce failure checks, intercept `/assets/tideglass-market/kit.glb` and then `/assets/old-watch/kit.glb` in separate fresh browser contexts and abort each request deliberately. The first preserves authored Watch/Farm plus complete market, cottage and hut fallbacks; the second preserves all three procedural areas. At market `(-27,40)`, both failed cases restore baseline sky `85d9ee`. No unexpected page/console/network errors remained in the successful runs, and failed contexts produced only the deliberately aborted request. Automated regressions additionally cover partial installation, independently arriving resources after failure/disposal, source nonmutation, exact-once shared disposal, roof undersides, full door prisms and original scenery/RNG preservation.
 
 Final `npm.cmd test` passed all **152 tests**, including the final paving depth-bias correction. `git diff --check` and independent implementation review passed.
+
+Implementation `2e2bc1d` was pushed to canonical `main` and deployed using `docker compose up -d --build --wait`. Compose reported healthy, `/health` returned `ok: true`, and 16 served environment assets matched `git show HEAD:<path>` by SHA-256, including all changed browser modules and the new GLB. The persistent volume mount was preserved. Deployed walking, interior and aerial screenshots and repeated independent/shared asset-failure checks passed without unexpected page/console/network errors. This evidence and the next bounded handoff are recorded in the rollout tracker.
 
 ## Extending the next area
 

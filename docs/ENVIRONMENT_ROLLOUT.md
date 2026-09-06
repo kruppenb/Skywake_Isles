@@ -6,7 +6,7 @@ This is the authoritative progress tracker for the environment rollout. With thi
 
 Old Watch is the approved visual benchmark. At commit `2c2d3fe`, the user explicitly approved it: “this is great, excellent style and quality.” Carry its moderate-fidelity weathering across the island: worn masonry, aged timber, moss, natural vegetation, textured ground, readable paths and restrained atmospheric lighting. Match that quality without raising the fidelity target. Coastal settlements, jungle, volcanic terrain and the magical grove retain their own colors, vegetation, architecture and atmosphere.
 
-Windward Farm is shipped and validated at `8b66888`; that records implementation and QA completion, without implying a separate explicit aesthetic approval. Existing gameplay, character art, controls, objectives and UI stay intact.
+Windward Farm is shipped and validated at `8b66888`, and Tideglass Market / central Haven at `2e2bc1d`; these record implementation and QA completion, without implying separate explicit aesthetic approvals. Existing gameplay, character art, controls, objectives and UI stay intact.
 
 ## Milestones
 
@@ -14,8 +14,8 @@ Windward Farm is shipped and validated at `8b66888`; that records implementation
 | --- | --- | --- | --- |
 | 1 | The Old Watch pilot | Complete | `2c2d3fe`; explicit user style approval; reproducible original kit. |
 | 2 | Windward Farm and Old Watch connector | Complete | `8b66888`; pushed to canonical `main`, Docker deployed and verified; evidence below. |
-| 3 | Tideglass Market and central Haven | In progress | Implementation and QA complete; publication and Docker verification pending. |
-| 4 | Saltwind Harbor, Driftwood Yard and Sunwake Strand | Planned | Coastal working waterfront and beach identity. |
+| 3 | Tideglass Market and central Haven | Complete | `2e2bc1d`; pushed to canonical `main`, Docker deployed and verified; evidence below. |
+| 4 | Saltwind Harbor, Driftwood Yard and Sunwake Strand | Planned — next | Coastal working waterfront and beach identity. |
 | 5 | Palmheart Camp and Wilds | Planned | Jungle settlement and vegetation identity. |
 | 6 | Cinderworks and Emberpeak | Planned | Volcanic architecture, terrain and atmosphere. |
 | 7 | Moonwatch and Moonbloom | Planned | Magical grove architecture, vegetation and atmosphere. |
@@ -23,14 +23,12 @@ Windward Farm is shipped and validated at `8b66888`; that records implementation
 
 ## Active handoff
 
-- **Active milestone:** Tideglass Market and central Haven — in progress, 2026-09-05.
-- **Scope:** Weathered market cottage, fruit/sailcloth stalls, the two existing central-Haven huts, market square and immediate connecting paths/planting. Preserve gameplay and later coastal regions.
-- **Source state:** Started from `8890454`; concurrent unrelated pickup work was committed and pushed as `be58b78`, now the implementation base on `main`. Preserve that history. Only milestone art/runtime/tests and documentation are being changed.
-- **Deployment at start:** Docker service and `/health` healthy at `be58b78`; 13 served environment assets matched committed source, and the persistent volume mount was recorded.
-- **Completed work:** Original cottage/stalls/huts, bounded ground/planting/paving and cached runtime integration are complete. Walking, close, interior, aerial, glider, low/reduced and asset-failure views passed review. Five-client gameplay checked both doors, chests, cutaway and the connecting trail. All three kits independently regenerated with identical GLB/manifest bytes. Final full suite passed 152 tests; diff and independent implementation review passed. Detailed measurements and recreation instructions are in the pipeline.
-- **Remaining work:** Commit and push the completed implementation, deploy Docker, verify health, served hashes and deployed browser views, then record actual publication evidence here.
-- **Known blocker:** None. No environment changes were in progress at start.
-- **Next action:** Publish and verify this milestone, update the completed handoff, and stop with milestone 4 still planned.
+- **Active milestone:** None. Milestone 3 is complete; milestone 4 has not started.
+- **Latest shipped environment implementation:** `2e2bc1d` on canonical GitHub `main`, preserving the concurrent pickup implementation `be58b78`.
+- **Last confirmed deployment:** Local Docker game at `http://localhost:3400`, healthy after the Tideglass deployment on 2026-09-05. All 16 checked browser environment assets matched committed source; the persistent volume mount was preserved. Deployed walking/interior/aerial views and deliberate asset-failure checks passed. Recheck current reality before working.
+- **Next objective:** Bring Saltwind Harbor, Driftwood Yard and Sunwake Strand to the approved weathered material quality while retaining their working-waterfront and beach identities. Bound the work to those existing coastal compositions and necessary transitions. Preserve routes, resident activity, loot, collision and gameplay; later regions remain planned.
+- **Known blocker:** None recorded. Inspect the current tree and remote for subsequent work.
+- **Next action:** Read the sources below, inspect repository/remote/deployment state, and capture walking, close and aerial baselines for the next area and an already-finished comparison view. Complete only milestone 4 on the next request.
 
 When work is interrupted, replace the active handoff with concrete current facts:
 
@@ -49,10 +47,10 @@ Keep this handoff useful without `.qa`: local helpers may accelerate verificatio
 
 Read [ENVIRONMENT_PIPELINE.md](ENVIRONMENT_PIPELINE.md) for the detailed asset contract, generation commands, ownership, terrain/lighting constraints, validation methods and measured limitations. Also read [CREDITS.md](../CREDITS.md) and the relevant existing tests before extending the kit.
 
-- **Shared gameplay/layout:** `shared/exploration.js`, `shared/world.js`, `shared/old-watch.js`, `shared/windward-farm.js`. Use the actual target buildings, trails, resident routes, doors and loot.
-- **Runtime integration:** `client/world.js`, `client/settlement.js`, `client/environment-assets.js`, `client/environment-lighting.js`, `client/environment-geometry.js`, `client/old-watch.js`, `client/windward-farm.js`.
-- **Editable assets:** `tools/environment_kit.py`, `tools/build-old-watch.py`, `tools/build-windward-farm.py`, and each kit's tracked manifest in `client/assets/`.
-- **Regression coverage:** `test/old-watch.test.js`, `test/windward-farm.test.js`, `test/environment.test.js`, plus target-area gameplay tests.
+- **Shared gameplay/layout:** `shared/exploration.js`, `shared/world.js`, `shared/old-watch.js`, `shared/windward-farm.js`, `shared/tideglass-market.js`. Use the actual target buildings, trails, resident routes, doors and loot.
+- **Runtime integration:** `client/world.js`, `client/settlement.js`, `client/environment-assets.js`, `client/environment-lighting.js`, `client/environment-geometry.js`, `client/old-watch.js`, `client/windward-farm.js`, `client/tideglass-market.js`.
+- **Editable assets:** `tools/environment_kit.py`, `tools/build-old-watch.py`, `tools/build-windward-farm.py`, `tools/build-tideglass-market.py`, and each kit's tracked manifest in `client/assets/`.
+- **Regression coverage:** `test/old-watch.test.js`, `test/windward-farm.test.js`, `test/tideglass-market.test.js`, `test/environment.test.js`, plus target-area gameplay tests.
 
 ## One-milestone resume workflow
 
@@ -73,6 +71,14 @@ Read [ENVIRONMENT_PIPELINE.md](ENVIRONMENT_PIPELINE.md) for the detailed asset c
 - Keep the concise durable evidence here and detailed methods/measurements in the pipeline. Never commit credentials, saves, dependencies, previews, logs or QA output.
 
 ## Latest completed milestone evidence
+
+**Tideglass Market and central Haven — `2e2bc1d`, 2026-09-05:** committed and pushed to canonical `main`; `docker compose up -d --build --wait` succeeded, `docker compose ps` reported healthy, and `/health` returned `ok: true`. All **16** checked browser environment assets matched committed source by SHA-256. The persistent volume mount was unchanged. Full `npm.cmd test` passed **152 tests**, and `git diff --check` plus independent implementation review passed. All three kits independently regenerated with identical GLB and manifest bytes; Old Watch and Farm assets remain unchanged.
+
+The milestone replaces the existing market cottage, two stalls and two closed Haven huts, with bounded ground, paving and coastal planting. The original geometry adds **2,019,240 GLB bytes** and no texture images. Combined unique environment GLBs total **12,063,040 bytes**, retaining **9,786,696 bytes** estimated decoded texture memory. Final deployed five-player fixed-render views measured **17.65–17.81ms mean / 18.2–18.6ms p95**, with materially higher market/Haven renderer costs. A live five-player scene with 36 enemies measured **16.67ms mean / 18.4ms p95**. Host scheduling, fixed poses and variable combat limit these comparisons; detailed fixtures, costs and provenance are retained in [the pipeline QA record](ENVIRONMENT_PIPELINE.md#tideglass-implementation-qa--2026-09-05).
+
+Validated both cottage doors in both directions, chests, furnished cutaway/restoration, the market-to-Haven trail, low graphics, reduced motion, close/walking/aerial/glider views and independent/shared asset-failure fallback. Visual review corrected dark plaster/canvas, awning beam intersections, masonry backing and the soil overlay hiding paving. Deployed browser review and repeated failure checks had no unexpected console/network errors. Milestone 4 remains planned.
+
+### Previous milestone
 
 **Windward Farm — `8b66888`, 2026-09-05:** committed and pushed to canonical `main`; local Docker deployment healthy; 13 browser-asset hashes matched committed source. Full `npm.cmd test` passed **130 tests**, and `git diff --check` passed. Both kits independently regenerated with matching GLB and manifest bytes. Old Watch's approved GLB remained unchanged.
 
