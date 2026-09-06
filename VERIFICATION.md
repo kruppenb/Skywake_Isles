@@ -1,3 +1,59 @@
+# Seaward crab defense verification
+
+September 6, 2026. The optional supply defenses now stage three crew-scaled
+waves that surge in from the seaward side, with Tidebreaker mini bosses on
+the final wave and a large wave banner. Measured on this Windows host.
+
+- Spawn placement was exercised for all three supply centers, waves 1 to 3,
+  and crews of 1, 3 and 5: every combination produced its full roster (5 to
+  19 attackers) inside the 60 degree seaward half-arc, on sand at or above
+  1.1 m, with 2.8 m spacing (3.6 m for Tidebreakers). Between 2 and 12 of
+  each wave start behind cover and carry a validated two-leg route. Driftwood
+  Yard's first rank forms on the surf line 17 m out; the market and farm
+  fronts sit 28 m and 26 m seaward. Warm spawn calls cost 6 to 32 ms; the
+  first call per site builds its waypoint ring in 66 to 155 ms.
+- Unattended solo surges reached the supplies and landed their first hit at
+  about 4 s (yard) and 7 s (farm, market), then drained 100 integrity within
+  10 to 14 s, so the failure path is exercised by real ticks.
+- A stall was found and fixed during this pass: an attacker whose straight
+  route flipped from clear to blocked could come to rest exactly on the 0.85 m
+  clearance margin of a prop, where every route check failed from its own
+  position and it idled forever. Route checks now exempt the walker's first
+  0.6 m, spawn and waypoint positions keep an explicit standing-room check,
+  waypoints count as reached at 0.2 m, and a ring point the walker already
+  stands on is skipped. The routed-attacker test walks every two-leg route
+  with the enemy's full public radius and confirms arrival within 3.2 m.
+- `node --test` passes side-events (18), side-events-ui (7, including the
+  banner text for waves 1, 2 and the final wave), presentation (14, including
+  finite Tidebreaker geometry), encounters and game suites. The scripted
+  solo and five-player defenses complete all three waves well inside the
+  180 s deadline with the expected kills and pearls (45 reward, 15 per
+  Tidebreaker, 3 per crab). The full working-tree `npm test` ran 167 tests
+  in 130.2 s with 166 passing; the single failure belongs to the concurrent
+  Driftwood Yard environment milestone's uncommitted manifest.
+- Browser check at 1280 by 800 against a local server: after joining and
+  setting sail, the wave banner rendered centered under the compass (top
+  102 px to 194 px) with the place name, "WAVE 1" and its subtitle, and the
+  toast stack moved below it to 222 px instead of overlapping. The gold
+  "FINAL WAVE" variant with "2 Tidebreakers rise from the deep!" was also
+  inspected. The only console error was the other session's missing
+  driftwood-yard kit, unrelated to this change.
+- Docker was rebuilt from a git-archive export of commit 3ac1087 (project
+  `skywake-isles`, so the `skywake-isles_skywake-data` volume was kept) and
+  reported healthy; all nine changed browser assets returned HTTP 200 with
+  `no-cache` and matched the commit byte for byte after CRLF normalization.
+  An isolated `npm test` on that export then showed that commit 3ac1087 had
+  swept the other session's unfinished Driftwood Yard imports into
+  client/world.js, which the export could not resolve, so the deployed
+  client failed to load. The other session removed only those hunks in
+  commit 9886cb4 and redeployed.
+- Final state on 9886cb4: an isolated `npm test` on a git-archive export of
+  that commit passed all 167 tests in 138.3 s. The Docker service is healthy,
+  the nine changed assets served on port 3400 match the commit after CRLF
+  normalization, and fetching the deployed client's entire ES module graph
+  from `/main.js` resolved all 31 modules with HTTP 200, so the earlier
+  unresolved-import failure is gone. No redeploy was needed after the fix.
+
 # Movement and character polish verification
 
 September 5, 2026 follow-up. `npm test` passed all 45 tests in 89.99 seconds,
