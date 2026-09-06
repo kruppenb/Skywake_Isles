@@ -283,3 +283,27 @@ test('camera carries the rendered travel delta exactly and has no catch-up after
     }
   }
 });
+
+test('crab archetypes build with finite geometry, and the Tidebreaker mini boss carries extra reef detail', async () => {
+  const { buildCrab } = await import('../client/models.js');
+  const { ENEMY_TYPES } = await import('../shared/enemies.js');
+  const palette = makePalette(), triangles = {};
+  for (const type of Object.keys(ENEMY_TYPES)) {
+    const model = buildCrab(palette, type, ENEMY_TYPES[type].scale);
+    assert.equal(model.group.userData.kind, type);
+    near(model.group.scale.x, ENEMY_TYPES[type].scale, type + ' scale');
+    let count = 0;
+    model.group.traverse((object) => {
+      if (!object.isMesh) return;
+      const position = object.geometry.getAttribute('position');
+      for (let i = 0; i < position.count; i++) {
+        assert.ok([position.getX(i), position.getY(i), position.getZ(i)].every(Number.isFinite), type + ' has finite vertices');
+      }
+      count += (object.geometry.index ? object.geometry.index.count : position.count) / 3;
+    });
+    triangles[type] = count;
+    for (const state of ['idle', 'chase', 'windup', 'attack']) model.animate(1.5, { state });
+  }
+  assert.ok(triangles.tidebreaker > triangles.crab, 'the mini boss carries extra reef detail');
+  assert.ok(triangles.tidebreaker < triangles.crab * 2.5, 'the mini boss stays a modest batch for the surge');
+});

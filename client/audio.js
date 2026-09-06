@@ -78,6 +78,8 @@ export function createAudio() {
       case 'hit': tone(660, .055, .13 * v, 'triangle', 0, 420); noise(.04, .07 * v, 4000); break;
       case 'hurt': tone(180, .16, .16 * v, 'triangle', 0, 90); break;
       case 'splash': noise(.35, .18 * v, 950); tone(260, .18, .09 * v, 'sine', 0, 120); break;
+      // A breaking wave: a low rumble under two overlapping foam hisses.
+      case 'surge': tone(64, 1.1, .16 * v, 'sine', 0, 38); noise(1.15, .2 * v, 520); noise(.75, .14 * v, 1400, .22); noise(.6, .09 * v, 2600, .5); break;
       case 'collect': [660, 880, 1320].forEach((f, i) => tone(f, .19, .14 * v, 'sine', i * .075)); break;
       case 'shrine': [392, 494, 587, 784].forEach((f, i) => tone(f, .48, .13 * v, 'triangle', i * .12)); break;
       case 'heal': [440, 554, 660].forEach((f, i) => tone(f, .45, .1 * v, 'sine', i * .09)); break;

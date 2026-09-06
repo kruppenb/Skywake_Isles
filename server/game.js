@@ -3,7 +3,8 @@ import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPONS, RARITIES, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
-import { SIDE_EVENTS, SIDE_EVENT_WAVES } from '../shared/side-events.js';
+import { enemyStats } from '../shared/enemies.js';
+import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, seawardBearing, sideEventWave } from '../shared/side-events.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
 const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
@@ -20,41 +21,104 @@ const canReach = (from, to) => hasWorldLineOfSight(sightPoint(from, 1.25), sight
 
 // Verify the whole walk, not just the endpoint: a clear-looking spawn on the
 // other side of a cottage must not leave a crab walking into its wall.
-export function sideEventPathClear(from, to) {
+export function sideEventPathClear(from, to, radius = 0.85) {
   if (![from?.x, from?.z, to?.x, to?.z].every(Number.isFinite)) return false;
-  if (!hasWorldLineOfSight(sightPoint(from), sightPoint(to), 0.8)) return false;
-  const steps = Math.max(1, Math.ceil(distance(from, to) / 0.75));
+  radius = Number.isFinite(radius) ? Math.max(0.85, radius) : 0.85;
+  const length = distance(from, to);
+  // The walker's own footprint is exempt. Crabs move with a smaller body than
+  // this conservative check, so one pushed against a prop or resting on the
+  // margin of a marginal straight route must still validate the walk away.
+  const lead = Math.min(length, 0.6);
+  const start = length > 0 ? { x: from.x + (to.x - from.x) / length * lead, z: from.z + (to.z - from.z) / length * lead } : { x: from.x, z: from.z };
+  if (!hasWorldLineOfSight(sightPoint(start), sightPoint(to), radius - 0.05)) return false;
+  const steps = Math.max(1, Math.ceil(length / 0.75));
   let previousY = heightAt(from.x, from.z);
   for (let step = 0; step <= steps; step++) {
     const fraction = step / steps;
     const point = { x: from.x + (to.x - from.x) * fraction, z: from.z + (to.z - from.z) * fraction };
     point.y = heightAt(point.x, point.z);
     if (point.y < 1 || inSafeLanding(point) || Math.abs(point.y - previousY) > 0.8) return false;
-    const resolved = resolveWorldCollision({ ...point }, 0.85);
-    if (distance(point, resolved) > 0.001) return false;
+    if (fraction * length >= lead && distance(point, resolveWorldCollision({ ...point }, radius)) > 0.001) return false;
     previousY = point.y;
   }
   return true;
 }
 
+// Standing room for a whole body of this radius, used for spawn and waypoint
+// positions that the footprint exemption above deliberately skips.
+export function sideEventStandingClear(point, radius = 0.85) {
+  if (![point?.x, point?.z].every(Number.isFinite)) return false;
+  const sample = { x: point.x, z: point.z, y: heightAt(point.x, point.z) };
+  return sample.y >= 1 && !inSafeLanding(sample) && distance(sample, resolveWorldCollision({ ...sample }, Math.max(0.85, radius))) <= 0.001;
+}
+
+// Crabs walk with a body radius near their public radius, so wide mini bosses
+// route around props that ordinary crabs squeeze past.
+const routeRadius = enemy => Math.max(0.85, Number(enemy?.radius) || 0);
+const waypointRings = new Map();
+
+// Two-leg routes let attackers start behind the buildings that stand between
+// the supplies and the sea. Each supply center keeps the ring of points that
+// reach it directly; a route then only needs one clear leg to that ring.
+export function sideEventWaypoint(from, point, radius = 0.85) {
+  if (![from?.x, from?.z, point?.x, point?.z].every(Number.isFinite)) return null;
+  radius = Math.max(0.85, Number.isFinite(radius) ? radius : 0.85);
+  const key = `${point.x},${point.z}:${radius}`;
+  if (!waypointRings.has(key)) {
+    const ring = [];
+    for (const distanceOut of [4, 8, 12, 16, 20, 24]) for (let direction = 0; direction < 32; direction++) {
+      const angle = direction * Math.PI / 16;
+      const candidate = { x: point.x + Math.cos(angle) * distanceOut, z: point.z + Math.sin(angle) * distanceOut, out: distanceOut };
+      if (sideEventStandingClear(candidate, radius) && sideEventPathClear(candidate, point, radius)) ring.push(candidate);
+    }
+    waypointRings.set(key, ring);
+  }
+  // Nearest total walk first, so the first clear leg is the shortest route. A
+  // waypoint the walker already stands on cannot lead it anywhere new.
+  const ordered = waypointRings.get(key).map(candidate => ({ candidate, route: distance(from, candidate) + candidate.out }))
+    .filter(({ route, candidate }) => route - candidate.out >= 1).sort((a, b) => a.route - b.route);
+  for (const { candidate } of ordered) if (sideEventPathClear(from, candidate, radius)) return { x: candidate.x, z: candidate.z, waypoint: true };
+  return null;
+}
+
 export function sideEventSpawns(id, playerCount, wave, occupied = []) {
   const point = SIDE_EVENTS.find(event => event.id === id);
-  if (!point || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > MAX_PLAYERS ||
-    !Number.isInteger(wave) || wave < 1 || wave > SIDE_EVENT_WAVES ||
+  const roster = sideEventWave(wave, playerCount);
+  if (!point || !roster || playerCount > MAX_PLAYERS ||
     !Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
-  const count = (wave === 1 ? 3 : 4) + Math.floor((playerCount - 1) / 2), result = [];
-  for (let index = 0; index < count; index++) {
+  // Ranks form on the seaward side: crabs lead in up to three ranks, spitters
+  // follow, and the Tidebreakers anchor the centre of the rearmost rank.
+  const bearing = seawardBearing(point), units = [];
+  const rank = (type, count, rankIndex, ranks = 1) => {
+    const perRank = Math.ceil(count / ranks);
+    for (let index = 0; index < count; index++) {
+      const row = Math.floor(index / perRank), inRow = Math.min(perRank, count - row * perRank);
+      units.push({ type, rank: rankIndex + row, angle: bearing + ((index % perRank + 0.5) / inRow - 0.5) * SIDE_EVENT_ARC * 2 });
+    }
+  };
+  const crabRanks = Math.min(3, Math.ceil(roster.crab / 4));
+  rank('tidebreaker', roster.tidebreaker, crabRanks);
+  rank('spitter', roster.spitter, crabRanks);
+  rank('crab', roster.crab, 0, crabRanks);
+  const result = [];
+  for (const unit of units) {
+    const radius = routeRadius(enemyStats(unit.type)), spacing = unit.type === 'tidebreaker' ? 3.6 : 2.8;
     let spawn = null;
-    // Try distinct bearings first, then alternate radii. Every fallback passes
-    // the same checks; exhausting candidates fails safely instead of spawning
-    // the last rejected point.
-    search: for (const radius of [12, 14, 10, 15]) for (let attempt = 0; attempt < 96; attempt++) {
-      const angle = index / count * Math.PI * 2 + wave * 0.47 + attempt * Math.PI * 2 / 96;
-      const candidate = { x: point.x + Math.cos(angle) * radius, z: point.z + Math.sin(angle) * radius };
-      if ([...occupied, ...result].some(other => distance(other, candidate) < 2.8)) continue;
+    // Nudge along the front first, then further out. Every fallback passes the
+    // same checks; exhausting candidates fails safely instead of spawning the
+    // last rejected point.
+    search: for (const extra of [0, 2, -2, 4, 6, 8]) for (let attempt = 0; attempt < 29; attempt++) {
+      const sway = Math.ceil(attempt / 2) * (attempt % 2 ? 1 : -1) * Math.PI / 36;
+      const angle = unit.angle + sway, out = point.front + unit.rank * SIDE_EVENT_RANK_SPACING + extra;
+      if (Math.abs(angle - bearing) > SIDE_EVENT_ARC + Math.PI / 36) continue;
+      const candidate = { x: point.x + Math.cos(angle) * out, z: point.z + Math.sin(angle) * out };
+      if (heightAt(candidate.x, candidate.z) < 1.1 || !sideEventStandingClear(candidate, radius)) continue;
+      if ([...occupied, ...result].some(other => distance(other, candidate) < Math.max(spacing, other.type === 'tidebreaker' ? 3.6 : 0))) continue;
       if ([BEACON, ...CHESTS, ...SHRINES].some(other => distance(other, candidate) < 3.6)) continue;
-      if (!sideEventPathClear(candidate, point)) continue;
-      spawn = { ...candidate, type: wave === 2 && index === count - 1 ? 'spitter' : 'crab', zone: point.region };
+      const direct = sideEventPathClear(candidate, point, radius);
+      const waypoint = direct ? null : sideEventWaypoint(candidate, point, radius);
+      if (!direct && !waypoint) continue;
+      spawn = { ...candidate, type: unit.type, zone: point.region, ...(waypoint ? { waypoint } : {}) };
       break search;
     }
     if (!spawn) return null;
@@ -334,7 +398,7 @@ export class Game {
     if (e.hp > 0) return;
     this.enemies.delete(e.id);
     const p = this.players.get(sourceId); if (p) p.kills++;
-    this.pearls += e.type === 'tempest' ? 60 : 3;
+    this.pearls += enemyStats(e.type).pearls;
     this.emit({ kind: 'defeated', id: e.id, x: e.x, y: e.y, z: e.z, type: e.type });
     if (e.type === 'tempest') this.win();
   }
@@ -418,23 +482,27 @@ export class Game {
     const spawns = sideEventSpawns(id, crewCount, 1, [...this.enemies.values()]);
     if (!spawns) return bad('The supplies need a clear approach. Try again in a moment.');
     Object.assign(event, { status: 'active', wave: 1, integrity: 100, startedAt: this.elapsed,
-      endsAt: this.elapsed + 120, finishedAt: 0, _crewCount: crewCount, _nextWaveAt: 0 });
+      endsAt: this.elapsed + SIDE_EVENT_DURATION, finishedAt: 0, _crewCount: crewCount, _nextWaveAt: 0 });
     this.spawnSideEventWave(event, spawns);
-    this.notifySideEvent(event, `${point.name}: protect the cyan supplies! Wave 1 of ${SIDE_EVENT_WAVES}.`);
+    this.notifySideEvent(event, `${point.name}: crabs are surging in from the sea! Keep them off the cyan supplies.`, undefined, spawns);
     return good();
   }
 
   spawnSideEventWave(event, spawns) {
     for (const spawn of spawns) {
-      const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone);
+      const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone, null, event._crewCount);
       enemy._sideEvent = event.id;
+      enemy._sideWaypoint = spawn.waypoint ? { x: spawn.waypoint.x, z: spawn.waypoint.z, waypoint: true } : null;
     }
     event.remaining = spawns.length;
   }
 
-  notifySideEvent(event, message, reward) {
+  // Wave spawns travel with the event so every client can stage the surge and
+  // its banner; the snapshot never carries individual spawn points.
+  notifySideEvent(event, message, reward, spawns) {
     this.emit({ kind: 'side-event', id: event.id, status: event.status, wave: event.wave,
-      ...(reward === undefined ? {} : { reward }) });
+      ...(reward === undefined ? {} : { reward }),
+      ...(spawns ? { spawns: spawns.map(spawn => ({ type: spawn.type, x: Math.round(spawn.x * 10) / 10, z: Math.round(spawn.z * 10) / 10 })) } : {}) });
     if (message) this.emit({ kind: 'notice', message });
   }
 
@@ -467,37 +535,30 @@ export class Game {
       if (!spawns) { this.finishSideEvent(event, 'failed'); continue; }
       event.wave++; event._nextWaveAt = 0;
       this.spawnSideEventWave(event, spawns);
-      this.notifySideEvent(event, `The crabs are back! Wave ${event.wave} of ${SIDE_EVENT_WAVES} at the cyan supplies.`);
+      this.notifySideEvent(event, null, undefined, spawns);
     }
   }
 
   sideEventDestination(enemy, point) {
-    if (sideEventPathClear(enemy, point)) { enemy._sideWaypoint = null; return point; }
-    if (enemy._sideWaypoint && distance(enemy, enemy._sideWaypoint) > 0.5) return enemy._sideWaypoint;
+    const radius = routeRadius(enemy);
+    if (sideEventPathClear(enemy, point, radius)) { enemy._sideWaypoint = null; return point; }
+    if (enemy._sideWaypoint && distance(enemy, enemy._sideWaypoint) > 0.2) return enemy._sideWaypoint;
     if (this.elapsed < (enemy._sideRouteAt ?? 0)) return enemy;
     enemy._sideRouteAt = this.elapsed + 0.75;
     // A pursuit may draw a defender behind a building. Find a clear two-leg
     // return route around it instead of repeatedly pushing against its wall.
-    let waypoint = null, bestDistance = Infinity;
-    for (const radius of [4, 8, 12, 16, 20, 24]) for (let direction = 0; direction < 32; direction++) {
-      const angle = direction * Math.PI / 16;
-      const candidate = { x: point.x + Math.cos(angle) * radius, z: point.z + Math.sin(angle) * radius };
-      const routeDistance = distance(enemy, candidate) + radius;
-      if (routeDistance >= bestDistance || !sideEventPathClear(candidate, point) || !sideEventPathClear(enemy, candidate)) continue;
-      waypoint = candidate; bestDistance = routeDistance;
-    }
-    enemy._sideWaypoint = waypoint;
-    return waypoint ?? enemy;
+    enemy._sideWaypoint = sideEventWaypoint(enemy, point, radius);
+    return enemy._sideWaypoint ?? enemy;
   }
 
-  spawnEnemy(type, x, z, zone, shrine = null) {
-    const boss = type === 'tempest';
-    const point = resolveWorldCollision({ x, y: heightAt(x, z), z }, boss ? 1.7 : 0.8);
+  spawnEnemy(type, x, z, zone, shrine = null, crewCount = this.onlineCount) {
+    const stats = enemyStats(type), boss = type === 'tempest';
+    const point = resolveWorldCollision({ x, y: heightAt(x, z), z }, boss ? 1.7 : stats.miniBoss ? 1.2 : 0.8);
     x = point.x; z = point.z;
-    const hp = boss ? 650 + 180 * Math.max(0, this.onlineCount - 1) : type === 'spitter' ? 60 : 52;
+    const hp = stats.hp + (stats.hpPerExtraPlayer ?? 0) * Math.max(0, crewCount - 1);
     const e = { id: `enemy-${this.nextEnemyId++}`, type, x, y: heightAt(x, z), z, yaw: 0, hp, maxHp: hp,
-      radius: boss ? 2.4 : 0.85, scale: boss ? 3.1 : type === 'spitter' ? 1.1 : 1,
-      state: 'idle', attackAt: 0, attackRadius: boss ? 5.5 : type === 'spitter' ? 2.5 : 2.3, zone,
+      radius: stats.radius, scale: stats.scale,
+      state: 'idle', attackAt: 0, attackRadius: stats.attackRadius, zone,
       _home: { x, z }, _shrine: shrine, _camp: null, _patrolIndex: 0, _nextAttack: this.elapsed + 1.4, _attack: null,
       _summonAt: this.elapsed + 12, _attackCount: 0, _endAttack: 0 };
     this.enemies.set(e.id, e);
@@ -581,21 +642,22 @@ export class Game {
     const defense = e._sideEvent ? this.sideEvents.find(event => event.id === e._sideEvent) : null;
     const supplies = defense ? SIDE_EVENTS.find(point => point.id === defense.id) : null;
     if (e._sideEvent && (defense?.status !== 'active' || defense.integrity <= 0)) return;
+    const stats = enemyStats(e.type);
     if (e.state === 'windup') {
       if (t + 1e-8 < e.attackAt) return;
       const a = e._attack;
       for (const p of this.players.values()) {
         if (!p.online || p.knockedUntil || p.mode !== 'ground') continue;
         if ((e._camp || e._sideEvent) && inSafeLanding(p)) continue;
-        if (distance(p, a) < a.radius + 0.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3 && canReach(e, p)) this.damagePlayer(p, e.type === 'tempest' ? 22 : e.type === 'spitter' ? 12 : 10, e.id);
+        if (distance(p, a) < a.radius + 0.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3 && canReach(e, p)) this.damagePlayer(p, stats.damage, e.id);
       }
       this.emit({ kind: 'splash', x: a.x, y: heightAt(a.x, a.z) + 0.1, z: a.z, radius: a.radius });
-      if (a.sideEvent === defense?.id && supplies && distance(e, supplies) <= 3 && !inSafeLanding(e) &&
+      if (a.sideEvent === defense?.id && supplies && distance(e, supplies) <= 3 + (stats.miniBoss ? 1 : 0) && !inSafeLanding(e) &&
         Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
-        defense.integrity = Math.max(0, defense.integrity - 8);
+        defense.integrity = Math.max(0, defense.integrity - (stats.supplyDamage ?? 8));
       }
       e.state = 'attack'; e._endAttack = t + 0.3;
-      e._nextAttack = t + (a.sideEvent || e.type === 'tempest' ? 1.2 : 1.65);
+      e._nextAttack = t + (stats.miniBoss ? 1.6 : a.sideEvent || e.type === 'tempest' ? 1.2 : 1.65);
       return;
     }
     if (e.state === 'attack') { if (t < e._endAttack) return; e.state = 'idle'; }
@@ -618,13 +680,13 @@ export class Game {
       }
     }
     let destination = target ?? (supplies ? this.sideEventDestination(e, supplies) : e._home);
-    if (!target && supplies && distance(e, supplies) <= 2.8 && Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
+    if (!target && supplies && distance(e, supplies) <= 2.8 + (stats.miniBoss ? 1 : 0) && Math.abs(e.y - heightAt(supplies.x, supplies.z)) < 3 && canReach(e, supplies)) {
       e.yaw = Math.atan2(-(supplies.x - e.x), -(supplies.z - e.z));
       if (t >= e._nextAttack) {
         e._attack = { x: supplies.x, z: supplies.z, radius: e.attackRadius, sideEvent: defense.id };
-        e.state = 'windup'; e.attackAt = t + 0.8;
+        e.state = 'windup'; e.attackAt = t + stats.windup;
         this.emit({ kind: 'telegraph', id: e.id, x: supplies.x, y: heightAt(supplies.x, supplies.z) + 0.08,
-          z: supplies.z, radius: e.attackRadius, duration: 0.8, style: e.type === 'spitter' ? 'splash' : 'swipe' });
+          z: supplies.z, radius: e.attackRadius, duration: stats.windup, style: stats.ranged ? 'splash' : 'swipe' });
       } else e.state = 'idle';
       return;
     }
@@ -638,21 +700,21 @@ export class Game {
     const d = distance(destination, e);
     if (target) {
       e.yaw = Math.atan2(-(target.x - e.x), -(target.z - e.z));
-      const ranged = e.type === 'spitter' || (e.type === 'tempest' && (d > 8 || e._attackCount % 3 === 2));
-      const canAttack = ranged ? d < (e.type === 'tempest' ? 35 : 22) : d < (e.type === 'tempest' ? 6.2 : 2.8);
+      const ranged = !!stats.ranged || (e.type === 'tempest' && (d > 8 || e._attackCount % 3 === 2));
+      const canAttack = ranged ? d < (e.type === 'tempest' ? 35 : 22) : d < (e.type === 'tempest' ? 6.2 : e.attackRadius + 0.5);
       if (canAttack && t >= e._nextAttack) {
         e._attackCount++;
         const radius = ranged ? (e.type === 'tempest' ? 4 : 2.5) : e.attackRadius;
         e._attack = { x: ranged ? target.x : e.x, z: ranged ? target.z : e.z, radius };
-        e.state = 'windup'; e.attackAt = t + (e.type === 'tempest' ? 1.05 : 0.8);
+        e.state = 'windup'; e.attackAt = t + stats.windup;
         this.emit({ kind: 'telegraph', id: e.id, x: e._attack.x, y: heightAt(e._attack.x, e._attack.z) + 0.08, z: e._attack.z, radius, duration: e.attackAt - t, style: ranged ? 'splash' : 'swipe' });
         return;
       }
-      if ((ranged && d < 13) || (!ranged && d < (e.type === 'tempest' ? 4.5 : 1.8))) { e.state = 'idle'; return; }
+      if ((ranged && d < 13) || (!ranged && d < (e.type === 'tempest' ? 4.5 : e.attackRadius - 0.5))) { e.state = 'idle'; return; }
     }
-    if (d < 0.5) { e.state = 'idle'; return; }
+    if (d < (destination.waypoint ? 0.2 : 0.5)) { e.state = 'idle'; return; }
     e.state = target || supplies ? 'chase' : 'idle';
-    const speed = !target && e._camp ? 1.15 : e.type === 'tempest' ? 3 : e.type === 'spitter' ? 2.7 : 3.6;
+    const speed = !target && e._camp ? 1.15 : stats.speed;
     if (!target) e.yaw = Math.atan2(-(destination.x - e.x), -(destination.z - e.z));
     const previous = { x: e.x, z: e.z };
     e.x += (destination.x - e.x) / d * Math.min(d, speed * dt);

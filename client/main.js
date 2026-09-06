@@ -1,7 +1,7 @@
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { GameNet } from './net.js';
-import { createUI, findInteractable } from './ui.js';
+import { createUI, findInteractable, sideEventAnnouncement } from './ui.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { weaponPresentation } from './weapon-presentation.js';
@@ -238,6 +238,11 @@ function receiveEvent(event) {
     case 'splash': audio.play('splash', { distant: true }); break;
     case 'victory': if (lastVictoryRound !== state.round) { lastVictoryRound = state.round; audio.play('victory'); } break;
     case 'notice': if (typeof event.message === 'string') ui.toast(event.message); break;
+    case 'side-event': {
+      const announcement = sideEventAnnouncement(event);
+      if (announcement) { ui.announce(announcement); audio.play('surge'); }
+      break;
+    }
     default: break;
   }
 }

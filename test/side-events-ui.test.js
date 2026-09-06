@@ -111,3 +111,22 @@ test('old snapshots and unrecognized event IDs preserve existing objective and i
   assert.equal(sideEventForHUD(state, player), null);
   assert.equal(findInteractable(state, player), null);
 });
+
+test('wave banners announce each surge from its event, name the place, and flag the final Tidebreaker wave', async () => {
+  const { sideEventAnnouncement } = await import('../client/ui.js');
+  const { SIDE_EVENT_WAVES } = await import('../shared/side-events.js');
+  const first = sideEventAnnouncement({ kind: 'side-event', id: SIDE_EVENTS[0].id, status: 'active', wave: 1, spawns: [{ type: 'crab', x: 0, z: 0 }] });
+  assert.equal(first.title, 'Wave 1'); assert.equal(first.kicker, SIDE_EVENTS[0].name); assert.equal(first.final, false);
+  assert.match(first.subtitle, /sea/);
+  const second = sideEventAnnouncement({ kind: 'side-event', id: SIDE_EVENTS[1].id, status: 'active', wave: 2 });
+  assert.equal(second.title, 'Wave 2'); assert.equal(second.final, false); assert.match(second.subtitle, /more crabs/);
+  const last = sideEventAnnouncement({ kind: 'side-event', id: SIDE_EVENTS[2].id, status: 'active', wave: SIDE_EVENT_WAVES,
+    spawns: [{ type: 'crab', x: 1, z: 1 }, { type: 'tidebreaker', x: 2, z: 2 }, { type: 'tidebreaker', x: 3, z: 3 }] });
+  assert.equal(last.title, 'Final wave'); assert.equal(last.final, true); assert.match(last.subtitle, /^2 Tidebreakers/);
+  assert.match(sideEventAnnouncement({ kind: 'side-event', id: SIDE_EVENTS[2].id, status: 'active', wave: SIDE_EVENT_WAVES, spawns: [{ type: 'tidebreaker' }] }).subtitle, /^1 Tidebreaker rises/);
+  for (const event of [null, {}, { kind: 'notice', message: 'Wave 1' }, { kind: 'side-event', id: SIDE_EVENTS[0].id, status: 'completed', wave: 3 },
+    { kind: 'side-event', id: SIDE_EVENTS[0].id, status: 'active', wave: 0 }, { kind: 'side-event', id: 'unknown-event', status: 'active', wave: 1 },
+    { kind: 'side-event', id: SIDE_EVENTS[0].id, status: 'active', wave: 'two' }]) {
+    assert.equal(sideEventAnnouncement(event), null);
+  }
+});

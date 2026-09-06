@@ -142,9 +142,10 @@ Player public fields:
  deckX,deckZ,hp,maxHp,ammo,maxAmmo,weapon,reloadUntil,healUntil,
  knockedUntil,invulnerableUntil,lastInputSeq,kills,rescues,chests}
 knockedUntil=0 means active, otherwise absolute state.elapsed timestamp.
-Enemy: {id,type:'crab'|'spitter'|'tempest',x,y,z,yaw,hp,maxHp,radius,
- state:'idle'|'chase'|'windup'|'attack',attackAt,zone,scale};
-tempest is the boss and can have attackRadius. Enemy y is feet position.
+Enemy: {id,type:'crab'|'spitter'|'tidebreaker'|'tempest',x,y,z,yaw,hp,maxHp,
+ radius,state:'idle'|'chase'|'windup'|'attack',attackAt,zone,scale,attackRadius};
+tempest is the boss; tidebreaker is the optional-defense mini boss. Base
+stats per type live in shared/enemies.js. Enemy y is feet position.
 Shrine dynamic fields: {id,status:'dormant'|'active'|'cleared',charge,
  remaining}; charge 0–1, remaining number of living shrine guards.
 Chest: {id,opened}; static positions from shared constants.
@@ -154,7 +155,10 @@ shot {playerId,from:{x,y,z},to:{x,y,z},weapon,hitId?,damage?},
 hit {targetId,damage,x,y,z,sourceId?}, defeated {id,x,y,z,type},
 chest {id,playerId,pearls}, shrine {id,status}, heal {playerId},
 downed {playerId}, revive {playerId,by?}, ping {playerId,x,z},
-phase {phase}, notice {message}, victory {pearls,duration,rescues,kills}.
+phase {phase}, notice {message}, victory {pearls,duration,rescues,kills},
+side-event {id,status,wave,reward?,spawns?:[{type,x,z}]} (spawns only when a
+wave forms; clients stage the surge and its banner from this event, never
+from snapshots).
 World/client tolerate extra fields and unknown events.
 
 Loop: host presses Set sail (launch) in lobby, all online crew begin aboard,
@@ -164,7 +168,17 @@ E within 4m starts a shrine, spawning 3–5 whimsical crabs scaled gently with
 crew size. Defeat guards then stand within 9m for 5 seconds to charge it.
 Cleared shrine grants shared shard and checkpoint; nearby crew healed.
 No respawning shrine guards or endless alarm. A few optional roaming crabs
-stay away from the initial beach. Chests open with E at 3.5m, give shared
+stay away from the initial beach. Optional defenses (shared/side-events.js):
+E at the cyan supplies of the market, farm or yard starts a once-per-voyage,
+three-wave surge that never touches the shard quest. Attackers form ranks on
+the seaward side of the supplies (bearing from the island centre, a 60 degree
+half-arc, first rank at the site's front distance, later ranks 3m further
+out, the yard's front on the surf line) and walk the two-leg route the
+server validated at spawn when a building blocks the straight approach.
+Rosters latch to the starting crew: wave 1 crabs only, wave 2 adds spitters,
+the final wave adds one Tidebreaker mini boss per two pirates. Supplies
+hold 100 integrity, crabs strip 8 and Tidebreakers 14 per hit, the deadline
+is 180s, and the reward is 45 pearls plus a local heal. Chests open with E at 3.5m, give shared
 pearls and heal; no competition for loot. Three shards unlock BEACON.
 E at BEACON starts finale with Tempest Crab. Boss has telegraphed swipes and
 ranged splashes (events acceptable for visuals) and minion summons with cap.

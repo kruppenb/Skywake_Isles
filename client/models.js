@@ -708,12 +708,12 @@ export function buildPirate(palette, color = '#eb785d') {
 }
 
 export function buildCrab(palette, type = 'crab', size = 1) {
-  const boss = type === 'tempest', spitter = type === 'spitter';
+  const boss = type === 'tempest', spitter = type === 'spitter', tidebreaker = type === 'tidebreaker';
   const group = new THREE.Group(); group.name = type + '-crab'; group.userData.kind = type;
   const body = new THREE.Group(), b = new GeoBatch(palette);
-  const shell = boss ? '#685fae' : spitter ? '#419f9f' : '#e88358';
-  const light = boss ? '#9e92d7' : spitter ? '#72ccbb' : '#f3ad70';
-  const dark = boss ? '#534b88' : spitter ? '#2d777f' : '#b96043';
+  const shell = boss ? '#685fae' : spitter ? '#419f9f' : tidebreaker ? '#2f5f7c' : '#e88358';
+  const light = boss ? '#9e92d7' : spitter ? '#72ccbb' : tidebreaker ? '#6fb3c4' : '#f3ad70';
+  const dark = boss ? '#534b88' : spitter ? '#2d777f' : tidebreaker ? '#1e3f55' : '#b96043';
   const carapace = characterProfile([[.38, .63, .46], [.52, .83, .62], [.70, .86, .64], [.94, .69, .54], [1.10, .34, .34]], 20, 1);
   b.add(carapace, [0, 0, 0], [1, 1, 1], [0, 0, 0], shell); carapace.dispose();
   b.add('characterCylinder', [0, .525, -.015], [.855, .085, .636], [0, 0, 0], light);
@@ -743,6 +743,21 @@ export function buildCrab(palette, type = 'crab', size = 1) {
   if (spitter) {
     b.add('characterDetail', [0, .93, .21], [.22, .15, .26], [0, 0, 0], '#b0edd2');
     for (const x of [-.12, .10]) b.add('characterDetail', [x, 1.015, .15], [.045, .025, .05], [0, 0, 0], '#e3f7be');
+  }
+  if (tidebreaker) {
+    // A reef-armoured mini boss: barnacle clusters, a kelp drape and a pale
+    // tide line across a shell that has spent years under the surf.
+    for (const [x, z, r] of [[-.42, .05, .11], [-.28, .30, .085], [.36, -.08, .12], [.22, .34, .09], [.05, .44, .075], [-.10, -.22, .07], [.50, .18, .07]]) {
+      const y = .69 + .43 * Math.sqrt(Math.max(.05, 1 - (x / .91) ** 2 - (z / .86) ** 2));
+      b.add('characterCone', [x, y + .03, z], [r, r * 1.3, r], [0, 0, 0], '#e9e2cd');
+      b.add('characterDetail', [x, y + .1 + r * .9, z], [r * .42, r * .3, r * .42], [0, 0, 0], '#6a6151');
+    }
+    b.add('characterCylinder', [0, .86, -.02], [.99, .03, .74], [0, 0, 0], '#c9ebe4');
+    for (const side of [-1, 1]) {
+      b.line([side * .55, .95, .28], [side * .74, .58, .55], .045, '#3e7d5c', .3);
+      b.line([side * .40, .99, .40], [side * .48, .64, .70], .04, '#4f9a68', .3);
+    }
+    for (const side of [-1, 1]) b.add('characterCone', [side * .62, .93, -.30], [.11, .26, .11], [0, 0, side * -.9], light);
   }
   if (boss) {
     b.add('cone', [0, 1.40, .10], [.70, .65, .60], [0, 0, 0], '#bda4d1');

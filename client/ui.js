@@ -3,6 +3,7 @@ import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } 
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
+import { ENEMY_TYPES } from '../shared/enemies.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -32,6 +33,21 @@ export function sideEventForHUD(state, player, { paused = false, mapOpen = false
   const event = active || recent || available;
   return event ? { ...event, integrityPercent: Math.round(clamp(event.integrity / Math.max(1, event.maxIntegrity) * 100, 0, 100)),
     secondsLeft: Math.max(0, event.endsAt - state.elapsed) } : null;
+}
+
+// Big top-of-screen call-out for each surge of an optional defense. Waves
+// are announced by their event, never inferred from snapshots, so a late
+// joiner does not see a stale banner.
+export function sideEventAnnouncement(event) {
+  if (!event || event.kind !== 'side-event' || event.status !== 'active' || !Number.isInteger(event.wave) || event.wave < 1) return null;
+  const definition = SIDE_EVENTS.find((entry) => entry.id === event.id);
+  if (!definition) return null;
+  const spawns = Array.isArray(event.spawns) ? event.spawns : [];
+  const bosses = spawns.filter((spawn) => spawn?.type === 'tidebreaker').length;
+  const final = event.wave >= SIDE_EVENT_WAVES;
+  const subtitle = final ? (bosses ? `${bosses} Tidebreaker${bosses === 1 ? ' rises' : 's rise'} from the deep!` : 'The tide throws everything it has!')
+    : event.wave === 1 ? 'Crabs surge in from the sea!' : 'The tide brings more crabs!';
+  return { kicker: definition.name, title: final ? 'Final wave' : `Wave ${event.wave}`, subtitle, final };
 }
 
 export function findInteractable(state, player) {
@@ -304,6 +320,7 @@ export function createUI(callbacks = {}) {
   let lastVictory = '';
   let mapAt = 0;
   let hitUntil = 0;
+  let bannerTimer = 0;
   let target = null;
   let discoveryRound = null;
   let discoveryUntil = 0;
@@ -489,6 +506,7 @@ export function createUI(callbacks = {}) {
       joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = '';
       discoveryRound = null; clearDiscoveries();
       show(refs['pause-overlay'], false); show(refs['map-overlay'], false); show(refs['victory-overlay'], false); show(refs['join-error'], false);
+      api.announce(null);
       document.body.classList.remove('paused', 'map-open'); plates.forEach((plate) => plate.remove()); plates.clear(); modalChanged();
     },
     toast(message, warning = false) {
@@ -502,6 +520,20 @@ export function createUI(callbacks = {}) {
       setTimeout(() => { element.classList.add('fade'); setTimeout(() => element.remove(), 270); }, warning ? 4800 : 3600);
     },
     hit() { hitUntil = performance.now() + 150; },
+    announce(announcement) {
+      const banner = refs['wave-banner'];
+      clearTimeout(bannerTimer);
+      show(banner, false); banner.classList.remove('fade');
+      if (!announcement) return;
+      banner.classList.toggle('final', !!announcement.final);
+      text(refs['wave-kicker'], announcement.kicker || ''); text(refs['wave-title'], announcement.title || '');
+      text(refs['wave-subtitle'], announcement.subtitle || '');
+      void banner.offsetWidth; show(banner, true);
+      bannerTimer = setTimeout(() => {
+        banner.classList.add('fade');
+        bannerTimer = setTimeout(() => { show(banner, false); banner.classList.remove('fade'); }, 560);
+      }, 4000);
+    },
     hurt() { refs.game.classList.remove('damage-flash'); void refs.game.offsetWidth; refs.game.classList.add('damage-flash'); },
     setTarget(enemy) { target = enemy; },
     clearWeaponPresentation() {
@@ -534,6 +566,7 @@ export function createUI(callbacks = {}) {
       show(refs['discovery-notice'], playing && !paused && !mapOpen && player.mode === 'ground' && now < discoveryUntil);
       show(refs.welcome, !joined); show(refs['welcome-caption'], !joined); show(refs['welcome-shade'], !joined);
       show(refs.lobby, lobby); show(refs.hud, playing); show(refs['menu-button'], joined && !won);
+      if (!playing && !refs['wave-banner'].hidden) api.announce(null);
       show(refs['victory-overlay'], won);
       document.body.classList.toggle('is-playing', joined);
       if (!joined) return;
@@ -594,8 +627,8 @@ export function createUI(callbacks = {}) {
         let eventDetail = `${sideEvent.description} Earn ${sideEvent.reward} shared pearls.`;
         let eventHint = 'Approach the cyan supplies and press E';
         if (active) {
-          eventDetail = `Wave ${sideEvent.wave}/${SIDE_EVENT_WAVES} · ${sideEvent.remaining > 0 ? `${sideEvent.remaining} crab${sideEvent.remaining === 1 ? '' : 's'} remaining` : 'Next wave incoming'} · ${formatTime(sideEvent.secondsLeft)} left`;
-          eventHint = 'Keep the crabs away from the supplies.';
+          eventDetail = `${sideEvent.wave >= SIDE_EVENT_WAVES ? 'Final wave' : `Wave ${sideEvent.wave}/${SIDE_EVENT_WAVES}`} · ${sideEvent.remaining > 0 ? `${sideEvent.remaining} crab${sideEvent.remaining === 1 ? '' : 's'} remaining` : 'Next wave gathering offshore'} · ${formatTime(sideEvent.secondsLeft)} left`;
+          eventHint = 'They come from the sea. Keep them off the supplies.';
         } else if (sideEvent.status === 'completed') {
           eventDetail = `Supplies saved! +${sideEvent.reward} shared pearls.`;
           eventHint = 'Your compass quest continues.';
@@ -648,7 +681,7 @@ export function createUI(callbacks = {}) {
       show(refs['boss-health'], state.phase === 'finale' && !!boss);
       if (boss) { refs['boss-meter'].value = boss.hp / boss.maxHp; text(refs['boss-percent'], `${Math.ceil(boss.hp / boss.maxHp * 100)}%`); }
       show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && player.mode === 'ground');
-      if (target) { text(refs['target-health'].firstElementChild, target.type === 'tempest' ? 'Tempest Crab' : target.type === 'spitter' ? 'Splash crab' : 'Cheeky crab'); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
+      if (target) { text(refs['target-health'].firstElementChild, ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
       const bearing = ((-view.yaw * 180 / Math.PI) % 360 + 360) % 360;
       for (const point of compassPoints) {
         const delta = ((point.degrees - bearing + 540) % 360) - 180;
