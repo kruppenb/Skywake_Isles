@@ -217,7 +217,7 @@ function receiveEvent(event) {
     case 'melee': if (mine) audio.play('melee'); break;
     case 'chest': {
       audio.play('collect', { distant: !mine });
-      const loot = WEAPONS[event.weapon] ? ` ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} waiting for pickup.` : '';
+      const loot = WEAPONS[event.weapon] ? ` Walk over the ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} to equip it. It stays for the whole crew!` : '';
       ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!${loot}`);
       break;
     }

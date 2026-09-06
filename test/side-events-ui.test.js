@@ -51,16 +51,16 @@ test('defense prompts reject unavailable, distant, airborne, downed, dead, and o
   }
 });
 
-test('reviving a crewmate keeps priority and nearby loot keeps normal nearest ordering', () => {
+test('persistent weapon drops cannot mask revives or optional defenses', () => {
   const { state, player } = fixture();
   player.x += 2; player.y = heightAt(player.x, player.z);
   const friend = { ...player, id: 'friend', knockedUntil: 60 };
   state.players.push(friend);
+  state.drops.push({ id: 'loot', weapon: 'longshot', rarity: 'rare', x: player.x, z: player.z });
   assert.equal(findInteractable(state, player)?.kind, 'revive');
   friend.knockedUntil = 0;
-  state.drops.push({ id: 'loot', weapon: 'longshot', rarity: 'rare', x: player.x, z: player.z });
-  assert.equal(findInteractable(state, player)?.id, 'loot');
-  state.drops[0].x += 3;
+  assert.equal(findInteractable(state, player)?.kind, 'side-event');
+  player.inventory = { longshot: { rarity: 'rare' } };
   assert.equal(findInteractable(state, player)?.kind, 'side-event');
 });
 

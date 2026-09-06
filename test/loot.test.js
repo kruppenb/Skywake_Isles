@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
-import { COLORS, CHESTS, heightAt, seededRandom } from '../shared/world.js';
+import { COLORS, CHESTS, SHRINES, heightAt, seededRandom } from '../shared/world.js';
 import { BUILDINGS, buildingWorldPoint, buildingLocalPoint } from '../shared/exploration.js';
 import { WEAPONS, WEAPON_ORDER, RARITIES, rollWeapon, weaponStats } from '../shared/weapons.js';
 
@@ -40,7 +40,7 @@ test('five distinct weapons and weighted rarity rolls cover every tier and gun',
   for (const rarity of Object.values(RARITIES)) assert.ok(Math.abs(counts[rarity.id] / 200 - rarity.weight) < 1.2, `${rarity.id} weight`);
 });
 
-test('a chest rolls once, shares pearls/healing and has one authoritative claimant', () => {
+test('a chest rolls once, shares pearls/healing and equips the whole nearby crew on the same tick', () => {
   let rolls = 0;
   const { game, p, events } = setup(() => { rolls++; return .99; }, 2), ally = game.players.get('p1');
   locate(p, CHESTS[0]); locate(ally, CHESTS[0]); p.hp = ally.hp = 40;
@@ -52,13 +52,83 @@ test('a chest rolls once, shares pearls/healing and has one authoritative claima
   assert.equal(events.find(e => e.kind === 'chest').dropId, drop.id);
   assert.equal(game.action(ally.id, 'interact', CHESTS[0].id).ok, false);
   assert.equal(rolls, 2); assert.equal(game.drops.length, 1); assert.equal(game.pearls, 12);
-  assert.equal(game.action(p.id, 'interact', drop.id).ok, true);
+  game.tick();
   assert.equal(p.weapon, 'longshot'); assert.equal(p.rarity, 'legendary'); assert.equal(p.ammo, 4);
-  assert.equal(game.drops.length, 0);
-  assert.equal(game.action(ally.id, 'interact', drop.id).code, 'TOO_FAR');
-  assert.equal(ally.inventory.longshot, undefined);
-  assert.equal(events.filter(e => e.kind === 'loot').length, 1);
-  assert.equal(events.find(e => e.kind === 'loot').playerId, p.id);
+  assert.equal(ally.weapon, 'longshot'); assert.equal(ally.rarity, 'legendary'); assert.equal(ally.ammo, 4);
+  assert.deepEqual(game.drops, [drop]); assert.deepEqual(game.snapshot().drops, [drop]);
+  const pickups = events.filter(e => e.kind === 'loot');
+  assert.deepEqual(pickups.map(e => e.playerId), [p.id, ally.id]);
+  assert.equal(pickups[0].at, pickups[1].at);
+  ticks(game, .5); assert.equal(events.filter(e => e.kind === 'loot').length, 2);
+});
+
+test('walking into a weapon equips it without interact, with sequential pickups and late arrivals', () => {
+  const { game, p, events } = setup(undefined, 2), ally = game.players.get('p1');
+  const drop = { id: 'walkover', weapon: 'repeater', rarity: 'rare', x: p.x + 2.1, y: p.y, z: p.z };
+  game.drops.push(drop);
+  game.tick(); assert.equal(p.inventory.repeater, undefined, 'outside the two-metre pickup radius');
+  game.setInput(p.id, { seq: 0, forward: 0, right: 1, yaw: 0, pitch: 0, sprint: true });
+  game.tick();
+  assert.ok(p.x > 0); assert.equal(p.lastInputSeq, 0);
+  assert.equal(p.weapon, 'repeater'); assert.equal(p.rarity, 'rare');
+  assert.equal(p.ammo, WEAPONS.repeater.ammo);
+  assert.equal(ally.inventory.repeater, undefined);
+  locate(ally, { x: drop.x - 2.1, z: drop.z });
+  game.setInput(ally.id, { seq: 0, forward: 0, right: 1, yaw: 0, pitch: 0 });
+  game.tick(); assert.equal(ally.weapon, 'repeater');
+  const late = game.addPlayer('late', 'Navigator', COLORS[2]);
+  assert.equal(late.inventory.repeater, undefined);
+  locate(late, { x: drop.x - 2.1, z: drop.z });
+  game.setInput(late.id, { seq: 0, forward: 0, right: 1, yaw: 0, pitch: 0 });
+  game.tick(); assert.equal(late.weapon, 'repeater');
+  assert.deepEqual(events.filter(e => e.kind === 'loot').map(e => e.playerId), [p.id, ally.id, late.id]);
+  assert.deepEqual(game.snapshot().drops, [drop]);
+});
+
+test('automatic pickup requires a living online landed pirate, active voyage and nearby reachable drop', () => {
+  const guards = [
+    ['outside radius', (game, p, drop) => { drop.x += 2.01; }],
+    ['vertical separation', (game, p, drop) => { drop.y += 3; }],
+    ['jumping', (game, p) => { game.setInput(p.id, { seq: 0, forward: 0, right: 0, yaw: 0, pitch: 0, jump: true }); }],
+    ['falling', (game, p) => { p.y += 1; p.grounded = false; p.vy = -1; }],
+    ['gliding', (game, p) => { p.mode = 'gliding'; p.y += 1; p.grounded = false; }],
+    ['aboard', (game, p) => { p.mode = 'aboard'; }],
+    ['offline', (game, p) => { game.disconnect(p.id); }],
+    ['downed', (game, p) => { p.knockedUntil = 10; }],
+    ['dead', (game, p) => { p.hp = 0; p._damageAt = game.elapsed; }],
+    ['lobby', game => { game.phase = 'lobby'; }],
+    ['victory', game => { game.phase = 'victory'; }],
+  ];
+  for (const [label, guard] of guards) {
+    const { game, p, events } = setup();
+    const drop = { id: 'guarded', weapon: 'longshot', rarity: 'legendary', x: p.x, y: p.y, z: p.z };
+    game.drops.push(drop); guard(game, p, drop); game.tick();
+    assert.equal(p.inventory.longshot, undefined, label);
+    assert.equal(events.filter(e => e.kind === 'loot').length, 0, label);
+    assert.equal(game.drops.length, 1, label);
+  }
+  const { game, p } = setup();
+  const building = BUILDINGS.find(b => b.kind === 'cottage' && b.enterable);
+  const inside = buildingWorldPoint(building, building.width / 2 - .5, -.45);
+  locate(p, buildingWorldPoint(building, building.width / 2 + .7, -.45));
+  const drop = { id: 'wall', weapon: 'longshot', rarity: 'legendary', ...inside, y: heightAt(inside.x, inside.z) };
+  game.drops.push(drop); game.tick();
+  assert.ok(Math.hypot(p.x - drop.x, p.z - drop.z) < 2);
+  assert.equal(p.inventory.longshot, undefined, 'nearby loot cannot pass through a wall');
+  locate(p, { x: 0, z: 50 }); Object.assign(drop, { x: p.x + 2, y: p.y, z: p.z });
+  game.phase = 'finale'; game.tick(); assert.equal(p.weapon, 'longshot', 'finale and radius boundary permit pickup');
+});
+
+test('persistent weapons leave targetless chest, shrine and revive interactions available', () => {
+  const { game, p } = setup(undefined, 2), ally = game.players.get('p1');
+  const drop = { id: 'retained', weapon: 'flintlock', rarity: 'common' }; game.drops.push(drop);
+  locate(p, CHESTS[0]); Object.assign(drop, { x: p.x, y: p.y, z: p.z });
+  game.tick(); assert.equal(game.chests[0].opened, false, 'walking never auto-opens a chest');
+  assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(game.chests[0].opened, true);
+  locate(p, SHRINES[0]); Object.assign(drop, { x: p.x, y: p.y, z: p.z });
+  locate(ally, { x: p.x + 1, z: p.z }); ally.knockedUntil = 10;
+  assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(ally.knockedUntil, 0);
+  assert.equal(game.action(p.id, 'interact').ok, true); assert.equal(game.shrines[0].status, 'active');
 });
 
 test('far, malformed, invented and through-wall drop/chest claims cannot grant weapons', () => {
@@ -95,7 +165,44 @@ test('duplicate and lower-rarity guns stay for crew; upgrades preserve magazines
   assert.equal(p._fireAt, game.elapsed + 4);
   assert.equal(game.action(p.id, 'fire').ok, true); assert.equal(p.ammo, 2);
   place('rare', 'lower'); assert.equal(game.action(p.id, 'interact', 'lower').code, 'DUPLICATE_WEAPON');
-  assert.deepEqual(game.drops.map(d => d.id), ['same', 'lower']);
+  assert.deepEqual(game.drops.map(d => d.id), ['same', 'upgrade', 'lower']);
+});
+
+test('automatic upgrades preserve magazines and cadence, cancel reload/burst and ignore revisited duplicates', () => {
+  const { game, p, events } = setup(); p.ammo = 2; p._fireAt = game.elapsed + 4;
+  p.inventory.repeater = { rarity: 'common', ammo: 3 };
+  game.action(p.id, 'reload'); assert.ok(p.reloadUntil);
+  game.drops.push({ id: 'upgrade', weapon: 'repeater', rarity: 'epic', x: p.x, y: p.y, z: p.z });
+  game.tick();
+  assert.equal(p.weapon, 'repeater'); assert.equal(p.rarity, 'epic'); assert.equal(p.ammo, 3);
+  assert.equal(p.inventory.flintlock.ammo, 2); assert.equal(p.reloadUntil, 0); assert.equal(p._fireAt, 4);
+  const swapAt = p._swapAt;
+  game.drops.push({ id: 'lower', weapon: 'repeater', rarity: 'rare', x: p.x, y: p.y, z: p.z });
+  ticks(game, 1);
+  assert.equal(p._fireAt, 4); assert.equal(p._swapAt, swapAt); assert.equal(p.ammo, 3); assert.equal(p.rarity, 'epic');
+  game.action(p.id, 'swap', 'flintlock'); assert.equal(p.ammo, 2);
+  const fireAt = p._fireAt, swappedAt = p._swapAt;
+  locate(p, { x: 5, z: 50 }); game.tick(); locate(p, { x: 0, z: 50 }); ticks(game, 1);
+  assert.equal(p.weapon, 'flintlock'); assert.equal(p.ammo, 2); assert.equal(p.inventory.repeater.ammo, 3);
+  assert.equal(p._fireAt, fireAt); assert.equal(p._swapAt, swappedAt);
+  assert.equal(events.filter(e => e.kind === 'loot').length, 1);
+
+  const burst = setup(); grant(burst.game, burst.p, 'burst'); burst.game.action(burst.p.id, 'fire');
+  const burstFireAt = burst.p._fireAt;
+  assert.ok(burst.p._burst); burst.game.tick();
+  burst.game.drops.push({ id: 'burst-upgrade', weapon: 'burst', rarity: 'rare', x: burst.p.x, y: burst.p.y, z: burst.p.z });
+  burst.game.tick(); const pickupFireAt = Math.max(burstFireAt, burst.game.elapsed + .5); ticks(burst.game, .2);
+  assert.equal(burst.p._burst, null); assert.equal(burst.p.ammo, WEAPONS.burst.ammo - 1);
+  assert.equal(burst.p._fireAt, pickupFireAt);
+  assert.equal(burst.events.filter(e => e.kind === 'shot').length, 1);
+  assert.equal(burst.events.filter(e => e.kind === 'loot').length, 1);
+});
+
+test('reload completion updates the stored magazine before an automatic pickup equips another gun', () => {
+  const { game, p } = setup(); p.ammo = 0; p.reloadUntil = game.elapsed + .05;
+  game.drops.push({ id: 'after-reload', weapon: 'longshot', rarity: 'rare', x: p.x, y: p.y, z: p.z });
+  game.tick(); assert.equal(p.weapon, 'longshot'); assert.equal(p.inventory.flintlock.ammo, 8);
+  assert.equal(p.reloadUntil, 0); assert.equal(p.ammo, 4);
 });
 
 test('empty/prototype slots cannot equip and swapping cannot refill either magazine', () => {
@@ -169,10 +276,13 @@ test('snapshots deeply isolate loadouts/drops, reconnect retains loot and a new 
   assert.ok(!Object.keys(publicPlayer).some(key => key.startsWith('_')));
   snapshot.drops[0].rarity = 'common'; publicPlayer.inventory.flintlock.ammo = -100;
   assert.equal(game.drops[0].rarity, 'legendary'); assert.equal(p.inventory.flintlock.ammo, 8);
-  game.action(p.id, 'interact', game.drops[0].id); game.disconnect(p.id); game.reconnect(p.id);
+  game.tick(); game.disconnect(p.id); game.reconnect(p.id);
   assert.equal(p.rarity, 'legendary'); assert.equal(p.inventory.longshot.ammo, 4);
   const late = game.addPlayer('late', 'Navigator', COLORS[1]); assert.equal(late.mode, 'gliding');
-  assert.deepEqual(Object.keys(late.inventory), ['flintlock', 'scatter']); assert.equal(game.drops.length, 0);
+  assert.deepEqual(Object.keys(late.inventory), ['flintlock', 'scatter']); assert.equal(game.drops.length, 1);
+  locate(late, CHESTS[0]); game.disconnect(late.id); game.tick(); assert.equal(late.inventory.longshot, undefined);
+  game.reconnect(late.id); game.tick(); assert.equal(late.weapon, 'longshot');
+  assert.equal(game.snapshot().drops.length, 1);
   game.resetRound(); snapshot = game.snapshot(); assert.deepEqual(snapshot.drops, []);
   assert.equal(p.rarity, 'common'); assert.deepEqual(Object.keys(p.inventory), ['flintlock', 'scatter']);
   assert.equal(p.inventory.flintlock.ammo, 8); assert.equal(p.inventory.scatter.ammo, 5);

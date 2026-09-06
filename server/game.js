@@ -255,6 +255,20 @@ export class Game {
     p._fireAt = Math.max(p._fireAt, this.elapsed + 0.5);
   }
 
+  pickupWeapon(p, drop) {
+    const owned = p.inventory[drop.weapon];
+    if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
+      return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}.`, 'DUPLICATE_WEAPON');
+    }
+    // Each pirate can use the same drop. Inventory rarity prevents repeat
+    // pickups, while upgrades preserve both active and inactive magazines.
+    if (p.weapon === drop.weapon) owned.ammo = p.ammo;
+    p.inventory[drop.weapon] = { rarity: drop.rarity, ammo: owned?.ammo ?? WEAPONS[drop.weapon].ammo };
+    this.equip(p, drop.weapon);
+    this.emit({ kind: 'loot', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity });
+    return good();
+  }
+
   fire(p) {
     const t = this.elapsed, w = weaponStats(p.weapon, p.rarity);
     if (t + 1e-8 < p._fireAt || p.reloadUntil || p._burst) return good();
@@ -347,7 +361,9 @@ export class Game {
     const options = [];
     for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
     for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHESTS.find(c => c.id === chest.id) });
-    for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
+    // Retained weapons must not mask nearby E interactions. Explicit drop
+    // targets remain supported for clients that still send pickup actions.
+    if (target) for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
     for (const shrine of this.shrines) if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point: SHRINES.find(s => s.id === shrine.id) });
     if (this.phase === 'voyage' && p.hp > 0 && p.grounded && !this.sideEvents.some(event => event.status === 'active')) {
       for (const event of this.sideEvents) if (event.status === 'available') {
@@ -362,20 +378,7 @@ export class Game {
     if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
     if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
-    if (option.kind === 'loot') {
-      const drop = option.data, owned = p.inventory[drop.weapon];
-      if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
-        return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}. Leave this one for your crew.`, 'DUPLICATE_WEAPON');
-      }
-      // An upgrade preserves the magazine, including the equipped slot; a new
-      // weapon brings its own magazine. Picking up cannot bypass fire cadence.
-      if (p.weapon === drop.weapon) owned.ammo = p.ammo;
-      p.inventory[drop.weapon] = { rarity: drop.rarity, ammo: owned?.ammo ?? WEAPONS[drop.weapon].ammo };
-      this.drops = this.drops.filter(item => item.id !== drop.id);
-      this.equip(p, drop.weapon);
-      this.emit({ kind: 'loot', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity });
-      return good();
-    }
+    if (option.kind === 'loot') return this.pickupWeapon(p, option.data);
     if (option.kind === 'chest') {
       option.data.opened = true; p.chests++; this.pearls += 12;
       for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
@@ -536,6 +539,11 @@ export class Game {
       movePlayer(p, this.phase === 'lobby' ? { ...input, jump: false } : input, dt, this.phase === 'lobby' ? 0 : this.elapsed);
       p.lastInputSeq = p._receivedInputSeq;
       if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.inventory[p.weapon].ammo = p.ammo; p.reloadUntil = 0; }
+      if ((this.phase === 'voyage' || this.phase === 'finale') && p.hp > 0 && p.mode === 'ground' && p.grounded) {
+        for (const drop of this.drops) {
+          if (distance(p, drop) <= 2 && Math.abs(p.y - drop.y) < 3 && canReach(p, drop)) this.pickupWeapon(p, drop);
+        }
+      }
       if (p._burst && (p.weapon !== p._burst.weapon || p.rarity !== p._burst.rarity || p.mode === 'aboard')) p._burst = null;
       if (p._burst && this.elapsed + 1e-8 >= p._burst.nextAt) {
         p._burst.remaining--; p._burst.nextAt += WEAPONS[p.weapon].burstInterval;

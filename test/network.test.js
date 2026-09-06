@@ -61,7 +61,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
   };
   try {
     server = await createGameServer({ port: 0, host: '127.0.0.1', dataDir });
-    // Only loot randomness is fixed. Movement, loot claims and combat still
+    // Only loot randomness is fixed. Movement, weapon pickups and combat still
     // travel through ordinary WebSocket controls and the real server clock.
     server.game.random = () => .99;
     const url = `ws://127.0.0.1:${server.port}`;
@@ -90,7 +90,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     assert.ok(crew.every(b => b.state.enemies.length === 36));
     assert.ok(crew.every(b => b.player.rarity === 'common' && Object.keys(b.player.inventory).length === 2));
 
-    let destination = SPAWN, autoDrop = true, combat = false, tick = 0;
+    let destination = SPAWN, formationRadius = 1.3, autoDrop = true, combat = false, tick = 0;
     const details = () => JSON.stringify(crew.map(b => ({ id: b.id, p: b.player && { x: +b.player.x.toFixed(1), z: +b.player.z.toFixed(1), mode: b.player.mode, hp: b.player.hp, down: b.player.knockedUntil }, errors: b.errors.slice(-2) })));
     // Bots observe public snapshots and issue the same controls used by the UI.
     // There is no teleport command, authority-state movement edit, or accelerated clock.
@@ -100,7 +100,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
         const b = crew[i], p = b.player, state = b.state;
         if (!p || !state || b.closed || state.phase === 'lobby' || state.phase === 'victory') continue;
         const angle = i / 5 * Math.PI * 2;
-        const goal = { x: destination.x + Math.cos(angle) * 1.3, z: destination.z + Math.sin(angle) * 1.3 };
+        const goal = { x: destination.x + Math.cos(angle) * formationRadius, z: destination.z + Math.sin(angle) * formationRadius };
         const dx = goal.x - p.x, dz = goal.z - p.z, d = Math.hypot(dx, dz);
         const enemies = combat ? state.enemies.filter(e => Math.hypot(e.x - p.x, e.z - p.z) < 45 && hasWorldLineOfSight({ x: p.x, y: p.y + 1.25, z: p.z }, { x: e.x, y: e.y + e.radius * .8, z: e.z })) : [];
         enemies.sort((a, b) => (a.id === state.bossId ? -1000 : Math.hypot(a.x - p.x, a.z - p.z)) - (b.id === state.bossId ? -1000 : Math.hypot(b.x - p.x, b.z - p.z)));
@@ -131,30 +131,56 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     crew[4] = await open(url, 'Late navigator', COLORS[4]);
     assert.notEqual(crew[4].id, departing.id); assert.equal(crew[4].player.mode, 'gliding');
     await until(landed, 10000, 'late join safely glides into existing voyage', details);
-    destination = CHESTS[0];
-    await until(() => gathered(CHESTS[0]), 10000, 'crew reaches shared chest', details);
+    formationRadius = 0; destination = { x: CHESTS[0].x, z: CHESTS[0].z + 2.7 };
+    await until(() => landed() && crew.every(b => {
+      const distance = Math.hypot(b.player.x - CHESTS[0].x, b.player.z - CHESTS[0].z);
+      return distance > 2 && distance < 3.5;
+    }), 10000, 'crew reaches chest interaction range outside automatic pickup range', details);
     crew[0].action('interact', CHESTS[0].id);
     await until(() => crew.every(b => b.state.chests.find(c => c.id === CHESTS[0].id).opened), 4000, 'shared chest synchronization');
     assert.ok(crew.every(b => b.state.pearls >= 12));
     const drop = crew[0].state.drops[0];
     assert.equal(drop.weapon, 'longshot'); assert.equal(drop.rarity, 'legendary');
     assert.ok(crew.every(b => b.state.drops.length === 1));
+    assert.ok(crew.every(b => b.player.inventory.longshot === undefined));
     for (const b of crew) assert.deepEqual(b.state.drops[0], drop);
     const denied = crew[2].errors.filter(e => e.code === 'TOO_FAR').length;
     crew[2].action('interact', CHESTS[0].id);
     await until(() => crew[2].errors.filter(e => e.code === 'TOO_FAR').length > denied, 3000, 'opened chest cannot reroll');
     assert.ok(crew.every(b => b.events.filter(e => e.kind === 'chest' && e.id === CHESTS[0].id).length === 1));
-    crew[0].action('interact', drop.id);
-    await until(() => crew.every(b => b.state.drops.length === 0 && b.state.players.find(p => p.id === crew[0].id).inventory.longshot?.rarity === 'legendary'), 4000, 'one pickup and loadout synchronize to all five clients');
-    assert.equal(crew[0].player.weapon, 'longshot'); assert.equal(crew[0].player.rarity, 'legendary');
-    assert.equal(crew[0].player.inventory.longshot.ammo, 4);
+    formationRadius = .6; destination = CHESTS[0];
+    await until(() => crew.every(b => b.state.drops.length === 1 && b.state.players.every(p => p.inventory.longshot?.rarity === 'legendary')), 4000, 'walking automatically equips the same retained weapon for all five clients');
+    assert.ok(crew.every(b => b.player.weapon === 'longshot' && b.player.rarity === 'legendary' && b.player.ammo === 4));
+    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'loot' && e.id === drop.id).length === 5));
+    for (const b of crew) {
+      assert.deepEqual(b.state.drops, [drop]);
+      assert.equal(new Set(b.events.filter(e => e.kind === 'loot' && e.id === drop.id).map(e => e.playerId)).size, 5);
+    }
     crew[2].action('interact', drop.id);
-    await until(() => crew[2].errors.filter(e => e.code === 'TOO_FAR').length > denied + 1, 3000, 'second claimant denied');
-    assert.equal(crew[2].player.inventory.longshot, undefined);
-    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'loot' && e.id === drop.id).length === 1));
+    await until(() => crew[2].errors.some(e => e.code === 'DUPLICATE_WEAPON'), 3000, 'explicit duplicate pickup cannot refill or re-equip');
     // Keep the existing flintlock voyage probe comparable after proving pickup.
-    await pause(950); crew[0].action('swap', 'flintlock');
-    await until(() => crew[0].player.weapon === 'flintlock', 3000, 'owned magazine restored after pickup');
+    await pause(950); for (const b of crew) b.action('swap', 'flintlock');
+    await until(() => crew.every(b => b.player.weapon === 'flintlock'), 3000, 'owned magazines restored after shared pickup');
+    await pause(300);
+    assert.ok(crew.every(b => b.player.weapon === 'flintlock' && b.player.ammo === 8 && b.player.inventory.longshot.ammo === 4));
+    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'loot' && e.id === drop.id).length === 5));
+
+    const equippedCaptain = crew[0]; equippedCaptain.close();
+    await until(() => crew[1].state.players.find(p => p.id === equippedCaptain.id)?.online === false, 4000, 'equipped pirate disconnect');
+    crew[0] = await open(url, 'Reconnect after pickup', COLORS[0], equippedCaptain.token);
+    assert.equal(crew[0].id, equippedCaptain.id); assert.equal(crew[0].player.inventory.longshot.rarity, 'legendary');
+    assert.equal(crew[0].player.inventory.longshot.ammo, 4); assert.deepEqual(crew[0].state.drops, [drop]);
+    const equippedNavigator = crew[4]; equippedNavigator.send({ type: 'leave' });
+    await until(() => crew[1].state.players.filter(p => p.online).length === 4, 4000, 'pickup remains after pirate leaves');
+    crew[4] = await open(url, 'Treasure navigator', COLORS[4]);
+    assert.equal(crew[4].player.inventory.longshot, undefined); assert.deepEqual(crew[4].state.drops, [drop]);
+    await until(() => crew[4].player.weapon === 'longshot' && crew.every(b => b.state.players.find(p => p.id === crew[4].id)?.inventory.longshot?.rarity === 'legendary'), 10000, 'late arrival walks over retained loot and synchronizes pickup', details);
+    assert.ok(crew.every(b => b.state.drops.length === 1));
+    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'loot' && e.id === drop.id && e.playerId === crew[4].id).length === 1));
+    await pause(950); crew[4].action('swap', 'flintlock');
+    await until(() => crew.every(b => b.player.weapon === 'flintlock'), 3000, 'late arrival restores starting gun without repeated pickup');
+    formationRadius = 1.3;
+    t.diagnostic('Five pirates automatically equipped one persistent weapon; reconnect and a later arrival retained shared access.');
 
     combat = true;
     for (const shrine of SHRINES) {
@@ -183,7 +209,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     assert.ok(crew.every(b => b.events.some(e => e.kind === 'victory')));
     assert.deepEqual(crew[0].state.victory, crew[4].state.victory);
     t.diagnostic(`Victory: ${results.kills} enemies, ${results.pearls} shared pearls, ${results.duration.toFixed(1)} simulated/real seconds.`);
-    crew[0].action('restart'); await until(() => crew[0].errors.filter(e => e.code === 'HOST_ONLY').length >= 2, 3000, 'nonhost restart denied');
+    crew[0].action('restart'); await until(() => crew[0].errors.some(e => e.code === 'HOST_ONLY'), 3000, 'nonhost restart denied');
     crew[1].action('restart');
     await until(() => crew.every(b => b.state.phase === 'lobby' && b.state.round === 2), 5000, 'all-player replay lobby');
     assert.ok(crew.every(b => b.player.mode === 'aboard' && b.player.hp === 100));

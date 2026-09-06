@@ -50,13 +50,6 @@ export function findInteractable(state, player) {
       options.push({ ...chest, kind: 'chest', label: 'Open shared treasure', distance: distance(player, chest) });
     }
   }
-  for (const drop of state.drops || []) {
-    if (!WEAPONS[drop.weapon] || distance(player, drop) > 3.5 || !reachable(drop)) continue;
-    const rarity = RARITIES[drop.rarity] || RARITIES.common;
-    const owned = player.inventory?.[drop.weapon];
-    const useful = !owned || rarity.damageMultiplier > (RARITIES[owned.rarity] || RARITIES.common).damageMultiplier;
-    options.push({ ...drop, kind: 'drop', label: `${useful ? 'Pick up' : 'Crew loot:'} ${rarity.name} ${WEAPONS[drop.weapon].name}${useful ? '' : ' (already owned)'}`, color: rarity.color, distance: distance(player, drop) - .3 });
-  }
   for (const shrine of SHRINES) {
     const dynamic = state.shrines.find((entry) => entry.id === shrine.id);
     if (dynamic?.status === 'dormant' && distance(player, shrine) <= 4 && reachable(shrine)) {

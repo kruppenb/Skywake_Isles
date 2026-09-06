@@ -7,7 +7,7 @@ import { makePalette, buildPirate, buildWeapon } from '../client/models.js';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { findInteractable } from '../client/ui.js';
 import { BUILDINGS, buildingWorldPoint } from '../shared/exploration.js';
-import { heightAt } from '../shared/world.js';
+import { BEACON, CHESTS, SHRINES, heightAt } from '../shared/world.js';
 import { cameraTravel } from '../client/camera.js';
 
 const pirate = (overrides = {}) => ({ id: 'crew', online: true, x: 0, y: 5, z: 0, deckX: 0, deckZ: 0, yaw: 0, pitch: 0, mode: 'ground', knockedUntil: 0, ...overrides });
@@ -237,16 +237,34 @@ test('distinct support grips touch gun surfaces and firing elbows hang below the
   assert.equal(grips.size, 5, 'pistol wrap and fore-end placements are specific to each weapon');
 });
 
-test('loot prompts include rarity, favor reachable pickups, and never pass through building walls', () => {
+test('weapon drops never offer an E interaction, including new guns and owned upgrades', () => {
   const building = BUILDINGS.find(entry => entry.enterable);
   const at = (x, z) => { const point = buildingWorldPoint(building, x, z); return { ...point, y: heightAt(point.x, point.z) }; };
   const player = { ...pirate(), ...at(0, building.depth / 2 + 1), inventory: {}, mode: 'ground' };
   const drop = { ...at(0, building.depth / 2 - 1), id: 'test-loot', weapon: 'longshot', rarity: 'legendary' };
-  const state = { elapsed: 0, phase: 'voyage', shards: 0, players: [player], chests: [], shrines: [], drops: [drop] };
-  const prompt = findInteractable(state, player);
-  assert.equal(prompt?.id, drop.id); assert.match(prompt.label, /Pick up Legendary Longshot/);
+  const state = { elapsed: 0, phase: 'voyage', shards: 0, players: [player],
+    chests: CHESTS.map((chest) => ({ id: chest.id, opened: true })), shrines: [], drops: [drop] };
+  for (const ownedRarity of [null, 'common', 'legendary']) {
+    player.inventory = ownedRarity ? { longshot: { rarity: ownedRarity } } : {};
+    assert.equal(findInteractable(state, player), null);
+  }
   Object.assign(player, at(building.width / 2 + 1, 0)); Object.assign(drop, at(building.width / 2 - 1, 0));
-  assert.notEqual(findInteractable(state, player)?.id, drop.id);
+  assert.equal(findInteractable(state, player), null);
+});
+
+test('persistent weapon drops cannot mask chest, shrine, or lighthouse interactions', () => {
+  for (const [kind, target] of [['chest', CHESTS[0]], ['shrine', SHRINES[0]], ['beacon', BEACON]]) {
+    const player = pirate({ x: target.x, y: heightAt(target.x, target.z), z: target.z });
+    const state = { elapsed: 0, phase: 'voyage', shards: kind === 'beacon' ? 3 : 0, players: [player],
+      chests: CHESTS.map((chest) => ({ id: chest.id, opened: kind !== 'chest' || chest.id !== target.id })),
+      shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: kind === 'shrine' && shrine.id === target.id ? 'dormant' : 'cleared' })),
+      drops: [{ ...player, id: 'loot', weapon: 'longshot', rarity: 'legendary' }] };
+    for (const inventory of [{}, { longshot: { rarity: 'legendary' } }]) {
+      player.inventory = inventory;
+      assert.equal(findInteractable(state, player)?.kind, kind);
+      assert.equal(findInteractable(state, player)?.id, target.id);
+    }
+  }
 });
 
 test('camera carries the rendered travel delta exactly and has no catch-up after release', () => {

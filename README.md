@@ -36,7 +36,7 @@ Use a desktop or laptop with a keyboard, mouse, and a browser supporting WebGL2.
 | Space | Jump; leave the flying ship and deploy your glider |
 | Left mouse | Fire the equipped blaster |
 | F | Cutlass swing |
-| E | Open treasure, pick up a gun, activate a shrine, restore the lighthouse, or revive a nearby friend |
+| E | Open treasure, activate a shrine, restore the lighthouse, or revive a nearby friend |
 | Q | Healing pulse for you and nearby crew |
 | R | Reload |
 | 1 / 2 / 3 / 4 / 5 | Flintlock / scatter blaster / tide repeater / burst carbine / longshot |
@@ -56,7 +56,7 @@ Visit each place on foot to add it to your voyage journal. Press M for named des
 
 Northwest of Windward Farm, Old Watch establishes the weathered environment style: mossy masonry, aged timber, pines, and worn stone paths surround its tower and furnished barracks. That material quality continues down the walking trail to Windward Farm's worn plaster windmill, turning timber sails, russet barn roof, crop rows and field edges. The barn retains its furnished interior, chest, paired entrances and roof cutaway.
 
-Open chests for shared pearls, nearby healing, and one random gun. Its floating model and glow show where it landed; approach and press E again to pick it up. Guns roll Common, Uncommon, Rare, Epic, or Legendary rarity, shown by both name and color. Better rarities increase damage. Your five slots hold one of each gun; higher rarity loot upgrades a slot and equips it. Equal or lower duplicates stay for another crewmate. Everyone shares pearls, while the first pirate to claim a gun keeps it.
+Open chests for shared pearls, nearby healing, and one random gun. Its floating model and glow show where it landed; walk over it to automatically collect and equip it. Guns stay on the ground so every crewmate can collect the same gun. Guns roll Common, Uncommon, Rare, Epic, or Legendary rarity, shown by both name and color. Better rarities increase damage. Your five slots hold one of each gun; new guns and higher rarity upgrades equip automatically. Equal or lower duplicates leave your equipment unchanged. Everyone shares pearls.
 
 Inland patrols guard paths and all eight destinations, with about 24 enemies for a solo voyage and up to 36 for a full crew. Crab and ranged spitter groups patrol locally, return to their posts, and stay away from the safe landing beach. Defeated patrols do not endlessly respawn. Visit the three compass shrines in any order, press E to awaken each one, defeat its crab guards, then stand near it for five seconds. A restored shrine grants a shard, heals nearby pirates, and becomes the automatic rescue checkpoint. There are no endless shrine waves.
 
