@@ -7,6 +7,7 @@ import http from 'node:http';
 import { WebSocket } from 'ws';
 import { createGameServer } from '../server/index.js';
 import { COLORS, SPAWN, BEACON, SHRINES, CHESTS } from '../shared/world.js';
+import { hasWorldLineOfSight } from '../shared/collision.js';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, timeout = 5000, label = 'condition', details = () => '') {
@@ -60,10 +61,13 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
   };
   try {
     server = await createGameServer({ port: 0, host: '127.0.0.1', dataDir });
+    // Only loot randomness is fixed. Movement, loot claims and combat still
+    // travel through ordinary WebSocket controls and the real server clock.
+    server.game.random = () => .99;
     const url = `ws://127.0.0.1:${server.port}`;
     const health = await request(server.port, '/health');
     assert.equal(health.status, 200); assert.equal(JSON.parse(health.body).game, 'Skywake Isles');
-    for (const route of ['/shared/world.js', '/shared/movement.js', '/vendor/three.module.js', '/vendor/three.core.js']) {
+    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/vendor/three.module.js', '/vendor/three.core.js']) {
       const response = await request(server.port, route); assert.equal(response.status, 200, route); assert.equal(response.headers['cache-control'], 'no-cache');
     }
     for (const route of ['/shared/%2e%2e/server/game.js', '/%ZZ', '/shared/..%5cserver/game.js']) assert.equal((await request(server.port, route)).status, 400, route);
@@ -81,11 +85,13 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     crew[0].action('launch'); await until(() => crew[0].errors.some(e => e.code === 'HOST_ONLY'), 3000, 'nonhost launch denied');
     crew[1].action('launch');
     await until(() => crew.every(b => b.state?.phase === 'voyage'), 5000, 'voyage launch');
+    assert.ok(crew.every(b => b.state.enemies.length === 36));
+    assert.ok(crew.every(b => b.player.rarity === 'common' && Object.keys(b.player.inventory).length === 2));
 
     let destination = SPAWN, autoDrop = true, combat = false, tick = 0;
     const details = () => JSON.stringify(crew.map(b => ({ id: b.id, p: b.player && { x: +b.player.x.toFixed(1), z: +b.player.z.toFixed(1), mode: b.player.mode, hp: b.player.hp, down: b.player.knockedUntil }, errors: b.errors.slice(-2) })));
     // Bots observe public snapshots and issue the same controls used by the UI.
-    // There is no access to server.game, teleport command, or accelerated clock.
+    // There is no teleport command, authority-state movement edit, or accelerated clock.
     controller = setInterval(() => {
       tick++;
       for (let i = 0; i < crew.length; i++) {
@@ -94,7 +100,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
         const angle = i / 5 * Math.PI * 2;
         const goal = { x: destination.x + Math.cos(angle) * 1.3, z: destination.z + Math.sin(angle) * 1.3 };
         const dx = goal.x - p.x, dz = goal.z - p.z, d = Math.hypot(dx, dz);
-        const enemies = combat ? state.enemies.filter(e => Math.hypot(e.x - p.x, e.z - p.z) < 45) : [];
+        const enemies = combat ? state.enemies.filter(e => Math.hypot(e.x - p.x, e.z - p.z) < 45 && hasWorldLineOfSight({ x: p.x, y: p.y + 1.25, z: p.z }, { x: e.x, y: e.y + e.radius * .8, z: e.z })) : [];
         enemies.sort((a, b) => (a.id === state.bossId ? -1000 : Math.hypot(a.x - p.x, a.z - p.z)) - (b.id === state.bossId ? -1000 : Math.hypot(b.x - p.x, b.z - p.z)));
         const enemy = enemies[0];
         const yaw = enemy ? Math.atan2(-(enemy.x - p.x), -(enemy.z - p.z)) : d > 0.2 ? Math.atan2(-dx, -dz) : p.yaw;
@@ -128,6 +134,25 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     crew[0].action('interact', CHESTS[0].id);
     await until(() => crew.every(b => b.state.chests.find(c => c.id === CHESTS[0].id).opened), 4000, 'shared chest synchronization');
     assert.ok(crew.every(b => b.state.pearls >= 12));
+    const drop = crew[0].state.drops[0];
+    assert.equal(drop.weapon, 'longshot'); assert.equal(drop.rarity, 'legendary');
+    assert.ok(crew.every(b => b.state.drops.length === 1));
+    for (const b of crew) assert.deepEqual(b.state.drops[0], drop);
+    const denied = crew[2].errors.filter(e => e.code === 'TOO_FAR').length;
+    crew[2].action('interact', CHESTS[0].id);
+    await until(() => crew[2].errors.filter(e => e.code === 'TOO_FAR').length > denied, 3000, 'opened chest cannot reroll');
+    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'chest' && e.id === CHESTS[0].id).length === 1));
+    crew[0].action('interact', drop.id);
+    await until(() => crew.every(b => b.state.drops.length === 0 && b.state.players.find(p => p.id === crew[0].id).inventory.longshot?.rarity === 'legendary'), 4000, 'one pickup and loadout synchronize to all five clients');
+    assert.equal(crew[0].player.weapon, 'longshot'); assert.equal(crew[0].player.rarity, 'legendary');
+    assert.equal(crew[0].player.inventory.longshot.ammo, 4);
+    crew[2].action('interact', drop.id);
+    await until(() => crew[2].errors.filter(e => e.code === 'TOO_FAR').length > denied + 1, 3000, 'second claimant denied');
+    assert.equal(crew[2].player.inventory.longshot, undefined);
+    assert.ok(crew.every(b => b.events.filter(e => e.kind === 'loot' && e.id === drop.id).length === 1));
+    // Keep the existing flintlock voyage probe comparable after proving pickup.
+    await pause(950); crew[0].action('swap', 'flintlock');
+    await until(() => crew[0].player.weapon === 'flintlock', 3000, 'owned magazine restored after pickup');
 
     combat = true;
     for (const shrine of SHRINES) {
@@ -161,6 +186,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     await until(() => crew.every(b => b.state.phase === 'lobby' && b.state.round === 2), 5000, 'all-player replay lobby');
     assert.ok(crew.every(b => b.player.mode === 'aboard' && b.player.hp === 100));
     assert.equal(crew[0].state.shards, 0); assert.equal(crew[0].state.pearls, 0); assert.equal(crew[0].state.stats.wins, 1);
+    assert.ok(crew.every(b => b.state.drops.length === 0 && b.player.inventory.longshot === undefined));
     for (const b of allSockets) b.close();
     await server.close(); server = null;
     restarted = await createGameServer({ port: 0, host: '127.0.0.1', dataDir });

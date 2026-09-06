@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from '../client/interpolation.js';
 import { shipAt } from '../shared/world.js';
+import * as THREE from 'three';
+import { makePalette, buildPirate, buildWeapon } from '../client/models.js';
+import { WEAPON_ORDER } from '../shared/weapons.js';
+import { findInteractable } from '../client/ui.js';
+import { BUILDINGS, buildingWorldPoint } from '../shared/exploration.js';
+import { heightAt } from '../shared/world.js';
+import { cameraTravel } from '../client/camera.js';
 
 const pirate = (overrides = {}) => ({ id: 'crew', online: true, x: 0, y: 5, z: 0, deckX: 0, deckZ: 0, yaw: 0, pitch: 0, mode: 'ground', knockedUntil: 0, ...overrides });
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-7, `${message}: ${actual} vs ${expected}`);
@@ -102,7 +109,7 @@ test('gait is zero on first appearance, snap, stale frame, knock and glide', () 
 });
 
 test('tracer heads travel visibly, trail behind, reach the authoritative endpoint and fade', () => {
-  for (const weapon of ['flintlock', 'scatter']) {
+  for (const weapon of WEAPON_ORDER) {
     const from = { x: 3, y: 7, z: 2 }, to = { x: 3, y: 7, z: -28 }, flight = makeTracerFlight(from, to, weapon);
     assert.ok(flight.duration >= .18 && flight.duration <= .3);
     const initial = sampleTracerFlight(flight, 0), half = sampleTracerFlight(flight, flight.duration / 2);
@@ -118,4 +125,52 @@ test('tracer heads travel visibly, trail behind, reach the authoritative endpoin
   assert.equal(makeTracerFlight({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), null);
   assert.equal(makeTracerFlight({ x: -1e308, y: 0, z: 0 }, { x: 1e308, y: 0, z: 0 }), null);
   assert.equal(makeTracerFlight({ x: 0, y: 0, z: 0 }, { x: 500, y: 0, z: 0 }).duration, .45);
+});
+
+test('all five gun models expose distinct silhouettes and live muzzle sockets across poses', () => {
+  const palette = makePalette(), model = buildPirate(palette), signatures = new Set();
+  for (const weapon of WEAPON_ORDER) {
+    const gun = buildWeapon(palette, weapon);
+    const bounds = new THREE.Box3().setFromObject(gun.group).getSize(new THREE.Vector3());
+    signatures.add([bounds.x, bounds.y, bounds.z].map(value => value.toFixed(3)).join(':'));
+    for (const mode of ['ground', 'gliding']) {
+      model.animate(1, 4, { mode, weapon, pitch: -.2, rarity: 'epic' }, { dt: .05, elapsed: 1, aiming: true });
+      model.fire(weapon); model.animate(1.05, 0, { mode, weapon, pitch: -.2 }, { dt: .05, elapsed: 1.05 });
+      const socket = model.group.getObjectByName(`${mode === 'gliding' ? 'stowed-muzzle' : 'muzzle'}-${weapon}`);
+      assert.ok(socket && socket.parent.visible, `${weapon} is equipped ${mode}`);
+      const muzzle = model.getMuzzle();
+      assert.ok(muzzle.distanceTo(socket.getWorldPosition(new THREE.Vector3())) < 1e-8);
+      assert.ok([muzzle.x, muzzle.y, muzzle.z].every(Number.isFinite));
+    }
+  }
+  assert.equal(signatures.size, 5, 'each gun has a different physical envelope');
+});
+
+test('loot prompts include rarity, favor reachable pickups, and never pass through building walls', () => {
+  const building = BUILDINGS.find(entry => entry.enterable);
+  const at = (x, z) => { const point = buildingWorldPoint(building, x, z); return { ...point, y: heightAt(point.x, point.z) }; };
+  const player = { ...pirate(), ...at(0, building.depth / 2 + 1), inventory: {}, mode: 'ground' };
+  const drop = { ...at(0, building.depth / 2 - 1), id: 'test-loot', weapon: 'longshot', rarity: 'legendary' };
+  const state = { elapsed: 0, phase: 'voyage', shards: 0, players: [player], chests: [], shrines: [], drops: [drop] };
+  const prompt = findInteractable(state, player);
+  assert.equal(prompt?.id, drop.id); assert.match(prompt.label, /Pick up Legendary Longshot/);
+  Object.assign(player, at(building.width / 2 + 1, 0)); Object.assign(drop, at(building.width / 2 - 1, 0));
+  assert.notEqual(findInteractable(state, player)?.id, drop.id);
+});
+
+test('camera carries the rendered travel delta exactly and has no catch-up after release', () => {
+  for (const fps of [30, 60, 144]) {
+    let previous = null, cameraZ = 7.45;
+    for (let frame = 0; frame < fps * 2; frame++) {
+      const player = pirate({ z: -Math.min(1, frame / fps) * 8 });
+      const travel = cameraTravel(previous, player, { round: 2 }); previous = travel.anchor;
+      if (travel.delta) cameraZ += travel.delta.z;
+      near(cameraZ - player.z, 7.45, 'camera offset never trails movement');
+      if (frame > fps) near(travel.delta.z, 0, 'stationary camera stays stationary');
+    }
+    for (const options of [{ menu: true, round: 2 }, { round: 3 }]) assert.equal(cameraTravel(previous, pirate({ z: -8 }), options).delta, null);
+    for (const player of [pirate({ id: 'new', z: -8 }), pirate({ mode: 'gliding', z: -8 }), pirate({ z: 60 })]) {
+      const travel = cameraTravel(previous, player, { round: 2 }); assert.equal(travel.delta, null); assert.equal(travel.reset, true);
+    }
+  }
 });

@@ -36,10 +36,10 @@ Use a desktop or laptop with a keyboard, mouse, and a browser supporting WebGL2.
 | Space | Jump; leave the flying ship and deploy your glider |
 | Left mouse | Fire the equipped blaster |
 | F | Cutlass swing |
-| E | Open treasure, activate a shrine, restore the lighthouse, or revive a nearby friend |
+| E | Open treasure, pick up a gun, activate a shrine, restore the lighthouse, or revive a nearby friend |
 | Q | Healing pulse for you and nearby crew |
 | R | Reload |
-| 1 / 2 | Flintlock / scatter blaster |
+| 1 / 2 / 3 / 4 / 5 | Flintlock / scatter blaster / tide repeater / burst carbine / longshot |
 | G | Mark your position for the crew |
 | M | Expand the island map |
 | Escape | Pause your controls and open help/settings |
@@ -50,15 +50,27 @@ The shared world continues while a player's menu is open. Sound and graphics set
 
 The ship cruises above the island for 28 seconds. Jump when ready, steer while gliding, and land safely. Pirates still aboard at the end are automatically dropped above Sunwake Strand. Explore Sunwake Strand, Palmheart Wilds, Emberpeak Caldera, Moonbloom Grove, and central Tideglass Haven. The map and colored shrine markers guide the crew.
 
-Branching footpaths lead to eight places with their own daily bustle: Saltwind Harbor's tavern and fishing boats, the striped awnings of Tideglass Market, Windward Farm's turning windmill, the ruins of Old Watch, Palmheart Camp, the caldera forge at Cinderworks, Moonwatch's observatory, and the hull under repair at Driftwood Yard. Friendly fishers, merchants, farmers, a smith, a lookout, a scholar, and shipwrights tend their work sites. These ambient locals add life to the island; the buildings are exterior landmarks.
+Branching footpaths lead to eight places with their own daily bustle: Saltwind Harbor's tavern and fishing boats, the striped awnings of Tideglass Market, Windward Farm's turning windmill, the ruins of Old Watch, Palmheart Camp, the caldera forge at Cinderworks, Moonwatch's observatory, and the hull under repair at Driftwood Yard. Friendly fishers, merchants, farmers, a smith, a lookout, a scholar, and shipwrights tend their work sites. Walk through the open doorways of nine furnished buildings to explore taverns, cottages, warehouses, a barn, forge, and barracks. Each contains a chest. Roofs cut away while you are inside, and pale gaps on map footprints mark entrances. Solid walls block movement, shots and interactions; open doors let you fight between indoors and outdoors.
 
 Visit each place on foot to add it to your voyage journal. Press M for named destinations, building footprints, walking paths, and your personal discovery count. Discoveries begin afresh each voyage. Treasure tucked around the settlements still belongs to the whole crew, and the three shrines remain your shared objective.
 
-Open chests for shared pearls and nearby healing. Visit the three compass shrines in any order, press E to awaken each one, defeat its crab guards, then stand near it for five seconds. A restored shrine grants a shard, heals nearby pirates, and becomes the automatic rescue checkpoint. There are no endless shrine waves.
+Open chests for shared pearls, nearby healing, and one random gun. Its floating model and glow show where it landed; approach and press E again to pick it up. Guns roll Common, Uncommon, Rare, Epic, or Legendary rarity, shown by both name and color. Better rarities increase damage. Your five slots hold one of each gun; higher rarity loot upgrades a slot and equips it. Equal or lower duplicates stay for another crewmate. Everyone shares pearls, while the first pirate to claim a gun keeps it.
+
+Inland patrols guard paths and all eight destinations, with about 24 enemies for a solo voyage and up to 36 for a full crew. Crab and ranged spitter groups patrol locally, return to their posts, and stay away from the safe landing beach. Defeated patrols do not endlessly respawn. Visit the three compass shrines in any order, press E to awaken each one, defeat its crab guards, then stand near it for five seconds. A restored shrine grants a shard, heals nearby pirates, and becomes the automatic rescue checkpoint. There are no endless shrine waves.
 
 With all three shards, return to the lighthouse and press E to begin the final encounter. Move away from the Tempest Crab's warning circles and keep firing together. Defeating it produces shared results and individual contributions. The captain can start another voyage from the results screen.
 
-The flintlock holds eight shots and reaches farther; the scatter blaster holds five shots and is strongest nearby. Both have unlimited reserve ammunition and reload automatically when empty. The cutlass is always available. Q restores up to 35 health in a nine-meter radius and has a 20-second cooldown. Health also regenerates after eight seconds without damage.
+Start with a Common Flintlock and Scatter Blaster, then find the other three guns in chests. All guns have unlimited reserve ammunition and reload automatically when empty. Switching guns preserves each magazine and the firing cooldown.
+
+| Gun | Magazine | Role |
+| --- | --- | --- |
+| Flintlock | 8 | Balanced single shots with 50 m reach |
+| Scatter Blaster | 5 | Wide pellet spread for close fights, up to 18 m |
+| Tide Repeater | 24 | Rapid automatic fire, up to 35 m |
+| Burst Carbine | 18 | Three timed shots per burst, up to 48 m |
+| Longshot | 4 | Slow, powerful scoped shots, up to 80 m |
+
+The cutlass is always available. Q restores up to 35 health in a nine-meter radius and has a 20-second cooldown. Health also regenerates after eight seconds without damage.
 
 Falling into the sea returns you safely to the landing beach. A knocked pirate can be revived by a nearby friend with E, or is automatically rescued after eight seconds with brief immunity. The whole crew being knocked down never ends the voyage.
 

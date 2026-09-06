@@ -1,4 +1,4 @@
-import { BUILDINGS, EXPLORATION_CHESTS } from './exploration.js';
+import { BUILDINGS, EXPLORATION_CHESTS, buildingLocalPoint } from './exploration.js';
 
 // Original designed island. These values are shared by rendering and authority.
 export const MAX_PLAYERS = 5;
@@ -56,7 +56,7 @@ function distanceToSegment(x, z, a, b) {
   return Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
 }
 
-export function heightAt(x, z) {
+function terrainHeightAt(x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
   const r = Math.hypot(x, z);
   // A gently scalloped shoreline, 119-137m from the center, fades into sea.
@@ -69,6 +69,22 @@ export function heightAt(x, z) {
   const hill = (cx, cz, h, spread) => h * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (spread * spread));
   const hills = hill(48, -87, 13, 27) + hill(-77, -14, 6.5, 29) + hill(99, 39, 5, 25);
   return edge * (base + routeEase * hills) - (1 - edge) * 0.8;
+}
+
+const foundations = BUILDINGS.filter(b => b.enterable).map(building => ({ building, y: terrainHeightAt(building.x, building.z) }));
+
+export function heightAt(x, z) {
+  let height = terrainHeightAt(x, z);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return height;
+  for (const { building, y } of foundations) {
+    if (Math.abs(x - building.x) > building.radius + 7.22 || Math.abs(z - building.z) > building.radius + 7.22) continue;
+    const local = buildingLocalPoint(building, x, z);
+    // The 2 m render grid must also be level at vertices just outside a rotated
+    // room, otherwise interpolated terrain can poke through its plank floor.
+    const outside = Math.max(Math.abs(local.x) - building.width / 2 - 2.85, Math.abs(local.z) - building.depth / 2 - 2.85, 0);
+    if (outside < 2.25) height += (y - height) * (1 - smooth(outside / 2.25));
+  }
+  return height;
 }
 
 export function regionAt(x, z) {

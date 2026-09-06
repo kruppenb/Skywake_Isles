@@ -13,23 +13,27 @@ const xyzNear = (a, b) => { for (const key of ['x', 'y', 'z']) near(a[key], b[ke
 
 // A real authority, fixed input ticks and independently timed display/snapshot
 // events catch ordering issues that identical client/server loops can hide.
-function voyageFrames({ frameMs = [1000 / 60], serverTickMs = [50], aboard = false, walking = true, duration = 2400 } = {}) {
+function voyageFrames({ frameMs = [1000 / 60], serverTickMs = [50], aboard = false, walking = true, duration = 2400, stopAfter = Infinity, initialSkew = 0, lateSkew = 0, inputDelay = 5 } = {}) {
   const game = new Game();
   const player = game.addPlayer('p0', 'Sailor', COLORS[0]);
   game.action(player.id, 'launch'); game.enemies.clear();
   if (!aboard) Object.assign(player, ground());
   const prediction = new LocalPrediction(), clock = new RenderClock();
-  prediction.reset(game.snapshot().players[0]); clock.observe(game.snapshot(), 0);
+  prediction.reset(game.snapshot().players[0], { simulationTime: initialSkew }); clock.observe(game.snapshot(), 0);
   const events = [], frames = [], arrivals = [], acknowledgements = [];
   let sequence = 0, accumulator = 0, lastFrame = 0, snapshotCount = 0;
   const schedule = (time, kind, data) => events.push({ time, kind, data });
+  if (lateSkew) schedule(850, 'skew');
   for (let t = serverTickMs[0], i = 1; t <= duration; t += serverTickMs[i++ % serverTickMs.length]) schedule(t, 'server');
   for (let t = 0, i = 0; t <= duration; t += frameMs[i++ % frameMs.length]) schedule(t, 'frame');
   while (events.length) {
     events.sort((a, b) => a.time - b.time);
     const { time, kind, data } = events.shift();
     if (time > duration) break;
-    if (kind === 'server') {
+    if (kind === 'skew') {
+      prediction.simulationTime += lateSkew;
+      for (const entry of prediction.history) entry.time += lateSkew;
+    } else if (kind === 'server') {
       game.tick(PREDICTION_STEP);
       schedule(time + [3, 31, 9, 23, 5][snapshotCount++ % 5], 'snapshot', game.snapshot());
     } else if (kind === 'input') game.setInput(player.id, data);
@@ -46,17 +50,17 @@ function voyageFrames({ frameMs = [1000 / 60], serverTickMs = [50], aboard = fal
       const elapsed = clock.sample(time);
       accumulator += dt;
       while (accumulator + 1e-8 >= PREDICTION_STEP) {
-        const input = controls({ forward: walking ? 1 : 0 });
+        const input = controls({ forward: walking && time < stopAfter ? 1 : 0 });
         const seq = ++sequence;
         prediction.step(seq, input, elapsed - accumulator + PREDICTION_STEP, 'voyage');
-        schedule(time + 5, 'input', { seq, ...input });
+        schedule(time + inputDelay, 'input', { seq, ...input });
         accumulator = Math.max(0, accumulator - PREDICTION_STEP);
       }
       prediction.decay(dt);
       frames.push({ time, elapsed, pose: prediction.sample(accumulator / PREDICTION_STEP, elapsed) });
     }
   }
-  return { frames, arrivals, acknowledgements };
+  return { frames, arrivals, acknowledgements, authoritative: game.snapshot().players[0] };
 }
 
 test('render ship clock stays continuous and monotonic through uneven snapshot arrivals at different frame rates', () => {
@@ -116,6 +120,35 @@ test('coalesced server timer ticks with repeated and skipped input ACKs preserve
     const speed = (frames[i - 1].pose.z - frames[i].pose.z) / ((frames[i].time - frames[i - 1].time) / 1000);
     near(speed, 8, .01);
   }
+});
+
+test('stopping after clock drift never replays consumed walking inputs or slides backward', () => {
+  for (const fps of [30, 60, 144]) for (const skew of [0, .05, .2]) for (const timing of [
+    { serverTickMs: [50], inputDelay: 5 },
+    { serverTickMs: [75, 25, 75, 25, 50, 50], inputDelay: 17 },
+  ]) for (const drift of [{ initialSkew: skew }, { lateSkew: skew }]) {
+    const { frames, authoritative } = voyageFrames({ frameMs: [1000 / fps], stopAfter: 1200, duration: 3000, ...timing, ...drift });
+    const stopped = frames.filter(frame => frame.time >= 1320);
+    const retreat = stopped.at(-1).pose.z - Math.min(...stopped.map(frame => frame.pose.z));
+    assert.ok(retreat < .015, `stop retreat ${retreat}m at ${fps} fps, ${JSON.stringify(drift)}`);
+    near(stopped.at(-1).pose.z, authoritative.z, .001);
+  }
+});
+
+test('action ACK gaps calibrate from the last real fixed step and repeated ACKs never shift clocks twice', () => {
+  const prediction = new LocalPrediction(); prediction.reset(ground(), { simulationTime: .2 });
+  prediction.step(1, controls({ forward: 1 }), .05, 'voyage');
+  prediction.step(2, controls(), .1, 'voyage');
+  const authority = { ...ground(), z: SPAWN.z - .4, lastInputSeq: 4 };
+  // Sequence 3/4 are immediate aim/neutral action packets, with no local step.
+  prediction.reconcile(authority, { phase: 'voyage', elapsed: .1 });
+  near(prediction.simulationTime, .1);
+  assert.deepEqual(prediction.history.map(entry => entry.seq), [1, 2]);
+  assert.ok(prediction.history.every(entry => entry.time <= .1 + 1e-7));
+  const timeline = prediction.history.map(entry => entry.time);
+  prediction.reconcile(authority, { phase: 'voyage', elapsed: .1 });
+  assert.deepEqual(prediction.history.map(entry => entry.time), timeline);
+  near(prediction.simulationTime, .1);
 });
 
 test('turning or releasing input between ticks cannot reinterpret an already simulated interval', () => {

@@ -134,3 +134,18 @@ test('non-mouse pointer taps keep their existing fire and release behavior', t =
   emit(window, 'pointerup', { pointerType: 'touch', pointerId: 5, button: 0 });
   assert.equal(input.firing, false);
 });
+
+test('five fixed number slots dispatch once and stay inactive behind menus and text focus', t => {
+  const { input, window, document, canvas, emit, actions } = fixture(t);
+  for (let index = 1; index <= 5; index++) {
+    const event = emit(window, 'keydown', { code: `Digit${index}`, repeat: false });
+    assert.equal(event.defaultPrevented, true);
+    emit(window, 'keydown', { code: `Digit${index}`, repeat: true });
+  }
+  assert.deepEqual(actions, ['flintlock', 'scatter', 'repeater', 'burst', 'longshot']);
+  input.setSuspended(true); emit(window, 'keydown', { code: 'Digit3', repeat: false });
+  input.setSuspended(false); document.activeElement = { closest: () => ({}) };
+  emit(window, 'keydown', { code: 'Digit4', repeat: false });
+  document.activeElement = canvas;
+  assert.equal(actions.length, 5);
+});

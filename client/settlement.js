@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GeoBatch } from './models.js';
 import { heightAt, OBSTACLES, CHESTS, SHRINES, SPAWN, BEACON } from '../shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, RESIDENTS, trailDistance } from '../shared/exploration.js';
+import { POINTS_OF_INTEREST, BUILDINGS, RESIDENTS, trailDistance, buildingLocalPoint, buildingWalls, buildingFurnishings } from '../shared/exploration.js';
 
 const TAU = Math.PI * 2;
 const C = { wood: '#94633f', paleWood: '#c49864', dark: '#4a5556', cream: '#f5dca0', teal: '#399d9a', coral: '#c86f59', stone: '#b2ad97', metal: '#52646a', gold: '#dfbb6b' };
@@ -87,9 +87,9 @@ function distanceToSegment(x, z, a, b) {
 
 export function buildSettlements(palette) {
   const group = new THREE.Group(); group.name = 'island-settlements';
-  const rotors = [], pennants = [], chimneys = [], boats = [], occupied = [], propSites = [], buildingBounds = [];
+  const rotors = [], pennants = [], chimneys = [], boats = [], occupied = [], propSites = [], buildingBounds = [], interiors = [];
   const batches = new Map(POINTS_OF_INTEREST.map(p => [p.id, new GeoBatch(palette)]));
-  const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
+  const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
 
   function hangingFlag(f, x, y, z, color, size = 1) {
@@ -101,7 +101,97 @@ export function buildSettlements(palette) {
     group.add(pivot); pennants.push({ pivot, phase: pennants.length * 1.8 });
   }
 
+  function furnishedBuilding(building) {
+    const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
+    const floorY = heightAt(x, z), source = batches.get(building.poiId), firstVertex = source.positions.length;
+    const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
+    const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
+    const floor = frame(source, x, floorY, z, yaw), cover = frame(roof, x, floorY, z, yaw);
+    const wall = { add(shape, position, ...args) {
+      const face = Math.abs(position[0]) / width >= Math.abs(position[2]) / depth
+        ? (position[0] >= 0 ? 0 : 1) : (position[2] >= 0 ? 2 : 3);
+      faces[face].add(shape, position, ...args);
+    } };
+    // The shared terrain is level under the whole room and both thresholds.
+    // A shallow inset plank floor needs no step or invisible collision platform.
+    floor.add('box', [0, -.06, 0], [width, .15, depth], [0, 0, 0], C.paleWood);
+    for (let i = 1; i < 10; i++) floor.add('box', [-width / 2 + i * width / 10, .022, 0], [.015, .007, depth], [0, 0, 0], '#ad8154');
+    for (const segment of buildingWalls(building)) {
+      const lowTop = Math.min(.48, segment.top);
+      if (segment.bottom < lowTop) floor.add('box', [segment.x, (segment.bottom + lowTop) / 2, segment.z], [segment.width, lowTop - segment.bottom, segment.depth], [0, 0, 0], color);
+      const bottom = Math.max(.48, segment.bottom);
+      wall.add('box', [segment.x, (bottom + segment.top) / 2, segment.z], [segment.width, segment.top - bottom, segment.depth], [0, 0, 0], color);
+    }
+    for (const side of [-1, 1]) for (const end of [-1, 1]) {
+      wall.add('box', [side * (width / 2 - .09), wallHeight / 2, end * (depth / 2 - .09)], [.14, wallHeight, .14], [0, 0, 0], C.wood);
+      // Trim belongs to the solid jamb, leaving the full shared doorway clear.
+      wall.add('box', [side * (building.doorWidth / 2 + .06), building.doorHeight / 2, end * (depth / 2 + .025)], [.12, building.doorHeight, .07], [0, 0, 0], C.paleWood);
+    }
+    for (const end of [-1, 1]) wall.add('box', [0, building.doorHeight + .08, end * (depth / 2 + .025)], [building.doorWidth + .24, .16, .07], [0, 0, 0], C.paleWood);
+    for (const side of [-1, 1]) windowPanel(wall, side * (width / 2 + .035), wallHeight * .6, 0, .68, side * Math.PI / 2);
+    if (kind === 'warehouse' || kind === 'barn' || kind === 'forge') {
+      for (const side of [-1, 1]) for (let i = 1; i < 7; i++) wall.add('box', [side * (width / 2 + .018), wallHeight / 2, -depth / 2 + i * depth / 7], [.035, wallHeight, .035], [0, 0, 0], '#bd905f');
+    }
+    gabledRoof(cover, width + .14, depth + .14, wallHeight + .1, height * .91, roofColor);
+    if (kind === 'tavern' || kind === 'forge') {
+      const chimneyX = -width * .29, chimneyZ = -depth * .22;
+      cover.add('box', [chimneyX, height * .79, chimneyZ], [.69, height * .39, .66], [0, 0, 0], kind === 'forge' ? '#665c58' : '#a89b89');
+      cover.add('box', [chimneyX, height * .98, chimneyZ], [.85, .15, .81], [0, 0, 0], C.stone);
+      chimneys.push(cover.point(chimneyX, height + .1, chimneyZ));
+    }
+    if (kind === 'tavern') {
+      wall.add('box', [width * .33, wallHeight * .82, depth / 2 + .16], [.74, .51, .15], [0, 0, 0], C.teal);
+      wall.add('ring', [width * .33, wallHeight * .82, depth / 2 + .25], [.16, .16, .16], [0, 0, 0], C.cream);
+    }
+    for (const item of buildingFurnishings(building)) {
+      const { x: fx, z: fz, width: fw, depth: fd, top } = item;
+      const add = (shape, p, s, color, rotation = [0, 0, 0]) => floor.add(shape, [fx + p[0], p[1], fz + p[2]], s, rotation, color);
+      if (item.kind === 'bed') {
+        add('box', [0, .22, 0], [fw, .36, fd], C.wood);
+        add('box', [0, .46, 0], [fw - .05, .14, fd - .08], C.cream);
+        add('box', [0, .56, -.2], [fw - .045, .13, fd * .61], roofColor);
+        add('box', [0, .6, fd * .32], [fw * .75, .12, .35], '#f3e5bd');
+        add('box', [0, .43, -fd / 2 + .045], [fw, .46, .09], C.paleWood);
+      } else if (item.kind === 'shelf') {
+        for (const end of [-1, 1]) add('box', [0, top / 2, end * (fd / 2 - .035)], [fw, top, .07], C.wood);
+        for (const level of [.12, .52, 1]) add('box', [0, top * level - .04, 0], [fw, .08, fd], C.paleWood);
+        for (let i = 0; i < 4; i++) add('box', [0, top * .52 + .14, (i - 1.5) * fd / 5], [fw * .8, .24 + i % 2 * .08, fd / 6], i % 2 ? C.cream : C.teal);
+        for (const end of [-1, 1]) add('cylinder', [0, .30, end * fd * .23], [fw * .33, .35, fw * .33], C.coral);
+      } else if (item.kind === 'casks') {
+        for (const end of [-1, 1]) barrel(floor, fx, fz + end * fd * .25, Math.min(fw / .9, top / 1.08));
+      } else if (item.kind === 'crates') {
+        for (const end of [-1, 1]) crate(floor, fx, fz + end * fd * .25, Math.min(fw / .94, fd / 1.7));
+        crate(floor, fx, fz, fw * .65, .64);
+      } else {
+        add('box', [0, top - .085, 0], [fw, .17, fd], C.paleWood);
+        for (const end of [-1, 1]) add('box', [0, (top - .17) / 2, end * fd * .37], [fw * .75, top - .17, .15], C.wood);
+        if (item.kind === 'bar') {
+          add('box', [fw / 2 - .04, top / 2, 0], [.08, top, fd], C.wood);
+          for (const end of [-1, 1]) add('cylinder', [0, top + .12, end * fd * .28], [.10, .24, .10], C.cream);
+        } else {
+          add('box', [0, top + .055, 0], [fw * .72, .11, .42], C.metal);
+          add('box', [0, top + .14, fd * .31], [.13, .1, .32], C.gold, [0, -.3, 0]);
+        }
+      }
+    }
+    const wallsMesh = new THREE.Group(), roofMesh = roof.mesh();
+    const normals = [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }];
+    upper.forEach((batch, index) => {
+      const face = batch.mesh(); face.name = building.id + '-wall-face-' + index;
+      face.userData.normal = normals[index]; wallsMesh.add(face);
+    });
+    wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
+    group.add(wallsMesh, roofMesh); interiors.push({ building, walls: wallsMesh, roof: roofMesh });
+    let visualRadius = 0, visualHeight = 0;
+    for (const [batch, first] of [[source, firstVertex], ...upper.map(batch => [batch, 0]), [roof, 0]]) for (let index = first; index < batch.positions.length; index += 3) {
+      visualRadius = Math.max(visualRadius, Math.hypot(batch.positions[index] - x, batch.positions[index + 2] - z));
+      visualHeight = Math.max(visualHeight, batch.positions[index + 1] - floorY);
+    }
+    buildingBounds.push({ id: building.id, radius: visualRadius, height: visualHeight });
+  }
+
   for (const building of BUILDINGS) {
+    if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
     const sourceBatch = batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
@@ -198,41 +288,6 @@ export function buildSettlements(palette) {
         f.add('sphere', [xx, h * .615, zz], [.16, .17, .16], [0, 0, 0], building.id === 'fruit-stall' ? ['#e89a53', '#b6c86e', '#e7ce78'][i % 3] : ['#cbdce1', '#f1d797', '#8abeba'][i % 3]);
       }
       f.add('box', [0, h * .30, depth * .43], [width * .65, .48, .05], [0, 0, 0], roofColor);
-    } else {
-      const width = r * 1.29, depth = r * 1.06;
-      const wallHeight = h * (kind === 'tavern' ? .57 : .63), eave = wallHeight + .1, ridge = h * .91;
-      f.add('box', [0, wallHeight / 2, 0], [width, wallHeight, depth], [0, 0, 0], color);
-      for (const side of [-1, 1]) for (const end of [-1, 1]) f.add('box', [side * (width / 2 - .025), wallHeight / 2, end * (depth / 2 + .025)], [.16, wallHeight + .1, .16], [0, 0, 0], C.wood);
-      for (const t of [.08, .92]) f.add('box', [0, wallHeight * t, 0], [width + .1, .14, depth + .1], [0, 0, 0], C.wood);
-      if (kind === 'warehouse' || kind === 'barn' || kind === 'forge') {
-        for (let i = 1; i < 11; i++) f.add('box', [-width / 2 + i * width / 11, wallHeight * .49, depth / 2 + .035], [.04, wallHeight * .87, .04], [0, 0, 0], '#bd905f');
-      }
-      gabledRoof(f, r * 1.44, r * 1.17, eave, ridge, roofColor);
-      const doorWidth = kind === 'barn' || kind === 'warehouse' ? width * .48 : 1.02;
-      closedDoor(f, 0, .08, depth / 2 + .075, doorWidth, Math.min(2.4, wallHeight * .76), kind === 'barn' ? C.coral : C.dark);
-      if (kind === 'barn' || kind === 'warehouse') {
-        const top = Math.min(2.4, wallHeight * .76);
-        for (const side of [-1, 1]) f.line([side * doorWidth * .43, .22, depth / 2 + .14], [-side * doorWidth * .43, top, depth / 2 + .14], .055, C.paleWood);
-      } else {
-        for (const side of [-1, 1]) windowPanel(f, side * width * .32, wallHeight * .55, depth / 2 + .10, kind === 'tavern' ? .74 : .57);
-      }
-      windowPanel(f, width / 2 + .08, wallHeight * .55, 0, .72, Math.PI / 2);
-      if (kind === 'tavern') {
-        windowPanel(f, 0, wallHeight + (ridge - wallHeight) * .35, depth / 2 + .09, .68);
-        f.add('box', [width * .28, wallHeight * .85, depth / 2 + .30], [.97, .54, .15], [0, 0, 0], C.teal);
-        f.add('ring', [width * .28, wallHeight * .85, depth / 2 + .40], [.17, .17, .17], [0, 0, 0], C.cream);
-        f.line([width * .28, wallHeight * .96, depth / 2 + .2], [width * .28, wallHeight * .96, depth / 2 + .55], .055, C.wood);
-      }
-      if (kind === 'tavern' || kind === 'forge') {
-        const chimneyX = -width * .31, chimneyZ = -depth * .22;
-        f.add('box', [chimneyX, h * .79, chimneyZ], [.69, h * .39, .66], [0, 0, 0], kind === 'forge' ? '#665c58' : '#a89b89');
-        f.add('box', [chimneyX, h * .98, chimneyZ], [.85, .15, .81], [0, 0, 0], C.stone);
-        chimneys.push(f.point(chimneyX, h + .1, chimneyZ));
-      }
-      if (kind === 'forge') {
-        f.add('box', [-width * .32, wallHeight * .34, depth / 2 + .07], [.77, .78, .11], [0, 0, 0], '#584a4d');
-        f.add('box', [-width * .32, wallHeight * .24, depth / 2 + .14], [.61, .24, .055], [0, 0, 0], '#ffc376');
-      }
     }
     let visualRadius = 0, visualHeight = 0;
     for (let index = firstVertex; index < sourceBatch.positions.length; index += 3) {
@@ -248,6 +303,10 @@ export function buildSettlements(palette) {
     if ([SPAWN, BEACON, ...SHRINES].some(p => Math.hypot(x - p.x, z - p.z) < 11 + radius)) return false;
     if (OBSTACLES.some(o => Math.hypot(x - o.x, z - o.z) < o.radius + radius + .35)) return false;
     if (CHESTS.some(p => Math.hypot(x - p.x, z - p.z) < 2.3 + radius)) return false;
+    for (const building of BUILDINGS.filter(b => b.enterable)) {
+      const local = buildingLocalPoint(building, x, z);
+      if (Math.abs(local.x) < building.doorWidth / 2 + radius + .5 && Math.abs(local.z) < building.depth / 2 + radius + 3) return false;
+    }
     if (occupied.some(p => Math.hypot(x - p.x, z - p.z) < p.radius + radius + .45)) return false;
     for (const person of RESIDENTS) for (let i = 0; i < person.route.length; i++) {
       if (distanceToSegment(x, z, person.route[i], person.route[(i + 1) % person.route.length]) < radius + .95) return false;
@@ -445,8 +504,24 @@ export function buildSettlements(palette) {
   const residents = buildResidents(palette, group);
   const transform = new THREE.Object3D();
   let lastAmbientTick = -Infinity, lastLowQuality = false, lastReducedMotion = false;
-  function animate(time, { lowQuality = false, reducedMotion = false } = {}) {
+  function animate(time, { lowQuality = false, reducedMotion = false, player = null, camera = null } = {}) {
     const t = Number.isFinite(time) ? time : 0, decorativeTime = reducedMotion ? 0 : t;
+    for (const interior of interiors) {
+      const local = player && buildingLocalPoint(interior.building, player.x, player.z);
+      const cutawayHeight = player?.mode === 'gliding' ? interior.building.height + 2 : interior.building.wallHeight;
+      const inside = local && Math.abs(local.x) < interior.building.width / 2 + .15 && Math.abs(local.z) < interior.building.depth / 2 + .8 && player.y < heightAt(interior.building.x, interior.building.z) + cutawayHeight;
+      // Keep the opposite walls and windows as a room backdrop while opening
+      // only the camera-facing walls. Low perimeter walls always show cover.
+      interior.roof.visible = !inside;
+      const cameraPosition = camera?.position ?? camera;
+      const view = inside && buildingLocalPoint(interior.building,
+        Number.isFinite(cameraPosition?.x) ? cameraPosition.x : player.x + Math.sin(player.yaw || 0) * 6,
+        Number.isFinite(cameraPosition?.z) ? cameraPosition.z : player.z + Math.cos(player.yaw || 0) * 6);
+      for (const face of interior.walls.children) {
+        const normal = face.userData.normal;
+        face.visible = !inside || normal.x * view.x + normal.z * view.z <= .05;
+      }
+    }
     // Work pauses and walks are sampled from absolute time, independent of FPS.
     const tick = Math.floor(t * (lowQuality ? 15 : 30));
     if (tick === lastAmbientTick && lowQuality === lastLowQuality && reducedMotion === lastReducedMotion) return;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 
 // Original, compact geometry for Skywake Isles. A part is baked into a colored
 // batch whenever it does not need to articulate; the island is not a forest of
@@ -313,7 +314,7 @@ function characterStrap(batch, a, b, width, thickness, color) {
     new THREE.Vector3(width, direction.length(), thickness)), color);
 }
 
-function pirateWeapon(palette, kind) {
+export function buildWeapon(palette, kind = 'flintlock') {
   const b = new GeoBatch(palette), scatter = kind === 'scatter';
   const wood = '#825635', brass = '#e9b855', steel = '#334b5a';
   const stock = flatShape([[-.09, .29], [-.13, .10], [-.105, -.48], [-.07, -.68], [.075, -.68], [.11, -.48], [.13, .10], [.09, .29]], .13);
@@ -341,7 +342,7 @@ function pirateWeapon(palette, kind) {
     b.add('characterCylinder', [0, -.08, -.44], [.125, .20, .12], [0, 0, 0], wood);
     for (const z of [-.22, -.58]) b.add('characterCylinder', [0, .12, z], [.133, .06, .133], [Math.PI / 2, 0, 0], brass);
     muzzle = new THREE.Vector3(0, .12, -.967);
-  } else {
+  } else if (kind === 'flintlock') {
     b.add('characterCylinder', [0, .13, -.44], [.078, .99, .078], [Math.PI / 2, 0, 0], steel);
     b.add('box', [0, .105, -.15], [.15, .13, .11], [0, 0, 0], '#213946');
     b.add('characterCylinder', [0, .13, -.94], [.094, .10, .094], [Math.PI / 2, 0, 0], brass);
@@ -351,6 +352,34 @@ function pirateWeapon(palette, kind) {
     b.add('box', [0, .22, -.80], [.032, .058, .075], [0, 0, 0], brass);
     b.add('box', [0, .205, -.96], [.024, .045, .042], [0, 0, 0], brass);
     muzzle = new THREE.Vector3(0, .13, -1.001);
+  } else {
+    const longshot = kind === 'longshot', repeater = kind === 'repeater';
+    const barrelEnd = longshot ? -1.83 : repeater ? -.93 : -1.39;
+    const barrelStart = -.12;
+    b.add('box', [0, .065, .40], [.23, .23, .51], [.09, 0, 0], wood);
+    b.add('box', [0, .065, .68], [.255, .29, .065], [.09, 0, 0], brass);
+    b.add('box', [0, .10, -.13], [.24, .25, .52], [0, 0, 0], steel);
+    b.add('characterCylinder', [0, .17, (barrelEnd + barrelStart) / 2], [.065, barrelStart - barrelEnd, .065], [Math.PI / 2, 0, 0], steel);
+    b.add('characterCylinder', [0, .17, barrelEnd], [.082, .11, .082], [Math.PI / 2, 0, 0], brass);
+    b.add('characterCylinder', [0, .17, barrelEnd - .06], [.052, .012, .052], [Math.PI / 2, 0, 0], '#142b36');
+    b.add('box', [0, -.035, -.48], [.20, .20, repeater ? .29 : .57], [0, 0, 0], wood);
+    for (const z of (repeater ? [-.37, -.58] : [-.30, -.48, -.66])) b.add('box', [0, -.025, z], [.216, .205, .036], [0, 0, 0], brass);
+    if (longshot) {
+      // A brass telescope is the longshot's unmistakable high silhouette.
+      for (const z of [-.20, -.56]) b.add('box', [0, .36, z], [.085, .22, .09], [0, 0, 0], brass);
+      b.add('characterCylinder', [0, .48, -.40], [.115, .78, .115], [Math.PI / 2, 0, 0], '#233f50');
+      for (const z of [-.01, -.80]) b.add('characterCylinder', [0, .48, z], [.137, .09, .137], [Math.PI / 2, 0, 0], brass);
+      b.add('characterCylinder', [0, .48, -.851], [.107, .012, .107], [Math.PI / 2, 0, 0], '#78d5df');
+      b.line([.15, .19, .02], [.23, .28, .02], .035, brass);
+      b.add('characterSphere', [.23, .28, .02], [.055, .055, .055], [0, 0, 0], steel);
+    } else {
+      // Box magazine on the compact repeater, narrow curved feed on the carbine.
+      b.add('box', [0, -.28, -.17], [repeater ? .15 : .11, repeater ? .29 : .36, .16], [repeater ? -.10 : -.25, 0, 0], repeater ? '#277f80' : steel);
+      b.add('box', [0, -.43, -.13], [.17, .045, .19], [-.10, 0, 0], brass);
+      b.add('box', [0, .32, -.15], [.06, .06, .13], [0, 0, 0], brass);
+      b.add('box', [0, .25, barrelEnd + .17], [.035, .085, .07], [0, 0, 0], brass);
+    }
+    muzzle = new THREE.Vector3(0, .17, barrelEnd - .07);
   }
   const group = new THREE.Group(); group.name = 'held-' + kind;
   const mesh = b.mesh(); mesh.name = kind + '-wood-brass-steel'; group.add(mesh);
@@ -477,7 +506,7 @@ export function buildPirate(palette, color = '#eb785d') {
   const weaponRig = new THREE.Group(); weaponRig.name = 'weapon-aim-recoil-rig'; torso.add(weaponRig);
   const stowRig = new THREE.Group(); stowRig.name = 'weapon-back-stow-rig';
   stowRig.position.set(.22, .73, .405); stowRig.rotation.set(-Math.PI / 2, 0, -.63); torso.add(stowRig);
-  const weapons = { flintlock: pirateWeapon(palette, 'flintlock'), scatter: pirateWeapon(palette, 'scatter') };
+  const weapons = Object.fromEntries(WEAPON_ORDER.map(kind => [kind, buildWeapon(palette, kind)]));
   const weaponEntries = Object.entries(weapons);
   for (const [, weapon] of weaponEntries) { weaponRig.add(weapon.group); stowRig.add(weapon.stowed); }
   const arms = [], down = new THREE.Vector3(0, -1, 0);
@@ -551,7 +580,7 @@ export function buildPirate(palette, color = '#eb785d') {
     const elapsed = Number.isFinite(pose.elapsed) ? pose.elapsed : 0;
     const falling = player.mode === 'gliding', knocked = !!player.knockedUntil;
     const motion = falling || knocked ? 0 : THREE.MathUtils.clamp(Number.isFinite(speed) ? speed : 0, 0, 18);
-    equipped = player.weapon === 'scatter' ? 'scatter' : 'flintlock'; stowed = falling;
+    equipped = WEAPONS[player.weapon] ? player.weapon : 'flintlock'; stowed = falling;
     // Distance-driven phase never changes frequency discontinuously at sprint.
     phase = (phase + motion * dt * 1.22) % (Math.PI * 2);
     locomotion = ease(locomotion, Math.min(1, motion / 4.5), 13, dt);
@@ -559,7 +588,7 @@ export function buildPirate(palette, color = '#eb785d') {
     aiming = ease(aiming, pose.aiming ? 1 : 0, 16, dt);
     glideBlend = ease(glideBlend, falling ? 1 : 0, 10, dt);
     knockBlend = ease(knockBlend, knocked ? 1 : 0, 10, dt);
-    const reloadDuration = equipped === 'scatter' ? 1.5 : 1.2;
+    const reloadDuration = WEAPONS[equipped].reload;
     const reloadProgress = THREE.MathUtils.clamp(1 - ((player.reloadUntil || 0) - elapsed) / reloadDuration, 0, 1);
     const reloadTarget = player.reloadUntil > elapsed ? Math.sin(reloadProgress * Math.PI) : 0;
     reloadBlend = ease(reloadBlend, reloadTarget, 18, dt);
@@ -624,7 +653,7 @@ export function buildPirate(palette, color = '#eb785d') {
   }
   animate(0, 0, { mode: 'aboard', weapon: 'flintlock' });
   return { group, animate,
-    fire(weapon = equipped) { recoil = Math.min(1.4, recoil + (weapon === 'scatter' ? 1.15 : .82)); },
+    fire(weapon = equipped) { recoil = Math.min(1.4, recoil + ({ flintlock: .82, scatter: 1.15, repeater: .38, burst: .48, longshot: 1.3 }[weapon] || .82)); },
     getMuzzle(targetVector3 = new THREE.Vector3()) {
       const weapon = weapons[equipped], socket = stowed ? weapon.stowedSocket : weapon.socket;
       socket.updateWorldMatrix(true, false);

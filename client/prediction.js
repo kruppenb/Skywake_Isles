@@ -90,6 +90,7 @@ export class LocalPrediction {
     this.future = null;
     this.correction = { x: 0, y: 0, z: 0 };
     this.authoritative = player ? { ...player } : null;
+    this.lastCalibratedSeq = player?.lastInputSeq ?? -1;
   }
 
   step(seq, input, elapsed, phase) {
@@ -129,6 +130,19 @@ export class LocalPrediction {
     if (force || !this.current || recovered || replaced) {
       this.reset(player, { simulationTime });
       return;
+    }
+    // A consumed packet cannot belong to a future authority tick. Clock drift
+    // used to replay these already-consumed walking steps, then unwind them
+    // after key release. Use advancing ACKs to bound the clock offset, without
+    // interpreting an ACK jump (or a repeated ACK) as a number of server ticks.
+    if (player.lastInputSeq > this.lastCalibratedSeq) {
+      const consumed = this.history.findLast(entry => entry.seq <= player.lastInputSeq);
+      const skew = consumed ? consumed.time - simulationTime : 0;
+      if (skew > TIME_EPSILON) {
+        this.simulationTime -= skew;
+        for (const entry of this.history) entry.time -= skew;
+      }
+      this.lastCalibratedSeq = player.lastInputSeq;
     }
     this.pending = this.pending.filter(entry => entry.seq > player.lastInputSeq);
     if (player.knockedUntil || phase === 'victory') this.pending = [];

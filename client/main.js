@@ -5,6 +5,7 @@ import { createUI, findInteractable } from './ui.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { SEED, SHRINES, CHESTS, heightAt } from '/shared/world.js';
+import { WEAPON_ORDER, WEAPONS, RARITIES, weaponStats } from '/shared/weapons.js';
 
 const canvas = document.getElementById('world');
 const testMode = new URLSearchParams(location.search).get('test') === '1';
@@ -14,7 +15,7 @@ const previewState = () => ({
   phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
   players: [], enemies: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
   chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), pearls: 0, shards: 0, bossId: null,
-  pings: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
+  pings: [], drops: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
 });
 let state = previewState();
 let simulationPlayer = null;
@@ -210,7 +211,16 @@ function receiveEvent(event) {
     case 'reload': if (mine) audio.play('reload'); break;
     case 'swap': if (mine) audio.play('reload'); break;
     case 'melee': if (mine) audio.play('melee'); break;
-    case 'chest': audio.play('collect', { distant: !mine }); ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!`); break;
+    case 'chest': {
+      audio.play('collect', { distant: !mine });
+      const loot = WEAPONS[event.weapon] ? ` ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name} waiting for pickup.` : '';
+      ui.toast(`${mine ? 'You' : name} found ${event.pearls || 0} shared pearls!${loot}`);
+      break;
+    }
+    case 'loot':
+      audio.play('collect', { distant: !mine });
+      ui.toast(`${mine ? 'You equipped' : `${name} equipped`} ${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon]?.name || 'a gun'}.`);
+      break;
     case 'shrine': {
       const shrine = SHRINES.find((entry) => entry.id === event.id);
       if (event.status === 'cleared') { audio.play('shrine'); ui.toast(`${shrine?.name || 'A compass shard'} restored! Your whole crew shares the reward.`); }
@@ -234,7 +244,7 @@ function aimPoint(player) {
   const ray = world.aimRay();
   const origin = ray.origin;
   const direction = ray.direction;
-  let nearest = 72;
+  let nearest = Math.max(72, weaponStats(player.weapon, player.rarity).range + 12);
   let enemy = null;
   for (const candidate of state.enemies) {
     if (candidate.hp <= 0) continue;
@@ -280,7 +290,7 @@ function performAction(action) {
   if (action === 'fire') {
     const now = performance.now();
     if (now < nextShotAt || player.mode !== 'ground') return;
-    nextShotAt = now + (player.weapon === 'scatter' ? 660 : 310);
+    nextShotAt = now + weaponStats(player.weapon, player.rarity).cooldown * 1000 + 10;
     const aim = aimPoint(player);
     sendInput({ ...base, yaw: aim.yaw, pitch: aim.pitch });
     net.action('fire');
@@ -290,7 +300,8 @@ function performAction(action) {
   } else if (action === 'interact') {
     const target = findInteractable(state, player);
     if (target) { sendInput(base); net.action('interact', target.id); }
-  } else if (action === 'flintlock' || action === 'scatter') {
+  } else if (WEAPON_ORDER.includes(action)) {
+    if (!player.inventory?.[action]) { ui.toast(`Find the ${WEAPONS[action].name} in chests.`); input.focus(); return; }
     net.action('swap', action);
     input.focus();
   } else if (action === 'heal') {

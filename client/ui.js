@@ -1,5 +1,7 @@
-import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt } from '/shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } from '/shared/exploration.js';
+import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt } from '../shared/world.js';
+import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } from '../shared/exploration.js';
+import { hasWorldLineOfSight } from '../shared/collision.js';
+import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -13,23 +15,33 @@ const text = (element, value) => { const next = String(value); if (element.textC
 export function findInteractable(state, player) {
   if (!player || player.mode !== 'ground' || player.knockedUntil > state.elapsed || state.phase === 'victory') return null;
   const options = [];
+  const reachable = (target) => hasWorldLineOfSight(
+    { x: player.x, y: player.y + 1.1, z: player.z },
+    { x: target.x, y: (target.y ?? heightAt(target.x, target.z)) + .9, z: target.z }, .08);
   for (const friend of state.players) {
-    if (friend.id !== player.id && friend.online && friend.knockedUntil > state.elapsed && distance(player, friend) <= 3.5) {
+    if (friend.id !== player.id && friend.online && friend.knockedUntil > state.elapsed && distance(player, friend) <= 3.5 && reachable(friend)) {
       options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance(player, friend) - 10 });
     }
   }
   for (const chest of CHESTS) {
-    if (!state.chests.find((entry) => entry.id === chest.id)?.opened && distance(player, chest) <= 3.5) {
+    if (!state.chests.find((entry) => entry.id === chest.id)?.opened && distance(player, chest) <= 3.5 && reachable(chest)) {
       options.push({ ...chest, kind: 'chest', label: 'Open shared treasure', distance: distance(player, chest) });
     }
   }
+  for (const drop of state.drops || []) {
+    if (!WEAPONS[drop.weapon] || distance(player, drop) > 3.5 || !reachable(drop)) continue;
+    const rarity = RARITIES[drop.rarity] || RARITIES.common;
+    const owned = player.inventory?.[drop.weapon];
+    const useful = !owned || rarity.damageMultiplier > (RARITIES[owned.rarity] || RARITIES.common).damageMultiplier;
+    options.push({ ...drop, kind: 'drop', label: `${useful ? 'Pick up' : 'Crew loot:'} ${rarity.name} ${WEAPONS[drop.weapon].name}${useful ? '' : ' (already owned)'}`, color: rarity.color, distance: distance(player, drop) - .3 });
+  }
   for (const shrine of SHRINES) {
     const dynamic = state.shrines.find((entry) => entry.id === shrine.id);
-    if (dynamic?.status === 'dormant' && distance(player, shrine) <= 4) {
+    if (dynamic?.status === 'dormant' && distance(player, shrine) <= 4 && reachable(shrine)) {
       options.push({ ...shrine, kind: 'shrine', label: `Awaken ${shrine.name}`, distance: distance(player, shrine) });
     }
   }
-  if (state.phase === 'voyage' && state.shards >= 3 && distance(player, BEACON) <= 4) {
+  if (state.phase === 'voyage' && state.shards >= 3 && distance(player, BEACON) <= 4 && reachable(BEACON)) {
     options.push({ ...BEACON, kind: 'beacon', label: 'Restore the lighthouse', distance: distance(player, BEACON) });
   }
   return options.sort((a, b) => a.distance - b.distance)[0] || null;
@@ -98,9 +110,14 @@ function createMapPainter() {
     if (['watchtower', 'windmill', 'observatory'].includes(building.kind)) {
       context.beginPath(); context.arc(0, 0, radius, 0, Math.PI * 2); context.fill(); context.stroke();
     } else {
-      const side = radius * Math.SQRT2;
-      context.fillRect(-side / 2, -side / 2, side, side); context.strokeRect(-side / 2, -side / 2, side, side);
-      context.beginPath(); context.moveTo(0, -side / 2); context.lineTo(0, side / 2); context.stroke();
+      const width = (building.width || building.radius * Math.SQRT2) * 450 / (extent * 2);
+      const depth = (building.depth || building.radius * Math.SQRT2) * 450 / (extent * 2);
+      context.fillRect(-width / 2, -depth / 2, width, depth); context.strokeRect(-width / 2, -depth / 2, width, depth);
+      if (building.enterable) {
+        const door = building.doorWidth * 450 / (extent * 2);
+        context.strokeStyle = '#fff6dd'; context.lineWidth = 2;
+        for (const side of [-1, 1]) { context.beginPath(); context.moveTo(-door / 2, side * depth / 2); context.lineTo(door / 2, side * depth / 2); context.stroke(); }
+      }
     }
     context.restore();
   }
@@ -304,8 +321,7 @@ export function createUI(callbacks = {}) {
   button('ready-button', () => callbacks.onAction?.('ready'));
   button('restart-button', () => callbacks.onAction?.('restart'));
   button('drop-button', () => callbacks.onDrop?.());
-  button('weapon-flintlock', () => callbacks.onAction?.('flintlock'));
-  button('weapon-scatter', () => callbacks.onAction?.('scatter'));
+  for (const weapon of WEAPON_ORDER) button(`weapon-${weapon}`, () => callbacks.onAction?.(weapon));
   button('heal-button', () => callbacks.onAction?.('heal'));
   button('menu-button', () => api.setPaused(!paused));
   button('resume-button', () => api.setPaused(false));
@@ -520,8 +536,17 @@ export function createUI(callbacks = {}) {
       refs['ammo-count'].replaceChildren(document.createTextNode(reload > 0 ? '…' : String(player.ammo)));
       const reserve = document.createElement('span'); reserve.textContent = `/ ${player.maxAmmo}`; refs['ammo-count'].append(reserve);
       text(refs['reload-label'], reload > 0 ? `Reloading · ${reload.toFixed(1)}s` : 'R reload · ∞ reserve');
-      refs['weapon-flintlock'].classList.toggle('selected', player.weapon === 'flintlock'); refs['weapon-scatter'].classList.toggle('selected', player.weapon === 'scatter');
-      refs['weapon-flintlock'].setAttribute('aria-pressed', String(player.weapon === 'flintlock')); refs['weapon-scatter'].setAttribute('aria-pressed', String(player.weapon === 'scatter'));
+      for (const [index, weapon] of WEAPON_ORDER.entries()) {
+        const slot = refs[`weapon-${weapon}`], owned = player.inventory?.[weapon];
+        const rarity = RARITIES[owned?.rarity] || RARITIES.common;
+        slot.classList.toggle('selected', player.weapon === weapon); slot.classList.toggle('empty', !owned);
+        slot.setAttribute('aria-pressed', String(player.weapon === weapon));
+        slot.setAttribute('aria-label', `${index + 1}: ${WEAPONS[weapon].name}, ${owned ? rarity.name : 'find in chests'}`);
+        slot.style.setProperty('--rarity', owned ? rarity.color : '#8199a3');
+        text(slot.querySelector('.weapon-rarity'), owned ? rarity.name : 'Find in chests');
+      }
+      text(refs['equipped-name'], `${RARITIES[player.rarity]?.name || 'Common'} ${WEAPONS[player.weapon]?.name || 'Flintlock'}`);
+      refs['equipped-name'].style.color = RARITIES[player.rarity]?.color || RARITIES.common.color;
       refs.reticle.classList.toggle('scatter', player.weapon === 'scatter');
       const heal = Math.max(0, Math.ceil(player.healUntil - state.elapsed));
       text(refs['heal-label'], heal ? `Heal ready in ${heal}s` : 'Healing pulse'); refs['heal-button'].classList.toggle('ready', !heal); refs['heal-button'].disabled = !!heal || downed;
@@ -531,7 +556,7 @@ export function createUI(callbacks = {}) {
       if (player.mode === 'aboard') text(refs['ship-banner-text'], `${Math.max(0, Math.ceil(SHIP_DURATION - state.elapsed))}s until the crew drops. Ready when you are!`);
       const interact = findInteractable(state, player);
       show(refs['interact-hint'], !!interact && !downed);
-      if (interact) text(refs['interact-hint'].lastElementChild, interact.label);
+      if (interact) { text(refs['interact-hint'].lastElementChild, interact.label); refs['interact-hint'].style.borderColor = interact.color || '#ffd16c'; }
       show(refs.reticle, player.mode === 'ground' && !downed && !paused && !mapOpen);
       show(refs['look-hint'], !view.locked && !paused && !mapOpen);
       refs['hit-marker'].classList.toggle('active', now < hitUntil);

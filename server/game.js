@@ -1,12 +1,11 @@
-import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, OBSTACLES, heightAt } from '../shared/world.js';
+import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt } from '../shared/world.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
-
-export const WEAPONS = Object.freeze({
-  flintlock: { ammo: 8, damage: 24, cooldown: 0.3, reload: 1.2, range: 50 },
-  scatter: { ammo: 5, damage: 10, cooldown: 0.65, reload: 1.5, range: 18 },
-});
+import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
+import { WEAPONS, RARITIES, weaponStats, rollWeapon } from '../shared/weapons.js';
+import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
+export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
-const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
 const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'scale', 'attackRadius'];
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -14,6 +13,23 @@ const cleanObject = (value, keys) => Object.fromEntries(keys.filter(k => value[k
 const good = () => ({ ok: true });
 const bad = (message, code = 'ACTION_DENIED') => ({ ok: false, message, code });
 const restInput = p => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: p.yaw, pitch: p.pitch });
+const sightPoint = (point, lift = 1) => ({ x: point.x, y: (point.y ?? heightAt(point.x, point.z)) + lift, z: point.z });
+const canReach = (from, to) => hasWorldLineOfSight(sightPoint(from, 1.25), sightPoint(to, 0.8));
+
+function clipShotEndpoint(from, to) {
+  if (hasWorldLineOfSight(from, to)) return to;
+  let clear = 0, blocked = 1;
+  const along = fraction => ({ x: from.x + (to.x - from.x) * fraction,
+    y: from.y + (to.y - from.y) * fraction, z: from.z + (to.z - from.z) * fraction });
+  // A blocked prefix stays blocked as the tracer extends. Thirteen bisections
+  // stop even an 80m longshot within a centimetre of the first solid surface.
+  for (let i = 0; i < 13; i++) {
+    const middle = (clear + blocked) / 2;
+    if (hasWorldLineOfSight(from, along(middle))) clear = middle;
+    else blocked = middle;
+  }
+  return along(clear);
+}
 
 export function sanitizeName(value) {
   const text = typeof value === 'string' ? value : '';
@@ -21,11 +37,12 @@ export function sanitizeName(value) {
 }
 
 export class Game {
-  constructor({ stats = {}, onEvent = () => {}, onStats = () => {} } = {}) {
+  constructor({ stats = {}, onEvent = () => {}, onStats = () => {}, random = Math.random } = {}) {
     this.players = new Map();
     this.enemies = new Map();
     this.onEvent = onEvent;
     this.onStats = onStats;
+    this.random = random;
     this.stats = {
       wins: Math.max(0, Math.floor(Number(stats.wins) || 0)),
       voyages: Math.max(0, Math.floor(Number(stats.voyages) || 0)),
@@ -44,16 +61,17 @@ export class Game {
     this.bossId = null; this.victory = null; this.checkpoint = { ...SPAWN };
     this.shrines = SHRINES.map(s => ({ id: s.id, status: 'dormant', charge: 0, remaining: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
-    this.pings = []; this.enemies.clear();
+    this.pings = []; this.drops = []; this.enemies.clear();
     for (const p of this.players.values()) this.resetPlayer(p);
   }
 
   resetPlayer(p) {
     Object.assign(p, makePlayerPosition(), {
-      ready: false, hp: 100, maxHp: 100, ammo: 8, maxAmmo: 8, weapon: 'flintlock',
+      ready: false, hp: 100, maxHp: 100, ammo: 8, maxAmmo: 8, weapon: 'flintlock', rarity: 'common',
+      inventory: { flintlock: { rarity: 'common', ammo: 8 }, scatter: { rarity: 'common', ammo: 5 } },
       reloadUntil: 0, healUntil: 0, knockedUntil: 0, invulnerableUntil: 0,
       lastInputSeq: -1, _receivedInputSeq: -1, kills: 0, rescues: 0, chests: 0,
-      _fireAt: 0, _meleeAt: 0, _swapAt: 0, _pingAt: 0, _damageAt: -100,
+      _fireAt: 0, _meleeAt: 0, _swapAt: 0, _pingAt: 0, _damageAt: -100, _burst: null,
       _inputAt: -1, _input: { forward: 0, right: 0, sprint: false, jump: false, yaw: 0, pitch: 0 },
     });
     const slot = [...this.players.keys()].indexOf(p.id);
@@ -99,7 +117,7 @@ export class Game {
   disconnect(id, leave = false) {
     const p = this.players.get(id);
     if (!p) return;
-    p.online = false; p._expiresAt = this.clock + 60; p._input = restInput(p);
+    p.online = false; p._expiresAt = this.clock + 60; p._input = restInput(p); p._burst = null;
     if (leave) this.players.delete(id);
     if (this.hostId === id) {
       this.hostId = [...this.players.values()].find(other => other.online)?.id ?? null;
@@ -136,9 +154,10 @@ export class Game {
       if (this.phase !== 'lobby') return bad('The voyage has already begun.');
       this.phase = 'voyage'; this.elapsed = 0; this.stats.voyages++;
       for (const crew of this.players.values()) this.resetPlayer(crew);
-      this.spawnEnemy('crab', -42, -38, 'haven');
-      this.spawnEnemy('crab', -108, 56, 'jungle');
-      this.spawnEnemy('spitter', 102, -6, 'moon');
+      for (const spawn of encounterSpawns(this.onlineCount)) {
+        const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone);
+        enemy._camp = spawn.group;
+      }
       this.onStats({ ...this.stats }); this.emit({ kind: 'phase', phase: this.phase });
       return good();
     }
@@ -164,41 +183,57 @@ export class Game {
   reload(p) {
     const w = WEAPONS[p.weapon];
     if (p.reloadUntil || p.ammo >= p.maxAmmo) return good();
+    p._burst = null;
     p.reloadUntil = this.elapsed + w.reload;
     this.emit({ kind: 'reload', playerId: p.id });
     return good();
   }
 
   swap(p, weapon) {
-    if (!WEAPONS[weapon]) return bad('Choose a flintlock or scatter blaster.', 'BAD_TARGET');
+    if (!Object.hasOwn(WEAPONS, weapon)) return bad('Choose one of the five weapon slots.', 'BAD_TARGET');
+    if (!Object.hasOwn(p.inventory, weapon)) return bad(`Find a ${WEAPONS[weapon].name} in a chest first.`, 'NOT_OWNED');
     if (p.weapon === weapon || this.elapsed < p._swapAt) return good();
-    p.weapon = weapon; p.maxAmmo = WEAPONS[weapon].ammo; p.ammo = p.maxAmmo;
-    p.reloadUntil = 0; p._swapAt = this.elapsed + 0.9;
-    p._fireAt = Math.max(p._fireAt, this.elapsed + 0.5);
-    this.emit({ kind: 'swap', playerId: p.id, weapon });
+    this.equip(p, weapon);
+    this.emit({ kind: 'swap', playerId: p.id, weapon, rarity: p.rarity });
     return good();
   }
 
+  equip(p, weapon) {
+    p.inventory[p.weapon].ammo = p.ammo;
+    p.weapon = weapon; p.rarity = p.inventory[weapon].rarity;
+    p.maxAmmo = WEAPONS[weapon].ammo; p.ammo = p.inventory[weapon].ammo;
+    p.reloadUntil = 0; p._burst = null; p._swapAt = this.elapsed + 0.9;
+    p._fireAt = Math.max(p._fireAt, this.elapsed + 0.5);
+  }
+
   fire(p) {
-    const t = this.elapsed, w = WEAPONS[p.weapon];
-    if (t + 1e-8 < p._fireAt || p.reloadUntil) return good();
+    const t = this.elapsed, w = weaponStats(p.weapon, p.rarity);
+    if (t + 1e-8 < p._fireAt || p.reloadUntil || p._burst) return good();
     if (p.ammo <= 0) return this.reload(p);
-    p.ammo--; p._fireAt = t + w.cooldown;
+    p._fireAt = t + w.cooldown;
+    if (w.burst) p._burst = { weapon: p.weapon, rarity: p.rarity, yaw: p.yaw, pitch: p.pitch, remaining: w.burst - 1, nextAt: t + w.burstInterval };
+    this.fireRound(p);
+    return good();
+  }
+
+  fireRound(p, aim = p) {
+    if (p.ammo <= 0 || p.reloadUntil) { p._burst = null; return; }
+    const w = weaponStats(p.weapon, p.rarity);
+    p.ammo--; p.inventory[p.weapon].ammo = p.ammo;
     const from = { x: p.x, y: p.y + 1.25, z: p.z };
     const pellets = p.weapon === 'scatter' ? [[0, 0], [-0.06, 0.025], [0.06, 0.025], [-0.035, -0.045], [0.035, -0.045]] : [[0, 0]];
     for (const [yawOffset, pitchOffset] of pellets) {
-      const yaw = p.yaw + yawOffset, pitch = p.pitch + pitchOffset;
+      const yaw = aim.yaw + yawOffset, pitch = aim.pitch + pitchOffset;
       const direction = { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: -Math.cos(yaw) * Math.cos(pitch) };
       const hit = this.raycast(from, direction, w.range);
-      const to = hit ? { x: hit.x, y: hit.y + hit.radius * 0.8, z: hit.z } : {
+      const to = hit ? { x: hit.x, y: hit.y + hit.radius * 0.8, z: hit.z } : clipShotEndpoint(from, {
         x: from.x + direction.x * w.range, y: from.y + direction.y * w.range, z: from.z + direction.z * w.range,
-      };
+      });
       const damage = hit ? Math.min(hit.hp, w.damage) : 0;
       this.emit({ kind: 'shot', playerId: p.id, from, to, weapon: p.weapon, ...(hit ? { hitId: hit.id, damage } : {}) });
       if (hit) this.damageEnemy(hit, w.damage, p.id);
     }
     if (!p.ammo) this.reload(p);
-    return good();
   }
 
   raycast(from, direction, range) {
@@ -210,19 +245,7 @@ export class Game {
       if (d > range + e.radius || along <= 0 || along >= bestDistance) continue;
       const offAxis = Math.sqrt(Math.max(0, d * d - along * along));
       if (offAxis > e.radius + Math.tan(8 * Math.PI / 180) * along) continue;
-      let blocked = false;
-      // The forgiving ray is still stopped by substantial island props.
-      const ex = x / d, ey = y / d, ez = z / d;
-      for (const o of OBSTACLES) {
-        const ox = o.x - from.x, oz = o.z - from.z;
-        const h2 = ex * ex + ez * ez;
-        const at = (ox * ex + oz * ez) / (h2 || 1);
-        if (at < 0.5 || at > d - e.radius) continue;
-        const miss = Math.hypot(from.x + ex * at - o.x, from.z + ez * at - o.z);
-        const yAt = from.y + ey * at, bottom = heightAt(o.x, o.z);
-        if (miss < o.radius && yAt > bottom && yAt < bottom + o.height) { blocked = true; break; }
-      }
-      if (!blocked) { best = e; bestDistance = along; }
+      if (hasWorldLineOfSight(from, sightPoint(e, e.radius * 0.8))) { best = e; bestDistance = along; }
     }
     return best;
   }
@@ -233,7 +256,7 @@ export class Game {
     this.emit({ kind: 'melee', playerId: p.id, x: p.x, y: p.y + 1, z: p.z, yaw: p.yaw });
     for (const e of [...this.enemies.values()]) {
       const d = distance(p, e);
-      if (d > 3 + e.radius || Math.abs(p.y - e.y) > 3) continue;
+      if (d > 3 + e.radius || Math.abs(p.y - e.y) > 3 || !canReach(p, e)) continue;
       const dot = ((e.x - p.x) * -Math.sin(p.yaw) + (e.z - p.z) * -Math.cos(p.yaw)) / (d || 1);
       if (dot > 0.35 || d < 1.2) this.damageEnemy(e, 32, p.id);
     }
@@ -275,17 +298,35 @@ export class Game {
     const options = [];
     for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
     for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHESTS.find(c => c.id === chest.id) });
+    for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
     for (const shrine of this.shrines) if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point: SHRINES.find(s => s.id === shrine.id) });
     if (this.shards === 3 && this.phase === 'voyage') options.push({ id: BEACON.id, kind: 'beacon', range: 4, point: BEACON });
-    const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range && Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3);
+    const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range && Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3 && canReach(p, o.point));
     reachable.sort((a, b) => (a.kind === 'revive' ? -10 : distance(p, a.point)) - (b.kind === 'revive' ? -10 : distance(p, b.point)));
     const option = reachable[0];
-    if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
+    if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
+    if (option.kind === 'loot') {
+      const drop = option.data, owned = p.inventory[drop.weapon];
+      if (owned && RARITIES[owned.rarity].damageMultiplier >= RARITIES[drop.rarity].damageMultiplier) {
+        return bad(`You already carry an equal or better ${WEAPONS[drop.weapon].name}. Leave this one for your crew.`, 'DUPLICATE_WEAPON');
+      }
+      // An upgrade preserves the magazine, including the equipped slot; a new
+      // weapon brings its own magazine. Picking up cannot bypass fire cadence.
+      if (p.weapon === drop.weapon) owned.ammo = p.ammo;
+      p.inventory[drop.weapon] = { rarity: drop.rarity, ammo: owned?.ammo ?? WEAPONS[drop.weapon].ammo };
+      this.drops = this.drops.filter(item => item.id !== drop.id);
+      this.equip(p, drop.weapon);
+      this.emit({ kind: 'loot', id: drop.id, playerId: p.id, weapon: drop.weapon, rarity: drop.rarity });
+      return good();
+    }
     if (option.kind === 'chest') {
       option.data.opened = true; p.chests++; this.pearls += 12;
       for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
-      this.emit({ kind: 'chest', id: option.id, playerId: p.id, pearls: 12 });
+      const rolled = rollWeapon(this.random);
+      const drop = { id: `drop-${this.round}-${option.id}`, ...rolled, x: option.point.x, y: heightAt(option.point.x, option.point.z), z: option.point.z };
+      this.drops.push(drop);
+      this.emit({ kind: 'chest', id: option.id, playerId: p.id, pearls: 12, ...rolled, dropId: drop.id });
     } else if (option.kind === 'shrine') {
       option.data.status = 'active';
       const n = 3 + Math.min(2, Math.floor((this.onlineCount - 1) / 2));
@@ -306,17 +347,14 @@ export class Game {
   }
 
   spawnEnemy(type, x, z, zone, shrine = null) {
-    // Resolve a rare spawn inside a matching physical prop.
-    for (const o of OBSTACLES) {
-      const d = Math.hypot(x - o.x, z - o.z), r = o.radius + 1.5;
-      if (d < r) { const a = Math.atan2(z - o.z, x - o.x); x = o.x + Math.cos(a) * r; z = o.z + Math.sin(a) * r; }
-    }
     const boss = type === 'tempest';
+    const point = resolveWorldCollision({ x, y: heightAt(x, z), z }, boss ? 1.7 : 0.8);
+    x = point.x; z = point.z;
     const hp = boss ? 650 + 180 * Math.max(0, this.onlineCount - 1) : type === 'spitter' ? 60 : 52;
     const e = { id: `enemy-${this.nextEnemyId++}`, type, x, y: heightAt(x, z), z, yaw: 0, hp, maxHp: hp,
       radius: boss ? 2.4 : 0.85, scale: boss ? 3.1 : type === 'spitter' ? 1.1 : 1,
       state: 'idle', attackAt: 0, attackRadius: boss ? 5.5 : type === 'spitter' ? 2.5 : 2.3, zone,
-      _home: { x, z }, _shrine: shrine, _nextAttack: this.elapsed + 1.4, _attack: null,
+      _home: { x, z }, _shrine: shrine, _camp: null, _patrolIndex: 0, _nextAttack: this.elapsed + 1.4, _attack: null,
       _summonAt: this.elapsed + 12, _attackCount: 0, _endAttack: 0 };
     this.enemies.set(e.id, e);
     return e;
@@ -327,7 +365,7 @@ export class Game {
     p.hp = Math.max(0, p.hp - amount); p._damageAt = this.elapsed;
     this.emit({ kind: 'hit', targetId: p.id, damage: amount, x: p.x, y: p.y + 1, z: p.z, sourceId });
     if (!p.hp) {
-      p.knockedUntil = this.elapsed + 8; p._input = restInput(p);
+      p.knockedUntil = this.elapsed + 8; p._input = restInput(p); p._burst = null;
       this.emit({ kind: 'downed', playerId: p.id });
     }
   }
@@ -356,7 +394,14 @@ export class Game {
       const input = this.clock - p._inputAt < 0.4 ? p._input : restInput(p);
       movePlayer(p, this.phase === 'lobby' ? { ...input, jump: false } : input, dt, this.phase === 'lobby' ? 0 : this.elapsed);
       p.lastInputSeq = p._receivedInputSeq;
-      if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.reloadUntil = 0; }
+      if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.inventory[p.weapon].ammo = p.ammo; p.reloadUntil = 0; }
+      if (p._burst && (p.weapon !== p._burst.weapon || p.rarity !== p._burst.rarity || p.mode === 'aboard')) p._burst = null;
+      if (p._burst && this.elapsed + 1e-8 >= p._burst.nextAt) {
+        p._burst.remaining--; p._burst.nextAt += WEAPONS[p.weapon].burstInterval;
+        const complete = p._burst.remaining === 0;
+        this.fireRound(p, p._burst);
+        if (complete) p._burst = null;
+      }
       if (this.phase !== 'lobby' && this.elapsed - p._damageAt > 8) p.hp = Math.min(p.maxHp, p.hp + 7 * dt);
     }
     this.resetAbandonedRound();
@@ -386,7 +431,8 @@ export class Game {
       const a = e._attack;
       for (const p of this.players.values()) {
         if (!p.online || p.knockedUntil || p.mode !== 'ground') continue;
-        if (distance(p, a) < a.radius + 0.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3) this.damagePlayer(p, e.type === 'tempest' ? 22 : e.type === 'spitter' ? 12 : 10, e.id);
+        if (e._camp && inSafeLanding(p)) continue;
+        if (distance(p, a) < a.radius + 0.5 && Math.abs(p.y - heightAt(a.x, a.z)) < 3 && canReach(e, p)) this.damagePlayer(p, e.type === 'tempest' ? 22 : e.type === 'spitter' ? 12 : 10, e.id);
       }
       this.emit({ kind: 'splash', x: a.x, y: heightAt(a.x, a.z) + 0.1, z: a.z, radius: a.radius });
       e.state = 'attack'; e._endAttack = t + 0.3;
@@ -394,7 +440,7 @@ export class Game {
       return;
     }
     if (e.state === 'attack') { if (t < e._endAttack) return; e.state = 'idle'; }
-    const targets = [...this.players.values()].filter(p => p.online && !p.knockedUntil && p.mode === 'ground' && distance(p, e._home) < (e.type === 'tempest' ? 55 : e._shrine ? 38 : 24));
+    const targets = [...this.players.values()].filter(p => p.online && !p.knockedUntil && p.mode === 'ground' && !(e._camp && inSafeLanding(p)) && distance(p, e._home) < (e.type === 'tempest' ? 55 : e._shrine ? 38 : e._camp ? 18 : 24) && canReach(e, p));
     targets.sort((a, b) => distance(a, e) - distance(b, e));
     const target = targets[0];
     if (e.type === 'tempest' && target && t >= e._summonAt) {
@@ -408,7 +454,14 @@ export class Game {
         this.emit({ kind: 'notice', message: 'Tiny tide crabs have joined the splash party!' });
       }
     }
-    const destination = target ?? e._home;
+    let destination = target ?? e._home;
+    if (!target && e._camp) {
+      const angle = e._patrolIndex * Math.PI * 2 / 3 + Number(e.id.split('-')[1]) * 0.7;
+      destination = { x: e._home.x + Math.cos(angle) * 2.4, z: e._home.z + Math.sin(angle) * 2.4 };
+      destination.y = heightAt(destination.x, destination.z);
+      resolveWorldCollision(destination, e.radius * 0.7);
+      if (distance(destination, e) < 0.5) e._patrolIndex = (e._patrolIndex + 1) % 3;
+    }
     const d = distance(destination, e);
     if (target) {
       e.yaw = Math.atan2(-(target.x - e.x), -(target.z - e.z));
@@ -426,12 +479,17 @@ export class Game {
     }
     if (d < 0.5) { e.state = 'idle'; return; }
     e.state = target ? 'chase' : 'idle';
-    const speed = e.type === 'tempest' ? 3 : e.type === 'spitter' ? 2.7 : 3.6;
+    const speed = !target && e._camp ? 1.15 : e.type === 'tempest' ? 3 : e.type === 'spitter' ? 2.7 : 3.6;
+    if (!target) e.yaw = Math.atan2(-(destination.x - e.x), -(destination.z - e.z));
+    const previous = { x: e.x, z: e.z };
     e.x += (destination.x - e.x) / d * Math.min(d, speed * dt);
     e.z += (destination.z - e.z) / d * Math.min(d, speed * dt);
-    for (const o of OBSTACLES) {
-      const ox = e.x - o.x, oz = e.z - o.z, od = Math.hypot(ox, oz), r = o.radius + e.radius * 0.7;
-      if (od < r) { e.x = o.x + (ox / (od || 1)) * r; e.z = o.z + (oz / (od || 1)) * r; }
+    e.y = heightAt(e.x, e.z);
+    resolveWorldCollision(e, e.radius * 0.7);
+    if (e._camp && inSafeLanding(e)) {
+      // Reject this step, so a wall beside the boundary cannot push a guard
+      // back into the protected area after a radial correction.
+      e.x = previous.x; e.z = previous.z;
     }
     e.y = heightAt(e.x, e.z);
   }
@@ -439,6 +497,7 @@ export class Game {
   win() {
     if (this.phase === 'victory') return;
     this.phase = 'victory'; this.enemies.clear();
+    for (const p of this.players.values()) p._burst = null;
     this.victory = { pearls: this.pearls, duration: this.elapsed,
       rescues: [...this.players.values()].reduce((sum, p) => sum + p.rescues, 0),
       kills: [...this.players.values()].reduce((sum, p) => sum + p.kills, 0) };
@@ -449,9 +508,9 @@ export class Game {
 
   snapshot() {
     return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
-      players: [...this.players.values()].map(p => cleanObject(p, PUBLIC_PLAYER)),
+      players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
-      shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })),
+      shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
       pings: this.pings.map(p => ({ ...p })), stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };
   }

@@ -1,13 +1,17 @@
 import * as THREE from 'three';
 import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBSTACLES, BEACON, SPAWN, WORLD_RADIUS, SEED } from '../shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, trailDistance } from '../shared/exploration.js';
-import { makePalette, GeoBatch, buildGalleon, buildPirate, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
+import { makePalette, GeoBatch, buildGalleon, buildPirate, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { WEAPONS, RARITIES } from '../shared/weapons.js';
+import { hasWorldLineOfSight } from '../shared/collision.js';
+import { cameraTravel } from './camera.js';
 import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
 
 const TAU = Math.PI * 2;
 const COLORS = { beach: '#e6d394', jungle: '#5aab70', volcano: '#c08d67', moon: '#839fa0', haven: '#81b57a' };
 const WAYPOINTS = [SPAWN, ...SHRINES];
+const ENTERABLE_IDS = new Set(BUILDINGS.filter(building => building.enterable).map(building => building.id));
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 const smooth = (a, b, t) => lerp(a, b, 1 - Math.exp(-t));
@@ -289,11 +293,11 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const settlements = buildSettlements(palette), reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
   scene.add(settlements.group);
   const ship = buildGalleon(palette); scene.add(ship.group);
-  const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), pingModels = new Map();
+  const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
   let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
-  let cameraShipPose = null;
+  let cameraShipPose = null, cameraFollowPose = null;
   let width = 1, height = 1, frameCount = 0, fps = 60, fpsElapsed = 0, lowQuality = quality === 'low';
   const direction = new THREE.Vector3(), right = new THREE.Vector3(), desiredCamera = new THREE.Vector3(), cameraTarget = new THREE.Vector3();
   const projectVector = new THREE.Vector3(), raycaster = new THREE.Raycaster();
@@ -481,6 +485,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     } else if (event.kind === 'chest') {
       const chest = CHESTS.find(c => c.id === event.id);
       if (chest) { burst(chest.x, heightAt(chest.x, chest.z) + 1, chest.z, '#ffe295', 23, 1.8); speechPop('+' + (event.pearls || 10), chest.x, heightAt(chest.x, chest.z) + 2, chest.z); pulse(chest.x, chest.z, '#ffe193', 3); }
+    } else if (event.kind === 'loot') {
+      const player = latestState?.players?.find(p => p.id === event.playerId);
+      if (player) pulse(player.x, player.z, RARITIES[event.rarity]?.color || '#aebbc5', 1.8, .6);
     } else if (event.kind === 'shrine') {
       const shrine = SHRINES.find(s => s.id === event.id);
       if (shrine) { pulse(shrine.x, shrine.z, shrine.color || '#b9f0d7', 10, 1.6); if (event.status === 'cleared') burst(shrine.x, heightAt(shrine.x, shrine.z) + 2.5, shrine.z, '#fce49d', 40, 2.5); }
@@ -557,6 +564,31 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     for (const [id, model] of enemies) if (!seen.has(id)) { disposeObject(model.group, preserve); disposeObject(model.hpGroup, preserve); enemies.delete(id); }
   }
   function updateObjectives(state, time) {
+    const seenDrops = new Set();
+    for (const drop of state?.drops || []) {
+      if (!WEAPONS[drop.weapon]) continue;
+      seenDrops.add(drop.id);
+      let model = dropModels.get(drop.id);
+      if (!model) {
+        const color = RARITIES[drop.rarity]?.color || '#aebbc5';
+        const group = new THREE.Group(); group.name = 'loot-' + drop.id;
+        group.userData = { kind: 'loot', weapon: drop.weapon, rarity: drop.rarity, id: drop.id };
+        const gun = buildWeapon(palette, drop.weapon).group;
+        gun.name = 'floating-' + drop.weapon; gun.rotation.z = -.14; gun.scale.setScalar(.92);
+        const ring = meshRing(.68, .065, color, .75);
+        ring.position.y = .075;
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(.12, .36, 2.7, 10, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .10, side: THREE.DoubleSide, depthWrite: false }));
+        beam.position.y = 1.4;
+        group.add(gun, ring, beam); scene.add(group);
+        model = { group, gun, ring, beam }; dropModels.set(drop.id, model);
+      }
+      model.group.position.set(drop.x, drop.y ?? heightAt(drop.x, drop.z), drop.z);
+      const motion = reducedMotionPreference.matches ? 0 : time;
+      model.gun.position.y = 1.20 + Math.sin(motion * 1.7) * .11;
+      model.gun.rotation.y = motion * .48 + .7;
+      model.ring.material.opacity = .64 + Math.sin(motion * 1.7) * .10;
+    }
+    for (const [id, model] of dropModels) if (!seenDrops.has(id)) { disposeObject(model.group, preserve); dropModels.delete(id); }
     for (const chest of state?.chests || []) { const model = chestModels.get(chest.id); if (model) model.opened = !!chest.opened; }
     for (const model of chestModels.values()) {
       model.animate(time, model.opened); model.beam.visible = !model.opened;
@@ -591,6 +623,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const GROUND_CAMERA_BACK = 7.45, AIM_CAMERA_BACK = 5.7;
     const NORMAL_GAMEPLAY_FOV = 50, AIM_GAMEPLAY_FOV = 43, GLIDING_FOV = 58;
     const menu = view.menu || !player;
+    const travel = cameraTravel(cameraFollowPose, player, { menu, round: view.round });
+    cameraFollowPose = travel.anchor;
+    if (travel.delta) { camera.position.x += travel.delta.x; camera.position.y += travel.delta.y; camera.position.z += travel.delta.z; }
     if (!menu && player.mode === 'aboard' && cameraShipPose) {
       camera.position.x += shipPose.x - cameraShipPose.x;
       camera.position.y += shipPose.y - cameraShipPose.y;
@@ -613,17 +648,29 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       if (player.mode === 'ground') {
         const dx = desiredCamera.x - anchor.x, dz = desiredCamera.z - anchor.z, lengthSq = dx * dx + dz * dz;
         for (const obstacle of OBSTACLES) {
+          if (ENTERABLE_IDS.has(obstacle.buildingId)) continue;
           const t = clamp(((obstacle.x - anchor.x) * dx + (obstacle.z - anchor.z) * dz) / (lengthSq || 1), 0, 1);
           if (t < .12 || t >= safeFraction) continue;
           const separation = Math.hypot(anchor.x + t * dx - obstacle.x, anchor.z + t * dz - obstacle.z);
           const top = heightAt(obstacle.x, obstacle.z) + (obstacle.height || 4);
           if (separation < (obstacle.radius || 1) + .45 && lerp(anchor.y, desiredCamera.y, t) < top + .5) safeFraction = Math.max(.3, t - .15);
         }
+        // Inside roofs and tall walls cut away. Outside, real wall segments
+        // replace the old solid building circles so open doors remain usable.
+        if (!buildingAt(player.x, player.z) && !hasWorldLineOfSight(anchor, desiredCamera, .22)) {
+          let low = 0, high = 1;
+          for (let pass = 0; pass < 7; pass++) {
+            const middle = (low + high) / 2;
+            const probe = { x: lerp(anchor.x, desiredCamera.x, middle), y: lerp(anchor.y, desiredCamera.y, middle), z: lerp(anchor.z, desiredCamera.z, middle) };
+            if (hasWorldLineOfSight(anchor, probe, .22)) low = middle; else high = middle;
+          }
+          safeFraction = Math.min(safeFraction, Math.max(.20, low));
+        }
       }
       if (safeFraction < 1) desiredCamera.lerpVectors(anchor, desiredCamera, safeFraction);
       desiredCamera.y = Math.max(desiredCamera.y, heightAt(desiredCamera.x, desiredCamera.z) + 1.25);
       if (player.mode === 'aboard') desiredCamera.y = Math.max(desiredCamera.y, player.y + 1.6);
-      const snap = !cameraReady || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu;
+      const snap = !cameraReady || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu;
       camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 18));
       // Center ray is exactly input direction, including after collision.
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
@@ -665,8 +712,9 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
     ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time);
     ocean.animate(time); sky.animate(time);
-    settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    updateCamera(dt, localPlayer, view, shipPose); updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
+    updateCamera(dt, localPlayer, view, shipPose);
+    settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
+    updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
       mote.mesh.position.set(mote.center.x + Math.sin(a) * mote.radius, mote.center.y + (mote.ember ? (mote.rise + time * .7) % 7 : Math.sin(time * .5 + mote.phase) * 1.1 + mote.rise * .4), mote.center.z + Math.cos(a) * mote.radius);
@@ -703,11 +751,11 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, effects: effects.length, settlements: { ...settlements.stats } }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats } }; }
   function dispose() {
     if (disposed) return; disposed = true;
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
-    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); pingModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
+    renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
   resize(); update(0, null, null, { menu: true, time: 0 });
   return { scene, camera, renderer, update, render, resize, setQuality, dispose, handleEvent, project, projectPlayer, aimRay, getStats };

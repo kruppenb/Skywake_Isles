@@ -1,4 +1,5 @@
-import { WORLD_RADIUS, SHIP_DURATION, SPAWN, OBSTACLES, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
+import { WORLD_RADIUS, SHIP_DURATION, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
+import { resolveWorldCollision } from './collision.js';
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const finite = (x, fallback = 0) => Number.isFinite(x) ? x : fallback;
@@ -64,15 +65,7 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
   p.x = finite(p.x, SPAWN.x) + dx * speed * dt;
   p.z = finite(p.z, SPAWN.z) + dz * speed * dt;
   p.y = finite(p.y, heightAt(p.x, p.z));
-  for (const o of OBSTACLES) {
-    if (p.y > heightAt(o.x, o.z) + o.height + 0.4) continue;
-    const ox = p.x - o.x, oz = p.z - o.z, distance = Math.hypot(ox, oz);
-    const radius = o.radius + 0.6;
-    if (distance < radius) {
-      const ux = distance > 0.0001 ? ox / distance : 1, uz = distance > 0.0001 ? oz / distance : 0;
-      p.x = o.x + ux * radius; p.z = o.z + uz * radius;
-    }
-  }
+  resolveWorldCollision(p);
   const ground = heightAt(p.x, p.z);
   if (Math.hypot(p.x, p.z) > WORLD_RADIUS || (ground < 0.3 && p.y < 2.5) || p.y < -4) {
     p.x = SPAWN.x; p.z = SPAWN.z; p.y = heightAt(SPAWN.x, SPAWN.z);

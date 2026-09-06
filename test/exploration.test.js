@@ -58,7 +58,7 @@ test('eight places and append-only loot/obstacle IDs preserve the original islan
   const originalChests = [[0, 88], [-8, 97], [9, 100], [-16, 66], [18, 52], [-32, 36], [-56, 26], [-83, -1], [-93, 31], [-25, -26], [17, -38], [39, -52], [61, -83], [79, -49], [87, 18], [64, 50], [97, 53], [13, 15]];
   assert.deepEqual(CHESTS.slice(0, 18), originalChests.map(([x, z], i) => ({ id: `chest-${i + 1}`, x, z })));
   assert.deepEqual(CHESTS.slice(18), EXPLORATION_CHESTS);
-  assert.deepEqual(EXPLORATION_CHESTS.map(c => c.id), Array.from({ length: 8 }, (_, i) => `chest-${19 + i}`));
+  assert.deepEqual(EXPLORATION_CHESTS.map(c => c.id), Array.from({ length: 17 }, (_, i) => `chest-${19 + i}`));
   assert.deepEqual(OBSTACLES.slice(0, 34).map(o => o.id), Array.from({ length: 34 }, (_, i) => `prop-${i + 1}`));
   assert.equal(OBSTACLES[0].x, -24);
   assert.equal(OBSTACLES[33].type, 'landmark');
@@ -66,7 +66,7 @@ test('eight places and append-only loot/obstacle IDs preserve the original islan
   for (const place of POINTS_OF_INTEREST) {
     assert.ok(BUILDINGS.some(b => b.poiId === place.id), `${place.id} has architecture`);
     assert.ok(RESIDENTS.some(r => r.poiId === place.id), `${place.id} has a resident`);
-    assert.equal(EXPLORATION_CHESTS.filter(c => pointOfInterestAt(c.x, c.z)?.id === place.id).length, 1, `${place.id} has one new chest`);
+    assert.equal(EXPLORATION_CHESTS.filter(c => !c.buildingId && pointOfInterestAt(c.x, c.z)?.id === place.id).length, 1, `${place.id} keeps its exterior chest`);
   }
 });
 
@@ -142,12 +142,14 @@ test('new buildings collide in authority movement and preserve loot/objective cl
       const boundary = { x: building.x + Math.cos(angle) * building.radius, z: building.z + Math.sin(angle) * building.radius };
       assert.ok(heightAt(boundary.x, boundary.z) >= 0.3, `${building.id} footprint stays on land`);
     }
-    for (const target of CHESTS) assert.ok(distance(building, target) >= building.radius + 1.5, `${building.id} leaves ${target.id} accessible`);
+    for (const target of CHESTS.filter(c => !c.buildingId)) assert.ok(distance(building, target) >= building.radius + 1.5, `${building.id} leaves ${target.id} accessible`);
     for (const target of [BEACON, SPAWN, ...SHRINES]) assert.ok(distance(building, target) >= building.radius + 12, `${building.id} preserves ${target.id ?? 'spawn'} gathering/arena space`);
     for (const other of OBSTACLES.filter(o => o.id !== obstacle.id)) {
       assert.ok(distance(building, other) >= building.radius + other.radius + 1, `${building.id} does not overlap ${other.id}`);
     }
-    for (const axis of [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }]) {
+    // Enterable structures use the segmented-wall and indoor-loot checks in
+    // interiors.test.js; special landmarks retain their original solid bodies.
+    for (const axis of building.enterable ? [] : [{ x: 1, z: 0 }, { x: -1, z: 0 }, { x: 0, z: 1 }, { x: 0, z: -1 }]) {
       const p = ground({ x: building.x + axis.x * (building.radius + 1.2), z: building.z + axis.z * (building.radius + 1.2) });
       for (let step = 0; step < 30; step++) {
         movePlayer(p, { forward: 1, yaw: Math.atan2(axis.x, axis.z) }, 0.05, 30);

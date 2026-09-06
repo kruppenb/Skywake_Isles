@@ -13,12 +13,15 @@ export const POINTS_OF_INTEREST = [
 
 const structure = (id, poiId, kind, x, z, radius, height, color, roofColor) => {
   const place = POINTS_OF_INTEREST.find(p => p.id === poiId);
+  const enterable = ['tavern', 'warehouse', 'cottage', 'barn', 'forge'].includes(kind);
   return { id, poiId, kind, x, z, radius, height,
+    enterable, ...(enterable ? { width: radius * 1.42, depth: radius * 1.18,
+      wallHeight: Math.max(3.2, height * .58), doorWidth: 2.3, doorHeight: 2.8, wallThickness: .24 } : {}),
     yaw: Math.atan2(place.x - x, place.z - z), color, roofColor };
 };
 
 // Radius encloses the solid body; heights include the roof and chimney/sails.
-// Closed doors face the shared gathering space (local +Z after yaw).
+// Paired doorways face the shared gathering space and rear approach (local +/-Z).
 export const BUILDINGS = [
   structure('saltwind-tavern', 'saltwind-harbor', 'tavern', -22, 88, 4, 7, '#e4ce9b', '#c86f59'),
   structure('net-house', 'saltwind-harbor', 'warehouse', -14, 109, 3.6, 6, '#94633f', '#399d9a'),
@@ -34,7 +37,54 @@ export const BUILDINGS = [
   structure('moonwatch-dome', 'moonwatch', 'observatory', 104, 46, 3.8, 9, '#d4cadc', '#729ea7'),
   structure('timber-shed', 'driftwood-yard', 'warehouse', 36, 102, 3.3, 6, '#94633f', '#399d9a'),
   structure('shipwrights-cottage', 'driftwood-yard', 'cottage', 33, 85, 3, 5.5, '#dccaa4', '#c86f59'),
+  structure('watch-barracks', 'old-watch', 'cottage', -77, -84, 3, 5.5, '#b9b8a4', '#697a73'),
 ];
+
+export function buildingLocalPoint(building, x, z) {
+  const dx = x - building.x, dz = z - building.z, c = Math.cos(building.yaw), s = Math.sin(building.yaw);
+  return { x: c * dx - s * dz, z: s * dx + c * dz };
+}
+
+export function buildingWorldPoint(building, x, z) {
+  const c = Math.cos(building.yaw), s = Math.sin(building.yaw);
+  return { x: building.x + c * x + s * z, z: building.z - s * x + c * z };
+}
+
+export function buildingAt(x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  for (const building of BUILDINGS) {
+    if (!building.enterable || Math.abs(x - building.x) > building.radius || Math.abs(z - building.z) > building.radius) continue;
+    const local = buildingLocalPoint(building, x, z);
+    if (Math.abs(local.x) <= building.width / 2 && Math.abs(local.z) <= building.depth / 2) return building;
+  }
+  return null;
+}
+
+// Rendering and collision use these same local boxes, including the open door
+// lintels. Bottom/top are measured from the building's flat terrain floor.
+export function buildingWalls(building) {
+  if (!building.enterable) return [];
+  const { width: w, depth: d, wallThickness: t, wallHeight: h, doorWidth: door, doorHeight } = building;
+  const box = (x, z, width, depth, bottom = 0, top = h) => ({ x, z, width, depth, bottom, top });
+  const walls = [-1, 1].map(side => box(side * (w - t) / 2, 0, t, d));
+  for (const end of [-1, 1]) {
+    const z = end * (d - t) / 2;
+    for (const side of [-1, 1]) walls.push(box(side * (w + door) / 4, z, (w - door) / 2, t));
+    walls.push(box(0, z, door, t, doorHeight, h));
+  }
+  return walls;
+}
+
+export function buildingFurnishings(building) {
+  if (!building.enterable) return [];
+  const inset = building.width / 2 - building.wallThickness;
+  const length = Math.min(1.8, building.depth - .9);
+  const furniture = (kind, side, width, depth, top, z = 0) => ({ kind, x: side * (inset - width / 2 - .05), z, width, depth, bottom: 0, top });
+  if (building.kind === 'tavern') return [furniture('bar', -1, .72, length, 1.1), furniture('casks', 1, .68, 1.45, 1.1)];
+  if (building.kind === 'cottage') return [furniture('bed', -1, .74, length, .66), furniture('shelf', 1, .42, 1.25, 1.65)];
+  if (building.kind === 'forge') return [furniture('workbench', -1, .64, length, 1.0), furniture('casks', 1, .6, 1.3, .96)];
+  return [furniture('shelf', -1, .5, length, 1.8), furniture('crates', 1, .72, 1.45, 1.15)];
+}
 
 // Trail IDs match their destinations. First points sit on an original main
 // route, except Old Watch, which continues from the farm's connected trail.
@@ -73,7 +123,9 @@ export const EXPLORATION_CHESTS = [
   { id: 'chest-24', x: 77, z: -38 },
   { id: 'chest-25', x: 92, z: 47 },
   { id: 'chest-26', x: 30, z: 104 },
-];
+].concat(BUILDINGS.filter(building => building.enterable).map((building, index) => ({
+  id: `chest-${27 + index}`, ...buildingWorldPoint(building, 0, -.45), buildingId: building.id,
+})));
 
 export function pointOfInterestAt(x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
