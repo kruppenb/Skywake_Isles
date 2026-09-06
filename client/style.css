@@ -19,6 +19,19 @@
 @media(max-width:800px){.loadout{width:calc(100vw - 30px);right:15px;bottom:15px}.loadout .weapon-slot{min-height:69px}.loadout .weapon-icon{height:23px;width:52px;margin:1px 0 3px}.player-hud{bottom:154px;left:15px;width:255px}.loadout .equipped-line{padding:5px 9px}.loadout .ammo>strong{font-size:21px}.loadout .ammo>span{max-width:none}.interact-hint{bottom:255px;font-size:12px;padding:9px 12px}.look-hint{display:none}.discovery-notice{bottom:252px}.ship-banner{bottom:258px}}
 @media(max-width:420px){.loadout .weapon-slot{font-size:8px}.loadout .weapon-rarity{font-size:8px}.loadout .empty .weapon-rarity{font-size:7px}.loadout .weapon-icon{width:46px}#equipped-name{font-size:10px}.loadout .ammo{gap:6px}.loadout .ammo>span{font-size:8px}}
 
+/* The reload arc follows server time on every frame, without a CSS timer. */
+.reload-ring{position:absolute;left:50%;top:50%;width:38px;height:38px;transform:translate(-50%,-50%) rotate(-90deg);overflow:visible;pointer-events:none;filter:drop-shadow(0 1px 2px #123c51)}
+.reload-ring svg{display:block;width:100%;height:100%;overflow:visible}.reload-ring circle{fill:none;stroke-width:2}.reload-track{stroke:#fff6dd40}.reload-progress{stroke:#ffd16c;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:100}
+.reticle.scatter.reloading{gap:6px}
+.scope-overlay{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.scope-lens{position:absolute;left:50%;top:50%;width:82vmin;height:82vmin;transform:translate(-50%,-50%);border:2px solid #b6924e;border-radius:50%;overflow:hidden;box-shadow:0 0 0 150vmax #071019,inset 0 0 24px 8px #07101975;outline:1px solid #ffd16c55;outline-offset:3px}
+.scope-crosshair{display:block;width:100%;height:100%;filter:drop-shadow(0 0 1px #fff6ddcc)}
+.scope-lines,.scope-ticks{fill:none;stroke:#071019;stroke-width:1.25;vector-effect:non-scaling-stroke}.scope-ticks{stroke-width:1}.scope-center{fill:#ffd16c;stroke:#071019;stroke-width:1.25;vector-effect:non-scaling-stroke}
+.scope-label{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);font-size:9px;letter-spacing:3px;color:#fff6dd99;text-shadow:0 1px 2px #071019}
+.scoped .player-hud,.scoped .loadout,.scoped .look-hint{z-index:3}.scoped .hit-marker{z-index:3}
+.scoped .quest-crew-column,.scoped .compass,.scoped .minimap-wrap,.scoped .objective-marker,.scoped .target-health,.scoped .nameplates,.scoped .interact-hint,.scoped .discovery-notice,.scoped .boss-health,.scoped .toast-stack{visibility:hidden}
+.scoped .look-hint{color:#fff6ddbb;bottom:167px}
+@media(max-width:800px){.scoped .look-hint{display:block;left:15px;right:auto;bottom:252px;font-size:9px}.scope-label{font-size:8px;letter-spacing:2px}}
 /* Optional defenses share the quest card; crew health follows its real height. */
 .quest-crew-column{position:absolute;top:91px;left:28px;width:305px;max-height:calc(100% - 300px);display:flex;flex-direction:column;align-items:flex-start;gap:12px}
 .quest-crew-column>.quest-panel{position:static;width:100%;flex:none}

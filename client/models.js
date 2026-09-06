@@ -314,6 +314,16 @@ function characterStrap(batch, a, b, width, thickness, color) {
     new THREE.Vector3(width, direction.length(), thickness)), color);
 }
 
+// Wrist sockets sit at the back of each palm. The support hand cups the
+// fore-end, except on the pistol where it wraps around the firing hand.
+const WEAPON_HANDLING = {
+  flintlock: { left: [-.24, -.17, .075], right: [.055, -.145, .21], stance: [.20, .65, -.70], supportRoll: -.15 },
+  scatter: { left: [-.27, -.20, -.32], right: [.055, -.145, .21], stance: [.55, .69, -.405], supportRoll: .04 },
+  repeater: { left: [-.265, -.18, -.32], right: [.055, -.145, .21], stance: [.55, .70, -.405], supportRoll: .02 },
+  burst: { left: [-.27, -.18, -.335], right: [.055, -.145, .21], stance: [.55, .71, -.395], supportRoll: .04 },
+  longshot: { left: [-.27, -.18, -.35], right: [.055, -.145, .21], stance: [.55, .72, -.385], supportRoll: .06 },
+};
+
 export function buildWeapon(palette, kind = 'flintlock') {
   const b = new GeoBatch(palette), scatter = kind === 'scatter';
   const wood = '#825635', brass = '#e9b855', steel = '#334b5a';
@@ -330,8 +340,8 @@ export function buildWeapon(palette, kind = 'flintlock') {
   b.line([.025, -.005, -.045], [.025, -.085, -.075], .018, steel);
   let muzzle;
   if (scatter) {
-    b.add('box', [0, .08, .32], [.23, .25, .32], [.08, 0, 0], wood);
-    b.add('box', [0, .08, .50], [.26, .31, .075], [.08, 0, 0], brass);
+    b.add('box', [.055, .08, .25], [.21, .23, .23], [.08, .24, 0], wood);
+    b.add('box', [.082, .08, .37], [.235, .27, .055], [.08, .24, 0], brass);
     b.add('characterCylinder', [0, .12, -.39], [.12, .69, .12], [Math.PI / 2, 0, 0], steel);
     const flare = new THREE.CylinderGeometry(.235, .12, .29, 20);
     b.add(flare, [0, .12, -.79], [1, 1, 1], [-Math.PI / 2, 0, 0], brass); flare.dispose();
@@ -356,9 +366,12 @@ export function buildWeapon(palette, kind = 'flintlock') {
     const longshot = kind === 'longshot', repeater = kind === 'repeater';
     const barrelEnd = longshot ? -1.83 : repeater ? -.93 : -1.39;
     const barrelStart = -.12;
-    b.add('box', [0, .065, .40], [.23, .23, .51], [.09, 0, 0], wood);
-    b.add('box', [0, .065, .68], [.255, .29, .065], [.09, 0, 0], brass);
-    b.add('box', [0, .10, -.13], [.24, .25, .52], [0, 0, 0], steel);
+    // A shorter, slightly cast-off stock meets the outside of the shoulder.
+    // The previous long butt extended through the chest and into the cheek
+    // when looking down, regardless of how the wrists were posed.
+    b.add('box', [.06, .065, .25], [.205, .22, .24], [.09, .28, 0], wood);
+    b.add('box', [.095, .065, .38], [.23, .26, .055], [.09, .28, 0], brass);
+    b.add('box', [0, .10, -.145], [.22, .235, .46], [0, 0, 0], steel);
     b.add('characterCylinder', [0, .17, (barrelEnd + barrelStart) / 2], [.065, barrelStart - barrelEnd, .065], [Math.PI / 2, 0, 0], steel);
     b.add('characterCylinder', [0, .17, barrelEnd], [.082, .11, .082], [Math.PI / 2, 0, 0], brass);
     b.add('characterCylinder', [0, .17, barrelEnd - .06], [.052, .012, .052], [Math.PI / 2, 0, 0], '#142b36');
@@ -505,7 +518,8 @@ export function buildPirate(palette, color = '#eb785d') {
 
   const weaponRig = new THREE.Group(); weaponRig.name = 'weapon-aim-recoil-rig'; torso.add(weaponRig);
   const stowRig = new THREE.Group(); stowRig.name = 'weapon-back-stow-rig';
-  stowRig.position.set(.22, .73, .405); stowRig.rotation.set(-Math.PI / 2, 0, -.63); torso.add(stowRig);
+  // Muzzle down, telescope facing away from the coat, butt below the tricorn.
+  stowRig.position.set(.10, .92, .52); stowRig.rotation.set(-Math.PI / 2, 0, Math.PI / 2 + .12); torso.add(stowRig);
   const weapons = Object.fromEntries(WEAPON_ORDER.map(kind => [kind, buildWeapon(palette, kind)]));
   const weaponEntries = Object.entries(weapons);
   for (const [, weapon] of weaponEntries) { weaponRig.add(weapon.group); stowRig.add(weapon.stowed); }
@@ -525,10 +539,10 @@ export function buildPirate(palette, color = '#eb785d') {
     fb.add('characterCylinder', [0, -.45, 0], [.107, .12, .111], [0, 0, 0], leather);
     fb.add('box', [0, -.45, -.113], [.075, .055, .018], [0, 0, 0], brass);
     const anchor = new THREE.Object3D(); anchor.name = label + '-weapon-grip';
-    anchor.position.set(side < 0 ? -.12 : .055, side < 0 ? -.12 : -.145, side < 0 ? -.44 : .21);
     weaponRig.add(anchor);
     const hand = new THREE.Group(); hand.name = label + '-hand';
     if (side < 0) {
+      handBatch.add('characterDetail', [-.075, .015, 0], [.08, .062, .075], [0, 0, 0], skin);
       handBatch.add('characterDetail', [.045, .039, 0], [.115, .074, .129], [0, 0, -.3], skin);
       for (const z of [-.073, -.024, .025, .074])
         handBatch.add('characterDetail', [.124, .092, z], [.047, .058, .023], [0, 0, -.28], skin);
@@ -539,8 +553,10 @@ export function buildPirate(palette, color = '#eb785d') {
         handBatch.add('characterDetail', [-.079, y, -.114], [.048, .020, .084], [.1, 0, -.18], skin);
       handBatch.add('characterDetail', [-.024, .091, -.075], [.041, .035, .088], [0, -.18, 0], skin);
     }
-    hand.add(handBatch.mesh()); upper.add(ub.mesh()); forearm.add(fb.mesh()); torso.add(upper, forearm, hand);
-    arms.push({ side, shoulder, upper, forearm, hand, anchor, upperLength, lowerLength,
+    const handMesh = handBatch.mesh();
+    if (side < 0) handMesh.position.x = .105;
+    hand.add(handMesh); upper.add(ub.mesh()); forearm.add(fb.mesh()); torso.add(upper, forearm, hand);
+    arms.push({ side, shoulder, upper, forearm, hand, handMesh, anchor, upperLength, lowerLength,
       wrist: new THREE.Vector3(), direction: new THREE.Vector3(), bend: new THREE.Vector3(), elbow: new THREE.Vector3(),
       segment: new THREE.Vector3(), glideTarget: new THREE.Vector3(side * .70, 2.29, -.17) });
   }
@@ -609,10 +625,28 @@ export function buildPirate(palette, color = '#eb785d') {
       legs[i].knee.rotation.x = -Math.max(0, -step) * .76 * locomotion * (1 - glideBlend) - .17 * glideBlend - .36 * knockBlend;
     }
     const pitch = THREE.MathUtils.clamp(Number.isFinite(player.pitch) ? player.pitch : 0, -1.2, 1.2);
-    weaponRig.position.set(.40 - aiming * .035, .59 + aiming * .07 - reloadBlend * .16 - knockBlend * .13,
-      -.34 - aiming * .065 + recoil * .10 + reloadBlend * .10);
-    weaponRig.rotation.set(pitch + recoil * .13 + reloadBlend * .54 - knockBlend * .3,
-      -.18 * reloadBlend, -.47 * reloadBlend);
+    const handling = WEAPON_HANDLING[equipped], steepness = Math.abs(Math.sin(pitch));
+    weaponRig.position.set(handling.stance[0],
+      handling.stance[1] + aiming * .035 + Math.max(0, Math.sin(pitch)) * .045 - Math.min(0, Math.sin(pitch)) * .10 - reloadBlend * .035 - knockBlend * .035,
+      handling.stance[2] - steepness * .055 + Math.min(0, Math.sin(pitch)) * .22 + recoil * .025 - reloadBlend * .025);
+    // Supported reload tilt and modest recoil keep the stock away from the face.
+    weaponRig.rotation.set(pitch + recoil * .055 + reloadBlend * .08 - knockBlend * .05,
+      .015 * reloadBlend, -.10 * Math.sin(pitch) * reloadBlend);
+    for (const arm of arms) {
+      arm.anchor.position.fromArray(arm.side < 0 ? handling.left : handling.right);
+      arm.anchor.rotation.set(0, 0, arm.side < 0 ? handling.supportRoll : -.04);
+    }
+    // Move the gun a few centimetres into the intersection of the two reachable
+    // wrist spheres, rather than stretching the character's arms to meet it.
+    for (let pass = 0; pass < 4; pass++) {
+      weaponRig.updateMatrix();
+      for (const arm of arms) {
+        arm.wrist.copy(arm.anchor.position).applyMatrix4(weaponRig.matrix);
+        arm.direction.copy(arm.wrist).sub(arm.shoulder);
+        const reach = arm.direction.length(), maximum = arm.upperLength + arm.lowerLength - .025;
+        if (reach > maximum) weaponRig.position.addScaledVector(arm.direction, -(reach - maximum) / reach);
+      }
+    }
     weaponRig.updateMatrix();
     glider.visible = falling; glider.rotation.z = Math.sin(time * 1.8) * .018;
     if (falling) {
@@ -629,16 +663,27 @@ export function buildPirate(palette, color = '#eb785d') {
       arm.wrist.copy(falling ? arm.glideTarget : arm.anchor.position);
       arm.wrist.applyMatrix4(falling ? gliderToTorso : weaponRig.matrix);
       arm.hand.position.copy(arm.wrist);
-      if (falling) arm.hand.rotation.set(0, arm.side * .2, arm.side * -.45);
-      else arm.hand.quaternion.copy(weaponRig.quaternion);
+      if (falling) {
+        arm.hand.rotation.set(0, arm.side * .2, arm.side * -.45);
+        // Center the actual palm around the glider handle; the extended
+        // sideways wrist used to cup a rifle is only part of the gun grip.
+        arm.handMesh.position.set(arm.side < 0 ? -.045 : .004, arm.side < 0 ? -.039 : -.016, arm.side < 0 ? 0 : .082);
+      } else {
+        arm.hand.quaternion.copy(weaponRig.quaternion).multiply(arm.anchor.quaternion);
+        arm.handMesh.position.set(arm.side < 0 ? .105 : 0, 0, 0);
+      }
       arm.direction.copy(arm.wrist).sub(arm.shoulder);
       const distance = Math.max(.001, arm.direction.length());
       arm.direction.multiplyScalar(1 / distance);
-      const reachScale = Math.max(1, distance / (arm.upperLength + arm.lowerLength - .015));
-      const upperLength = arm.upperLength * reachScale, lowerLength = arm.lowerLength * reachScale;
+      const upperLength = arm.upperLength, lowerLength = arm.lowerLength;
       const along = (upperLength * upperLength - lowerLength * lowerLength + distance * distance) / (2 * distance);
       const height = Math.sqrt(Math.max(0, upperLength * upperLength - along * along));
-      arm.bend.set(arm.side * .42, -1, .35);
+      // Forward is -Z. Outward elbows keep the entire forearm in front of the
+      // coat even when the support wrist crosses toward the firing shoulder.
+      if (falling) arm.bend.set(arm.side * .7, -.8, -.7);
+      else if (arm.side > 0) arm.bend.set(.82 - aiming * .08, -1.2, -.08);
+      else if (equipped === 'flintlock') arm.bend.set(-.65, -1.1, -.3);
+      else arm.bend.set(-.4 + aiming * .10, -.30, -2.8);
       arm.bend.addScaledVector(arm.direction, -arm.bend.dot(arm.direction)).normalize();
       arm.elbow.copy(arm.shoulder).addScaledVector(arm.direction, along).addScaledVector(arm.bend, height);
       arm.segment.copy(arm.elbow).sub(arm.shoulder);

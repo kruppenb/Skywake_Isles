@@ -19,6 +19,7 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
   let pulseJumpUntil = 0;
   let yaw = 0;
   let pitch = -.16;
+  let lookScale = 1;
 
   const on = (target, name, handler, options) => {
     target.addEventListener(name, handler, options);
@@ -28,6 +29,7 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
     keys.clear();
     leftHeld = false;
     dragging = false;
+    lookScale = 1;
     pulseJumpUntil = 0;
   };
   const canUse = (event) => enabled && !suspended && !isControl(event?.target) && !isControl(document.activeElement);
@@ -100,7 +102,7 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
   }
   function releaseMouseButton(event) {
     if (event.button === 0) leftHeld = false;
-    if (event.button === 2) dragging = false;
+    if (event.button === 2) { dragging = false; lookScale = 1; }
   }
   // Mouse events report each button in a chord. Canceling mouse pointerdown
   // suppresses mousemove, so keep mouse buttons and look on this one event path.
@@ -119,16 +121,16 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
     if (!enabled || suspended) return;
     // Recover if a release happened outside the browser before the mouse returned.
     if (!(event.buttons & 1)) leftHeld = false;
-    if (!(event.buttons & 2)) dragging = false;
+    if (!(event.buttons & 2)) { dragging = false; lookScale = 1; }
     if (!locked && !dragging) return;
     const dx = locked ? event.movementX : event.clientX - lastX;
     const dy = locked ? event.movementY : event.clientY - lastY;
     lastX = event.clientX;
     lastY = event.clientY;
     if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 800 || Math.abs(dy) > 800) return;
-    yaw -= dx * .0025;
+    yaw -= dx * .0025 * lookScale;
     yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-    pitch = clamp(pitch - dy * .0025, -1.15, 1.1);
+    pitch = clamp(pitch - dy * .0025 * lookScale, -1.15, 1.1);
   });
   on(canvas, 'contextmenu', (event) => event.preventDefault());
   on(document, 'pointerlockchange', () => {
@@ -154,6 +156,8 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
     get aiming() { return dragging; },
     get firing() { return enabled && !suspended && leftHeld && !isControl(document.activeElement); },
     get enabled() { return enabled; },
+    get active() { return enabled && !suspended && !isControl(document.activeElement); },
+    setLookScale(value) { lookScale = enabled && !suspended && dragging && Number.isFinite(value) ? clamp(value, .1, 1) : 1; },
     snapshot() {
       const allowed = enabled && !suspended && !isControl(document.activeElement);
       return {

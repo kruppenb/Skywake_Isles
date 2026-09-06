@@ -4,6 +4,7 @@ import { GameNet } from './net.js';
 import { createUI, findInteractable } from './ui.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
+import { weaponPresentation } from './weapon-presentation.js';
 import { SEED, SHRINES, CHESTS, heightAt } from '/shared/world.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES, weaponStats } from '/shared/weapons.js';
 
@@ -26,6 +27,7 @@ let receivedAt = performance.now();
 let lastFrame = performance.now();
 let lastUIAt = 0;
 let nextShotAt = 0;
+let pendingWeaponAction = null;
 let forcePrediction = false;
 let lastAuthoritativeMode = null;
 let lastVictoryRound = null;
@@ -79,7 +81,7 @@ input = createInput(canvas, {
   onMap() { if (!ui.paused && state.phase !== 'lobby' && state.phase !== 'victory') ui.setMap(!ui.mapOpen); },
   onGesture() { audio.unlock(); },
   onNotice(message) { ui.toast(message); },
-  onBlur() { sendNeutralInput(); },
+  onBlur() { ui.clearWeaponPresentation(); sendNeutralInput(); },
 }, { testMode });
 
 net = new GameNet({
@@ -116,6 +118,7 @@ net = new GameNet({
 });
 
 function resetToWelcome() {
+  pendingWeaponAction = null;
   simulationPlayer = null;
   renderedPlayer = null;
   prediction.reset();
@@ -156,6 +159,7 @@ function receiveState(next) {
   const now = performance.now();
   const stale = now - receivedAt > 500 || document.hidden;
   state = next;
+  pendingWeaponAction = null;
   receivedAt = now;
   renderClock.observe(state, now);
   const authoritative = state.players.find((entry) => entry.id === net.id);
@@ -302,6 +306,7 @@ function performAction(action) {
     if (target) { sendInput(base); net.action('interact', target.id); }
   } else if (WEAPON_ORDER.includes(action)) {
     if (!player.inventory?.[action]) { ui.toast(`Find the ${WEAPONS[action].name} in chests.`); input.focus(); return; }
+    if (action !== player.weapon) { pendingWeaponAction = 'swap'; input.setLookScale(1); ui.clearWeaponPresentation(); }
     net.action('swap', action);
     input.focus();
   } else if (action === 'heal') {
@@ -310,6 +315,7 @@ function performAction(action) {
     else net.action('heal');
     input.focus();
   } else if (['melee', 'reload', 'ping'].includes(action)) {
+    if (action === 'reload') { pendingWeaponAction = 'reload'; input.setLookScale(1); ui.clearWeaponPresentation(); }
     sendInput(base);
     net.action(action);
   }
@@ -352,10 +358,17 @@ function frame(now) {
     const view = {
       yaw: input.yaw, pitch: input.pitch,
       menu: !renderedPlayer || state.phase === 'victory',
-      aiming: input.aiming, time: now / 1000, locked: input.locked,
+      aiming: input.aiming && input.active && !!net.connected, time: now / 1000, locked: input.locked,
       snapshotTime: state.elapsed, snapshotReceivedAt: receivedAt, round: state.round,
     };
     const renderState = { ...state, elapsed };
+    const presentation = weaponPresentation(state, state.players.find((player) => player.id === net.id), {
+      elapsed, connected: !!net.connected, controlsActive: input.active && !document.hidden && document.hasFocus(),
+      menuOpen: ui.menuOpen, aiming: view.aiming, pendingAction: pendingWeaponAction,
+    });
+    view.scoped = presentation.scoped;
+    input.setLookScale(presentation.sensitivity);
+    ui.updateWeaponPresentation(presentation, renderedPlayer, view);
     world.update(dt, renderState, renderedPlayer, view);
     world.render();
     if (now - lastUIAt >= 65) {
@@ -383,7 +396,7 @@ canvas.addEventListener('webglcontextlost', (event) => {
 });
 document.addEventListener('visibilitychange', () => {
   resetPredictionHistory();
-  if (document.hidden) { input.reset(); sendNeutralInput(); }
+  if (document.hidden) { input.reset(); ui.clearWeaponPresentation(); sendNeutralInput(); }
   else lastFrame = performance.now();
 });
 

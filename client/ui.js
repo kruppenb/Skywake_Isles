@@ -455,13 +455,14 @@ export function createUI(callbacks = {}) {
     get quality() { return settings.quality; },
     get menuOpen() { return paused || mapOpen; },
     ready() { show(refs.boot, false); show(refs.topbar, true); show(refs.welcome, true); show(refs['welcome-caption'], true); },
-    fatal(message) { show(refs.boot, true); text(refs['boot-title'], 'The island needs a hand.'); text(refs['boot-message'], message); show(refs['boot-retry'], true); },
+    fatal(message) { api.clearWeaponPresentation(); show(refs.boot, true); text(refs['boot-title'], 'The island needs a hand.'); text(refs['boot-message'], message); show(refs['boot-retry'], true); },
     setJoining(value) {
       refs['join-button'].disabled = !!value; refs['join-button'].setAttribute('aria-busy', String(!!value));
       text(refs['join-button'].firstElementChild, value ? 'Finding your ship…' : 'Board the ship');
     },
     setError(message) { text(refs['join-error'], message); show(refs['join-error'], true); api.setJoining(false); },
     setConnection({ status, message }) {
+      if (status !== 'connected') api.clearWeaponPresentation();
       refs.connection.classList.toggle('offline', status === 'reconnecting' || status === 'connecting');
       refs.connection.classList.toggle('error', status === 'error');
       text(refs.connection.lastElementChild, message);
@@ -475,6 +476,7 @@ export function createUI(callbacks = {}) {
     setPaused(value) {
       if (!joined && value) return;
       paused = !!value;
+      if (paused) api.clearWeaponPresentation();
       if (paused) { mapOpen = false; show(refs['map-overlay'], false); }
       if (paused) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
       show(refs['pause-overlay'], paused); document.body.classList.toggle('paused', paused); document.body.classList.toggle('map-open', mapOpen);
@@ -484,11 +486,13 @@ export function createUI(callbacks = {}) {
     setMap(value) {
       if (!joined || paused) return;
       mapOpen = !!value; show(refs['map-overlay'], mapOpen); document.body.classList.toggle('map-open', mapOpen); mapAt = 0;
+      if (mapOpen) api.clearWeaponPresentation();
       if (mapOpen) { show(refs['discovery-notice'], false); show(refs['side-event-status'], false); }
       modalChanged();
       if (mapOpen) refs['close-map'].focus({ preventScroll: true });
     },
     reset() {
+      api.clearWeaponPresentation();
       joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = '';
       discoveryRound = null; clearDiscoveries();
       show(refs['pause-overlay'], false); show(refs['map-overlay'], false); show(refs['victory-overlay'], false); show(refs['join-error'], false);
@@ -507,6 +511,24 @@ export function createUI(callbacks = {}) {
     hit() { hitUntil = performance.now() + 150; },
     hurt() { refs.game.classList.remove('damage-flash'); void refs.game.offsetWidth; refs.game.classList.add('damage-flash'); },
     setTarget(enemy) { target = enemy; },
+    clearWeaponPresentation() {
+      show(refs['reload-ring'], false); show(refs['scope-overlay'], false); show(refs.reticle, false);
+      refs['reload-progress'].style.strokeDashoffset = '100';
+      document.body.classList.remove('scoped');
+    },
+    updateWeaponPresentation(presentation, player, view) {
+      show(refs['reload-ring'], presentation.reloading);
+      refs['reload-progress'].style.strokeDashoffset = String((1 - presentation.reloadProgress) * 100);
+      show(refs['scope-overlay'], presentation.scoped);
+      document.body.classList.toggle('scoped', presentation.scoped);
+      show(refs.reticle, presentation.active && !presentation.scoped);
+      refs.reticle.classList.toggle('scatter', player?.weapon === 'scatter');
+      refs.reticle.classList.toggle('reloading', presentation.reloading);
+      show(refs['look-hint'], presentation.active && (!view.locked || player?.weapon === 'longshot'));
+      text(refs['look-hint'], presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
+        : player?.weapon === 'longshot' ? 'Hold right mouse to scope Longshot · R reload · Esc menu'
+          : 'Click to aim · Hold right mouse to look · R reload · Esc menu');
+    },
     update(state, player, world, view) {
       const now = performance.now();
       joined = !!player;
@@ -619,7 +641,6 @@ export function createUI(callbacks = {}) {
       }
       text(refs['equipped-name'], `${RARITIES[player.rarity]?.name || 'Common'} ${WEAPONS[player.weapon]?.name || 'Flintlock'}`);
       refs['equipped-name'].style.color = RARITIES[player.rarity]?.color || RARITIES.common.color;
-      refs.reticle.classList.toggle('scatter', player.weapon === 'scatter');
       const heal = Math.max(0, Math.ceil(player.healUntil - state.elapsed));
       text(refs['heal-label'], heal ? `Heal ready in ${heal}s` : 'Healing pulse'); refs['heal-button'].classList.toggle('ready', !heal); refs['heal-button'].disabled = !!heal || downed;
       show(refs['knocked-banner'], downed);
@@ -629,8 +650,6 @@ export function createUI(callbacks = {}) {
       const interact = findInteractable(state, player);
       show(refs['interact-hint'], !!interact && !downed);
       if (interact) { text(refs['interact-hint'].lastElementChild, interact.label); refs['interact-hint'].style.borderColor = interact.color || '#ffd16c'; }
-      show(refs.reticle, player.mode === 'ground' && !downed && !paused && !mapOpen);
-      show(refs['look-hint'], !view.locked && !paused && !mapOpen);
       refs['hit-marker'].classList.toggle('active', now < hitUntil);
       const boss = state.enemies.find((enemy) => enemy.id === state.bossId && enemy.hp > 0);
       show(refs['boss-health'], state.phase === 'finale' && !!boss);

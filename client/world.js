@@ -4,7 +4,8 @@ import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../sha
 import { makePalette, GeoBatch, buildGalleon, buildPirate, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
-import { cameraTravel } from './camera.js';
+import { cameraTravel, scopeCameraPose } from './camera.js';
+import { SCOPE_FOV } from './weapon-presentation.js';
 import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
 import { SIDE_EVENTS, SIDE_EVENT_COLOR } from '../shared/side-events.js';
@@ -568,7 +569,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       model.group.userData.movementSpeed = model.speed;
       model.animate(time, model.speed, player, { dt, aiming: isLocal && !!view.aiming, elapsed });
       model.lastPose = { ...player }; model.generation = sample?.generation;
-      model.group.visible = !player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0;
+      model.group.visible = !(isLocal && view.scoped) && (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
     }
     for (const [id, model] of players) if (!seen.has(id)) { disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
   }
@@ -683,7 +684,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       desiredCamera.set(-122 * Math.cos(orbit) + 174 * Math.sin(orbit), 105 + Math.sin(t * .09) * 2.3, 174 * Math.cos(orbit) + 122 * Math.sin(orbit));
       cameraTarget.set(6, 18, 4);
       camera.position.lerp(desiredCamera, cameraReady ? 1 - Math.exp(-dt * 2) : 1); camera.lookAt(cameraTarget);
-      camera.fov = smooth(camera.fov, 53, dt * 3);
+      camera.fov = latestView.scoped ? 53 : smooth(camera.fov, 53, dt * 3);
+    } else if (view.scoped) {
+      const pose = scopeCameraPose(player, view.yaw, view.pitch);
+      camera.position.set(pose.origin.x, pose.origin.y, pose.origin.z);
+      direction.set(pose.direction.x, pose.direction.y, pose.direction.z);
+      cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
+      camera.fov = reducedMotionPreference.matches ? SCOPE_FOV : camera.fov + (SCOPE_FOV - camera.fov) * (1 - Math.exp(-dt * 12));
     } else {
       const yaw = Number.isFinite(view.yaw) ? view.yaw : player.yaw || 0, pitch = clamp(Number.isFinite(view.pitch) ? view.pitch : player.pitch || -.15, -1.25, 1.1);
       direction.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
@@ -717,15 +724,16 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       if (safeFraction < 1) desiredCamera.lerpVectors(anchor, desiredCamera, safeFraction);
       desiredCamera.y = Math.max(desiredCamera.y, heightAt(desiredCamera.x, desiredCamera.z) + 1.25);
       if (player.mode === 'aboard') desiredCamera.y = Math.max(desiredCamera.y, player.y + 1.6);
-      const snap = !cameraReady || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu;
+      const snap = !cameraReady || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu || latestView.scoped;
       camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 18));
       // Center ray is exactly input direction, including after collision.
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
-      camera.fov = smooth(camera.fov, view.aiming ? AIM_GAMEPLAY_FOV : player.mode === 'gliding' ? GLIDING_FOV : NORMAL_GAMEPLAY_FOV, dt * 8);
-      if (Math.hypot(player.x - sun.target.position.x, player.z - sun.target.position.z) > 8) {
-        sun.target.position.set(player.x, 0, player.z); sun.position.set(player.x - 60, 130, player.z + 70);
-        sun.target.updateMatrixWorld();
-      }
+      const targetFov = view.aiming ? AIM_GAMEPLAY_FOV : player.mode === 'gliding' ? GLIDING_FOV : NORMAL_GAMEPLAY_FOV;
+      camera.fov = latestView.scoped ? targetFov : smooth(camera.fov, targetFov, dt * 8);
+    }
+    if (!menu && Math.hypot(player.x - sun.target.position.x, player.z - sun.target.position.z) > 8) {
+      sun.target.position.set(player.x, 0, player.z); sun.position.set(player.x - 60, 130, player.z + 70);
+      sun.target.updateMatrixWorld();
     }
     if (ship.sails) {
       const fade = !menu && player.mode === 'aboard' && camera.position.y - player.y > 5;

@@ -4,7 +4,7 @@ import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTrac
 import { shipAt } from '../shared/world.js';
 import * as THREE from 'three';
 import { makePalette, buildPirate, buildWeapon } from '../client/models.js';
-import { WEAPON_ORDER } from '../shared/weapons.js';
+import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { findInteractable } from '../client/ui.js';
 import { BUILDINGS, buildingWorldPoint } from '../shared/exploration.js';
 import { heightAt } from '../shared/world.js';
@@ -144,6 +144,97 @@ test('all five gun models expose distinct silhouettes and live muzzle sockets ac
     }
   }
   assert.equal(signatures.size, 5, 'each gun has a different physical envelope');
+});
+
+// Test the rendered geometry against the coat's softly squared cross-section,
+// rather than checking pose constants or permitting the arm solver to stretch.
+function coatClearance(point, padding = 0) {
+  const rings = [[-.12, .34, .235], [.13, .35, .24], [.48, .425, .28], [.76, .455, .265], [.88, .34, .21]];
+  if (point.y < rings[0][0] || point.y > rings.at(-1)[0]) return Infinity;
+  const index = rings.findIndex(ring => ring[0] >= point.y), a = rings[Math.max(0, index - 1)], b = rings[index];
+  const t = (point.y - a[0]) / (b[0] - a[0] || 1);
+  const width = THREE.MathUtils.lerp(a[1], b[1], t) + padding, depth = THREE.MathUtils.lerp(a[2], b[2], t) + padding;
+  return (Math.abs(point.x) / width) ** (2 / .78) + (Math.abs(point.z) / depth) ** (2 / .78);
+}
+
+function minimumMeshClearance(mesh, relativeTo, measure) {
+  const transform = relativeTo.matrixWorld.clone().invert().multiply(mesh.matrixWorld);
+  const vertices = mesh.geometry.attributes.position, point = new THREE.Vector3();
+  let minimum = Infinity;
+  for (let i = 0; i < vertices.count; i++) minimum = Math.min(minimum, measure(point.fromBufferAttribute(vertices, i).applyMatrix4(transform)));
+  return minimum;
+}
+
+test('gun grips stay attached with fixed arm lengths and body clearance through combat and glide poses', () => {
+  const model = buildPirate(makePalette()), torso = model.group.getObjectByName('pirate-upper-body');
+  const head = model.group.getObjectByName('pirate-head');
+  const arms = ['left', 'right'].map(side => ({ side,
+    upper: model.group.getObjectByName(`${side}-upper-arm`), forearm: model.group.getObjectByName(`${side}-forearm`),
+    hand: model.group.getObjectByName(`${side}-hand`), anchor: model.group.getObjectByName(`${side}-weapon-grip`),
+    glide: model.group.getObjectByName(`${side}-glider-grip`),
+  }));
+  for (const weapon of WEAPON_ORDER) for (const aiming of [false, true]) {
+    for (const pitch of [-1.2, -1.15, -.6, 0, .6, 1.1, 1.2]) {
+      for (const state of ['idle', 'moving', 'reload-start', 'reload', 'reload-end', 'recoil', 'knocked', 'gliding']) {
+        const reloading = state.startsWith('reload'), progress = state === 'reload-start' ? .15 : state === 'reload-end' ? .85 : .5;
+        const player = { weapon, pitch, mode: state === 'gliding' ? 'gliding' : 'ground', knockedUntil: state === 'knocked' ? 20 : 0,
+          reloadUntil: reloading ? 10 + WEAPONS[weapon].reload * (1 - progress) : 0 };
+        const context = `${weapon}, ${state}, pitch ${pitch}, aiming ${aiming}`;
+        for (let frame = 0; frame < 40; frame++) model.animate(10 + frame / 60, state === 'moving' ? 8 : 0, player, { dt: 1 / 60, elapsed: 10, aiming });
+        if (state === 'recoil') { model.fire(weapon); model.animate(11, 0, player, { dt: 0, elapsed: 10, aiming }); }
+        model.group.updateMatrixWorld(true);
+        for (const arm of arms) {
+          near(arm.upper.position.distanceTo(arm.forearm.position), .52, `${context}: ${arm.side} upper arm`);
+          near(arm.forearm.position.distanceTo(arm.hand.position), .57, `${context}: ${arm.side} forearm`);
+          near(arm.upper.scale.y, 1, `${context}: sleeve never stretches`);
+          near(arm.forearm.scale.y, 1, `${context}: wrist never stretches`);
+          const socket = state === 'gliding' ? arm.glide : arm.anchor;
+          near(arm.hand.getWorldPosition(new THREE.Vector3()).distanceTo(socket.getWorldPosition(new THREE.Vector3())), 0, `${context}: grip contact`);
+          for (let sample = 0; sample <= 12; sample++) {
+            const point = arm.forearm.position.clone().lerp(arm.hand.position, sample / 12);
+            assert.ok(coatClearance(point, .10) >= 1, `${context}: ${arm.side} forearm radius clears coat`);
+          }
+          assert.ok(minimumMeshClearance(arm.forearm.children[0], torso, coatClearance) >= 1, `${context}: actual ${arm.side} forearm mesh clears coat`);
+          if (state === 'gliding') {
+            const palm = arm.side === 'left' ? new THREE.Vector3(.045, .039, 0) : new THREE.Vector3(-.004, .016, -.082);
+            arm.hand.children[0].localToWorld(palm);
+            near(palm.distanceTo(arm.glide.getWorldPosition(new THREE.Vector3())), 0, `${context}: physical palm surrounds glider handle`);
+          }
+        }
+        const gun = model.group.getObjectByName(`${state === 'gliding' ? 'stowed' : 'held'}-${weapon}`).children[0];
+        assert.ok(minimumMeshClearance(gun, torso, coatClearance) >= 1, `${context}: actual gun mesh clears coat`);
+        const faceClearance = minimumMeshClearance(gun, head, point => point.y > -.17 && point.y < .45
+          ? (point.x / .33) ** 2 + ((point.z + .02) / .28) ** 2 : Infinity);
+        assert.ok(faceClearance >= 1, `${context}: gun stays outside face and cheek envelope`);
+        assert.ok(model.getMuzzle().toArray().every(Number.isFinite), `${context}: muzzle remains finite`);
+      }
+    }
+  }
+});
+
+test('distinct support grips touch gun surfaces and firing elbows hang below the shoulder', () => {
+  const model = buildPirate(makePalette()), grips = new Set(), triangle = new THREE.Triangle(), nearest = new THREE.Vector3();
+  for (const weapon of WEAPON_ORDER) {
+    for (let frame = 0; frame < 40; frame++) model.animate(1, 0, { weapon, mode: 'ground', pitch: 0 }, { dt: 1 / 60, aiming: true });
+    model.group.updateMatrixWorld(true);
+    const gun = model.group.getObjectByName(`held-${weapon}`).children[0], vertices = gun.geometry.attributes.position;
+    grips.add(model.group.getObjectByName('left-weapon-grip').position.toArray().join(':'));
+    for (const side of ['left', 'right']) {
+      const hand = model.group.getObjectByName(`${side}-hand`), palm = side === 'left' ? new THREE.Vector3(.045, .039, 0) : new THREE.Vector3(-.004, .016, -.082);
+      gun.worldToLocal(hand.children[0].localToWorld(palm));
+      let distance = Infinity;
+      for (let i = 0; i < vertices.count; i += 3) {
+        triangle.a.fromBufferAttribute(vertices, i); triangle.b.fromBufferAttribute(vertices, i + 1); triangle.c.fromBufferAttribute(vertices, i + 2);
+        distance = Math.min(distance, triangle.closestPointToPoint(palm, nearest).distanceTo(palm));
+      }
+      assert.ok(distance < .07, `${weapon}: ${side} palm actually meets the grip or fore-end, distance ${distance}`);
+    }
+    for (const side of weapon === 'flintlock' ? ['left', 'right'] : ['right']) {
+      const elbow = model.group.getObjectByName(`${side}-forearm`), shoulder = model.group.getObjectByName(`${side}-upper-arm`);
+      assert.ok(elbow.position.y < shoulder.position.y - .20, `${weapon}: ${side} elbow is lowered`);
+    }
+  }
+  assert.equal(grips.size, 5, 'pistol wrap and fore-end placements are specific to each weapon');
 });
 
 test('loot prompts include rarity, favor reachable pickups, and never pass through building walls', () => {

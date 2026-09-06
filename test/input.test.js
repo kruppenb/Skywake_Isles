@@ -149,3 +149,30 @@ test('five fixed number slots dispatch once and stay inactive behind menus and t
   document.activeElement = canvas;
   assert.equal(actions.length, 5);
 });
+
+test('scope sensitivity scales both look paths and right release restores normal locked look', t => {
+  const { input, mouse, document, canvas, emit } = fixture(t);
+  mouse.down(2); input.setLookScale(.35);
+  mouse.move(100, 40);
+  assert.ok(Math.abs(input.yaw + .0875) < 1e-9); assert.ok(Math.abs(input.pitch + .195) < 1e-9);
+  document.pointerLockElement = canvas; emit(document, 'pointerlockchange');
+  mouse.down(0); mouse.up(0);
+  mouse.move(200, 100, { movementX: 20, movementY: 10 });
+  assert.ok(Math.abs(input.yaw + .105) < 1e-9); assert.ok(Math.abs(input.pitch + .20375) < 1e-9);
+  mouse.up(2); mouse.move(200, 100, { movementX: 20, movementY: 10 });
+  assert.ok(Math.abs(input.yaw + .155) < 1e-9); assert.ok(Math.abs(input.pitch + .22875) < 1e-9);
+});
+
+test('scope sensitivity resets with blur, menu suspension, disabled controls and lost release', t => {
+  const { input, mouse, window, emit } = fixture(t);
+  const interruptions = [() => emit(window, 'blur'), () => { input.setSuspended(true); input.setSuspended(false); },
+    () => { input.setEnabled(false); input.setEnabled(true); }, () => mouse.move(0, 0, { buttons: 0 })];
+  for (const interrupt of interruptions) {
+    mouse.down(2); input.setLookScale(.35); interrupt();
+    assert.equal(input.aiming, false);
+    mouse.up(2); mouse.down(2);
+    const before = input.yaw; mouse.move(20, 0);
+    assert.ok(Math.abs(input.yaw - before + .05) < 1e-9);
+    mouse.up(2);
+  }
+});
