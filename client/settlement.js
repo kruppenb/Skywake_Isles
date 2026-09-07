@@ -104,6 +104,8 @@ export function buildSettlements(palette) {
   const palmheartTent = new GeoBatch(palette), palmheartWork = new GeoBatch(palette);
   const cinderworksFallback = new THREE.Group(); cinderworksFallback.name = 'cinderworks-original-exterior'; group.add(cinderworksFallback);
   const cinderworksWork = new GeoBatch(palette), cinderworksAuthored = new Set(['cinder-forge']);
+  const moonwatchFallback = new THREE.Group(); moonwatchFallback.name = 'moonwatch-original-exterior'; group.add(moonwatchFallback);
+  const moonwatchDome = new GeoBatch(palette), moonwatchWork = new GeoBatch(palette);
   let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
@@ -218,7 +220,7 @@ export function buildSettlements(palette) {
   for (const building of BUILDINGS) {
     if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
-    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : building.id === 'trailkeepers-tent' ? palmheartTent : ['fruit-stall', 'sailcloth-stall'].includes(building.id) ? tideglassStalls : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
+    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : building.id === 'trailkeepers-tent' ? palmheartTent : building.id === 'moonwatch-dome' ? moonwatchDome : ['fruit-stall', 'sailcloth-stall'].includes(building.id) ? tideglassStalls : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
     let high = ground, low = ground;
     for (let i = 0; i < 12; i++) {
@@ -457,7 +459,9 @@ export function buildSettlements(palette) {
         crate(f, 1.0, .45, .6);
       }, 0, null, false, cinderworksWork);
     } else if (place.kind === 'observatory') {
-      site(place, -3, -8, 1.4, telescope, -.75);
+      // The observatory's work sites keep their original positions and radii; the
+      // authored kit replaces their geometry and hides this batch when ready.
+      site(place, -3, -8, 1.4, telescope, -.75, null, false, moonwatchWork);
       site(place, 0, 9, 2.0, f => {
         f.add('cylinder', [0, .34, 0], [1.65, .68, 1.65], [0, 0, 0], '#aaaabd');
         f.add('cylinder', [0, .71, 0], [1.62, .10, 1.62], [0, 0, 0], '#527b89');
@@ -467,8 +471,8 @@ export function buildSettlements(palette) {
           f.line([Math.sin(a) * .43, .79, Math.cos(a) * .43], [Math.sin(a) * 1.40, .79, Math.cos(a) * 1.40], .027, C.cream);
         }
         f.add('cone', [0, 1.04, 0], [.17, .56, .17], [0, 0, -.22], C.gold);
-      });
-      site(place, -8, 3, 1.1, f => { crate(f, 0, 0, .9); f.add('box', [0, .88, 0], [.65, .1, .49], [0, .16, 0], '#ab99c1'); f.add('box', [.12, 1.0, .08], [.55, .09, .42], [0, -.12, 0], C.cream); });
+      }, 0, null, false, moonwatchWork);
+      site(place, -8, 3, 1.1, f => { crate(f, 0, 0, .9); f.add('box', [0, .88, 0], [.65, .1, .49], [0, .16, 0], '#ab99c1'); f.add('box', [.12, 1.0, .08], [.55, .09, .42], [0, -.12, 0], C.cream); }, 0, null, false, moonwatchWork);
     } else if (place.kind === 'boatyard') {
       site(place, 10, 2, 3.5, f => {
         // Open ribs, keel and a few fitted strakes make a visibly unfinished hull.
@@ -501,12 +505,13 @@ export function buildSettlements(palette) {
       f.add('box', [0, 2.33, 0], [.40, .53, .4], [0, .3, 0], C.cream);
       f.add('cone', [0, 2.67, 0], [.35, .25, .35], [0, 0, 0], C.teal);
       for (const y of [2.06, 2.60]) f.add('box', [0, y, 0], [.44, .07, .44], [0, .3, 0], C.wood);
-    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : place.kind === 'camp' ? palmheartWork : place.kind === 'forge' ? cinderworksWork : null);
+    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : place.kind === 'camp' ? palmheartWork : place.kind === 'forge' ? cinderworksWork : place.kind === 'observatory' ? moonwatchWork : null);
   }
   const saltwindWorkMesh = saltwindWork.mesh(); saltwindWorkMesh.name = 'saltwind-harbor-original-work-sites'; saltwindFallback.add(saltwindWorkMesh);
   const driftwoodWorkMesh = driftwoodWork.mesh(); driftwoodWorkMesh.name = 'driftwood-yard-original-work-sites'; driftwoodFallback.add(driftwoodWorkMesh);
   const palmheartWorkMesh = palmheartWork.mesh(); palmheartWorkMesh.name = 'palmheart-camp-original-work-sites'; palmheartFallback.add(palmheartWorkMesh);
   const cinderworksWorkMesh = cinderworksWork.mesh(); cinderworksWorkMesh.name = 'cinderworks-original-work-sites'; cinderworksFallback.add(cinderworksWorkMesh);
+  const moonwatchWorkMesh = moonwatchWork.mesh(); moonwatchWorkMesh.name = 'moonwatch-original-work-sites'; moonwatchFallback.add(moonwatchWorkMesh);
 
   for (const place of POINTS_OF_INTEREST) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
@@ -516,6 +521,7 @@ export function buildSettlements(palette) {
   const fieldFallbackMesh = farmField.mesh(); fieldFallbackMesh.name = 'windward-farm-original-crops-hay-fences'; farmFallback.add(fieldFallbackMesh);
   const stallsFallbackMesh = tideglassStalls.mesh(); stallsFallbackMesh.name = 'tideglass-market-original-stalls'; tideglassFallback.add(stallsFallbackMesh);
   const tentFallbackMesh = palmheartTent.mesh(); tentFallbackMesh.name = 'trailkeepers-tent-original'; palmheartFallback.add(tentFallbackMesh);
+  const domeFallbackMesh = moonwatchDome.mesh(); domeFallbackMesh.name = 'moonwatch-dome-original'; moonwatchFallback.add(domeFallbackMesh);
 
   // Fishing skiffs lie beyond the actual scalloped shoreline, at sea level.
   for (let i = 0; i < 2; i++) {
@@ -623,6 +629,8 @@ export function buildSettlements(palette) {
       interior.roof = kit?.buildings[interior.building.id].roof ?? interior.originalRoof;
     }
     cinderworksFallback.visible = !kit;
+  }, setMoonwatchKit(kit = null) {
+    moonwatchFallback.visible = !kit;
   } };
 }
 

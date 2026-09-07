@@ -6,6 +6,7 @@ import { saltwindHarborWeight } from '../shared/saltwind-harbor.js';
 import { driftwoodYardWeight, sunwakeStrandWeight } from '../shared/driftwood-yard.js';
 import { palmheartWeight } from '../shared/palmheart-camp.js';
 import { cinderworksWeight } from '../shared/cinderworks.js';
+import { moonwatchWeight } from '../shared/moonwatch.js';
 
 // Profiles are immutable color strings/scalars. Each frame is evaluated from
 // the captured island baseline, never from another area's last frame.
@@ -22,10 +23,13 @@ export const ENVIRONMENT_PROFILES = Object.freeze({
   palmheartCamp: Object.freeze({ sky: '#a9d3c4', skyStrength: .7, fog: '#b3cfb6', near: 80, far: 360, skyLight: '#d3e9cf', groundLight: '#4f6b45', ambient: 1.75, sunColor: '#f4ecc0', sunIntensity: 2.3 }),
   // Ash-hazy amber over the forge: closer dusty fog and ember-brown bounce.
   cinderworks: Object.freeze({ sky: '#e4c6a2', skyStrength: .72, fog: '#d6bc9f', near: 80, far: 360, skyLight: '#f0dcc4', groundLight: '#7c5a48', ambient: 1.75, sunColor: '#f9d8ab', sunIntensity: 2.4 }),
+  // Cool luminous night-watch light: lilac sky, closer lilac fog, pale cyan-lilac
+  // sky light over a lilac-grey ground bounce and a slightly cooler sun.
+  moonwatch: Object.freeze({ sky: '#c9c4e6', skyStrength: .70, fog: '#c2c0dc', near: 82, far: 365, skyLight: '#dfe6f4', groundLight: '#6f6a8a', ambient: 1.70, sunColor: '#eeeaf2', sunIntensity: 2.30 }),
 });
 
-export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false, driftwoodReady = false, palmheartReady = false, cinderworksReady = false } = {}) {
-  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0 };
+export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false, driftwoodReady = false, palmheartReady = false, cinderworksReady = false, moonwatchReady = false } = {}) {
+  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0, moonwatch: 0 };
   const oldWatch = oldWatchReady ? (farmReady ? oldWatchRadialWeight : oldWatchWeight)(player.x, player.z) : 0;
   const windwardFarm = farmReady ? windwardFarmWeight(player.x, player.z) : 0;
   const tideglassMarket = tideglassReady ? tideglassWeight(player.x, player.z) : 0;
@@ -34,9 +38,11 @@ export function environmentWeights(player, { oldWatchReady = false, farmReady = 
   const sunwakeStrand = driftwoodReady ? sunwakeStrandWeight(player.x, player.z) : 0;
   const palmheartCamp = palmheartReady ? palmheartWeight(player.x, player.z) : 0;
   const cinderworks = cinderworksReady ? cinderworksWeight(player.x, player.z) : 0;
-  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor + driftwoodYard + sunwakeStrand + palmheartCamp + cinderworks, scale = total > 1 ? 1 / total : 1;
+  const moonwatch = moonwatchReady ? moonwatchWeight(player.x, player.z) : 0;
+  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor + driftwoodYard + sunwakeStrand + palmheartCamp + cinderworks + moonwatch, scale = total > 1 ? 1 / total : 1;
   return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale,
-    saltwindHarbor: saltwindHarbor * scale, driftwoodYard: driftwoodYard * scale, sunwakeStrand: sunwakeStrand * scale, palmheartCamp: palmheartCamp * scale, cinderworks: cinderworks * scale };
+    saltwindHarbor: saltwindHarbor * scale, driftwoodYard: driftwoodYard * scale, sunwakeStrand: sunwakeStrand * scale, palmheartCamp: palmheartCamp * scale,
+    cinderworks: cinderworks * scale, moonwatch: moonwatch * scale };
 }
 
 export function createEnvironmentLighting({ scene, hemisphere = null, sun = null }) {
@@ -67,6 +73,6 @@ export function createEnvironmentLighting({ scene, hemisphere = null, sun = null
   }
   return { update(player, ready) { if (!disposed) apply(environmentWeights(player, ready)); }, dispose() {
     if (disposed) return;
-    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0 }); disposed = true;
+    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0, moonwatch: 0 }); disposed = true;
   } };
 }
