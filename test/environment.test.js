@@ -10,7 +10,7 @@ import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
 import { heightAt, seededRandom, SEED } from '../shared/world.js';
 import { makePalette } from '../client/models.js';
 
-const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb', marketURL = '/assets/tideglass-market/kit.glb', harborURL = '/assets/saltwind-harbor/kit.glb', yardURL = '/assets/driftwood-yard/kit.glb', campURL = '/assets/palmheart-camp/kit.glb';
+const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb', marketURL = '/assets/tideglass-market/kit.glb', harborURL = '/assets/saltwind-harbor/kit.glb', yardURL = '/assets/driftwood-yard/kit.glb', campURL = '/assets/palmheart-camp/kit.glb', forgeURL = '/assets/cinderworks/kit.glb';
 function fixture() {
   const counts = { geometry: 0, material: 0, texture: 0, image: 0 };
   const geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
@@ -104,7 +104,7 @@ test('lighting normalizes overlaps and retains the farm exclusion only when the 
   const ready = environmentWeights(player, { oldWatchReady: true, farmReady: true });
   assert.ok(ready.oldWatch > 0 && ready.windwardFarm > 0); assert.equal(ready.baseline, 0);
   assert.ok(Math.abs(ready.oldWatch + ready.windwardFarm - 1) < 1e-12);
-  assert.deepEqual(environmentWeights({ x: NaN, z: 0 }, { oldWatchReady: true, farmReady: true }), { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0 });
+  assert.deepEqual(environmentWeights({ x: NaN, z: 0 }, { oldWatchReady: true, farmReady: true }), { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0 });
   let last;
   for (let i = 0; i <= 330; i++) {
     const t = i / 330, weights = environmentWeights({ x: -66 + 24 * t, z: -76 + 23 * t }, { oldWatchReady: true, farmReady: true });
@@ -118,7 +118,7 @@ test('coastal lighting depends on market readiness and restores the baseline abo
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#85d9ee'); scene.fog = new THREE.Fog('#a2def0', 180, 610);
   const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2), sun = new THREE.DirectionalLight('#fff0d0', 2.7);
   const lighting = createEnvironmentLighting({ scene, hemisphere, sun }), ready = { oldWatchReady: true, farmReady: true, tideglassReady: true };
-  const player = { x: -29, z: 39, mode: 'ground' }, baseline = { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0 };
+  const player = { x: -29, z: 39, mode: 'ground' }, baseline = { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0, cinderworks: 0 };
   assert.deepEqual(environmentWeights(player, { ...ready, tideglassReady: false }), baseline);
   assert.deepEqual(environmentWeights(player, ready), { ...baseline, baseline: 0, tideglassMarket: 1 });
   lighting.update(player, ready); assert.equal(hemisphere.intensity, 1.85); assert.equal(sun.intensity, 2.5); assert.equal(scene.fog.near, 95); assert.equal(scene.fog.far, 405);
@@ -154,7 +154,7 @@ test('terrain helper follows the actual grid, including off-diagonal barycentric
 });
 
 test('registered island payload and texture costs match the committed kit manifests', async () => {
-  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL, marketURL, harborURL, yardURL, campURL]);
+  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL, marketURL, harborURL, yardURL, campURL, forgeURL]);
   for (const [url, cost] of Object.entries(ENVIRONMENT_ASSET_REGISTRY)) {
     const manifest = JSON.parse(await readFile(new URL('../client' + url.replace('/kit.glb', '/manifest.json'), import.meta.url)));
     const bytes = await readFile(new URL('../client' + url, import.meta.url));

@@ -12,6 +12,8 @@ Saltwind Harbor's net-house, tavern and fisher's cottage with their sidings, roo
 
 Palmheart Camp and Wilds' thatched trailkeepers' tent, stone fire ring, drying rack and gear, lashed lantern post, buttressed jungle hardwoods, jungle palms and elephant-ear ground plants are original geometry from `tools/build-palmheart-camp.py`. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, bark, earth and foliage textures with recorded linear material tints; it adds no texture images or external art dependencies. Bram, the chests, the shrine, its gateway and the camp's fallback geometry remain part of the original game.
 
+The Cinderworks' basalt-and-iron forge with its rusted sheet roof, flue hood, chimney stack and hanging hammer sign, the anvil block, quench trough, ore pile, coal bin, slag heap, iron lantern post, columnar basalt outcrop, boulders, cinder clumps and ember crystals are original geometry from `tools/build-cinderworks.py`. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, earth, iron and amber materials with recorded linear material tints; it adds no texture images or external art dependencies. Sula, the chests, the caldera crescent, the ember shard, the ember motes and the forge's fallback geometry remain part of the original game.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |

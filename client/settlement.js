@@ -102,6 +102,8 @@ export function buildSettlements(palette) {
   const driftwoodWork = new GeoBatch(palette), driftwoodAuthored = new Set(['timber-shed', 'shipwrights-cottage']);
   const palmheartFallback = new THREE.Group(); palmheartFallback.name = 'palmheart-camp-original-exterior'; group.add(palmheartFallback);
   const palmheartTent = new GeoBatch(palette), palmheartWork = new GeoBatch(palette);
+  const cinderworksFallback = new THREE.Group(); cinderworksFallback.name = 'cinderworks-original-exterior'; group.add(cinderworksFallback);
+  const cinderworksWork = new GeoBatch(palette), cinderworksAuthored = new Set(['cinder-forge']);
   let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
@@ -118,7 +120,8 @@ export function buildSettlements(palette) {
   function furnishedBuilding(building) {
     const { x, z, yaw, width, depth, wallHeight, height, color, roofColor, kind } = building;
     const pilot = building.id === 'watch-barracks', farm = building.id === 'harvest-barn', market = building.id === 'market-cottage';
-    const harbor = saltwindAuthored.has(building.id), yard = driftwoodAuthored.has(building.id), authored = pilot || farm || market || harbor || yard;
+    const harbor = saltwindAuthored.has(building.id), yard = driftwoodAuthored.has(building.id), forge = cinderworksAuthored.has(building.id);
+    const authored = pilot || farm || market || harbor || yard || forge;
     const floorY = heightAt(x, z), source = authored ? new GeoBatch(palette) : batches.get(building.poiId), firstVertex = source.positions.length;
     const upper = Array.from({ length: 4 }, () => new GeoBatch(palette)), roof = new GeoBatch(palette);
     const faces = upper.map(batch => frame(batch, x, floorY, z, yaw));
@@ -200,7 +203,7 @@ export function buildSettlements(palette) {
       face.userData.normal = normals[index]; wallsMesh.add(face);
     });
     wallsMesh.name = building.id + '-cutaway-walls'; roofMesh.name = building.id + '-cutaway-roof';
-    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : market ? tideglassFallback : harbor ? saltwindFallback : yard ? driftwoodFallback : group;
+    const exterior = pilot ? oldWatchFallback : farm ? farmFallback : market ? tideglassFallback : harbor ? saltwindFallback : yard ? driftwoodFallback : forge ? cinderworksFallback : group;
     exterior.add(wallsMesh, roofMesh);
     if (authored) { const base = source.mesh(); base.name = building.id + '-original-base'; exterior.add(base); }
     interiors.push({ building, walls: wallsMesh, roof: roofMesh, originalWalls: wallsMesh, originalRoof: roofMesh });
@@ -448,11 +451,11 @@ export function buildSettlements(palette) {
         f.line([-.56, 1.07, -.08], [.16, 1.09, .13], .047, C.wood);
         f.add('box', [-.53, 1.13, -.08], [.18, .19, .37], [0, -.15, 0], C.metal);
         barrel(f, -.90, .77, .75);
-      });
+      }, 0, null, false, cinderworksWork);
       site(place, 7, -1, 1.7, f => {
         for (let i = 0; i < 8; i++) f.add('pebble', [(i % 3 - 1) * .55, .25 + Math.floor(i / 3) * .2, (Math.floor(i / 3) - 1) * .47], [.43, .34, .4], [.2, i, 0], i % 3 ? '#625e5c' : '#b57e57');
         crate(f, 1.0, .45, .6);
-      });
+      }, 0, null, false, cinderworksWork);
     } else if (place.kind === 'observatory') {
       site(place, -3, -8, 1.4, telescope, -.75);
       site(place, 0, 9, 2.0, f => {
@@ -498,11 +501,12 @@ export function buildSettlements(palette) {
       f.add('box', [0, 2.33, 0], [.40, .53, .4], [0, .3, 0], C.cream);
       f.add('cone', [0, 2.67, 0], [.35, .25, .35], [0, 0, 0], C.teal);
       for (const y of [2.06, 2.60]) f.add('box', [0, y, 0], [.44, .07, .44], [0, .3, 0], C.wood);
-    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : place.kind === 'camp' ? palmheartWork : null);
+    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : place.kind === 'camp' ? palmheartWork : place.kind === 'forge' ? cinderworksWork : null);
   }
   const saltwindWorkMesh = saltwindWork.mesh(); saltwindWorkMesh.name = 'saltwind-harbor-original-work-sites'; saltwindFallback.add(saltwindWorkMesh);
   const driftwoodWorkMesh = driftwoodWork.mesh(); driftwoodWorkMesh.name = 'driftwood-yard-original-work-sites'; driftwoodFallback.add(driftwoodWorkMesh);
   const palmheartWorkMesh = palmheartWork.mesh(); palmheartWorkMesh.name = 'palmheart-camp-original-work-sites'; palmheartFallback.add(palmheartWorkMesh);
+  const cinderworksWorkMesh = cinderworksWork.mesh(); cinderworksWorkMesh.name = 'cinderworks-original-work-sites'; cinderworksFallback.add(cinderworksWorkMesh);
 
   for (const place of POINTS_OF_INTEREST) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
@@ -613,6 +617,12 @@ export function buildSettlements(palette) {
     driftwoodFallback.visible = !kit;
   }, setPalmheartCampKit(kit = null) {
     palmheartFallback.visible = !kit;
+  }, setCinderworksKit(kit = null) {
+    for (const interior of interiors.filter(item => cinderworksAuthored.has(item.building.id))) {
+      interior.walls = kit?.buildings[interior.building.id].walls ?? interior.originalWalls;
+      interior.roof = kit?.buildings[interior.building.id].roof ?? interior.originalRoof;
+    }
+    cinderworksFallback.visible = !kit;
   } };
 }
 
