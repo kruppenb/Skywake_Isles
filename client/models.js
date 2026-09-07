@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
+import { sampleReloadAnimation } from './reload-animation.js';
 
 // Original, compact geometry for Skywake Isles. A part is baked into a colored
 // batch whenever it does not need to articulate; the island is not a forest of
@@ -326,6 +327,7 @@ const WEAPON_HANDLING = {
 
 export function buildWeapon(palette, kind = 'flintlock') {
   const b = new GeoBatch(palette), scatter = kind === 'scatter';
+  const moving = new GeoBatch(palette), actionOrigin = new THREE.Vector3();
   const wood = '#825635', brass = '#e9b855', steel = '#334b5a';
   const stock = flatShape([[-.09, .29], [-.13, .10], [-.105, -.48], [-.07, -.68], [.075, -.68], [.11, -.48], [.13, .10], [.09, .29]], .13);
   b.add(stock, [0, -.055, 0], [1, 1, 1], [0, 0, 0], wood); stock.dispose();
@@ -383,26 +385,37 @@ export function buildWeapon(palette, kind = 'flintlock') {
       b.add('characterCylinder', [0, .48, -.40], [.115, .78, .115], [Math.PI / 2, 0, 0], '#233f50');
       for (const z of [-.01, -.80]) b.add('characterCylinder', [0, .48, z], [.137, .09, .137], [Math.PI / 2, 0, 0], brass);
       b.add('characterCylinder', [0, .48, -.851], [.107, .012, .107], [Math.PI / 2, 0, 0], '#78d5df');
-      b.line([.15, .19, .02], [.23, .28, .02], .035, brass);
-      b.add('characterSphere', [.23, .28, .02], [.055, .055, .055], [0, 0, 0], steel);
+      moving.line([.15, .19, .02], [.23, .28, .02], .035, brass);
+      moving.add('characterSphere', [.23, .28, .02], [.055, .055, .055], [0, 0, 0], steel);
     } else {
       // Box magazine on the compact repeater, narrow curved feed on the carbine.
-      b.add('box', [0, -.28, -.17], [repeater ? .15 : .11, repeater ? .29 : .36, .16], [repeater ? -.10 : -.25, 0, 0], repeater ? '#277f80' : steel);
-      b.add('box', [0, -.43, -.13], [.17, .045, .19], [-.10, 0, 0], brass);
+      moving.add('box', [0, -.28, -.17], [repeater ? .15 : .11, repeater ? .29 : .36, .16], [repeater ? -.10 : -.25, 0, 0], repeater ? '#277f80' : steel);
+      moving.add('box', [0, -.43, -.13], [.17, .045, .19], [-.10, 0, 0], brass);
       b.add('box', [0, .32, -.15], [.06, .06, .13], [0, 0, 0], brass);
       b.add('box', [0, .25, barrelEnd + .17], [.035, .085, .07], [0, 0, 0], brass);
     }
     muzzle = new THREE.Vector3(0, .17, barrelEnd - .07);
   }
+  if (scatter || kind === 'flintlock') {
+    // A small hinged loading gate gives the breech action a visible mechanism.
+    // The dark receiver backing remains solid when the gate opens.
+    actionOrigin.set(-.115, .125, -.10);
+    b.add('box', [-.112, .07, -.10], [.018, .105, .22], [0, 0, 0], '#213946');
+    moving.add('box', [0, -.055, 0], [.025, .105, .22], [0, 0, 0], brass);
+  }
   const group = new THREE.Group(); group.name = 'held-' + kind;
   const mesh = b.mesh(); mesh.name = kind + '-wood-brass-steel'; group.add(mesh);
+  const action = moving.mesh(); action.name = 'reload-action-' + kind; action.position.copy(actionOrigin); group.add(action);
   const socket = new THREE.Object3D(); socket.name = 'muzzle-' + kind; socket.position.copy(muzzle); group.add(socket);
   const stowed = new THREE.Group(); stowed.name = 'stowed-' + kind;
   const stowedMesh = new THREE.Mesh(mesh.geometry, mesh.material);
   stowedMesh.castShadow = stowedMesh.receiveShadow = true; stowed.add(stowedMesh);
+  const stowedAction = new THREE.Mesh(action.geometry, action.material);
+  stowedAction.name = 'stowed-reload-action-' + kind; stowedAction.position.copy(actionOrigin);
+  stowedAction.castShadow = stowedAction.receiveShadow = true; stowed.add(stowedAction);
   const stowedSocket = new THREE.Object3D(); stowedSocket.name = 'stowed-muzzle-' + kind;
   stowedSocket.position.copy(muzzle); stowed.add(stowedSocket);
-  return { group, stowed, socket, stowedSocket };
+  return { group, stowed, socket, stowedSocket, action, actionOrigin };
 }
 
 export function buildPirate(palette, color = '#eb785d') {
@@ -587,8 +600,9 @@ export function buildPirate(palette, color = '#eb785d') {
     color: '#183c46', transparent: true, opacity: .20, depthWrite: false }));
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);
 
-  let phase = 0, locomotion = 0, aiming = 0, glideBlend = 0, knockBlend = 0, reloadBlend = 0, recoil = 0;
+  let phase = 0, locomotion = 0, aiming = 0, glideBlend = 0, knockBlend = 0, recoil = 0;
   let equipped = 'flintlock', stowed = false;
+  let previousReloadUntil = 0, cancelledReloadUntil = 0;
   const gliderToTorso = new THREE.Matrix4();
   const ease = (a, target, rate, dt) => THREE.MathUtils.lerp(a, target, 1 - Math.exp(-rate * dt));
   function animate(time = 0, speed = 0, player = {}, pose = {}) {
@@ -596,7 +610,18 @@ export function buildPirate(palette, color = '#eb785d') {
     const elapsed = Number.isFinite(pose.elapsed) ? pose.elapsed : 0;
     const falling = player.mode === 'gliding', knocked = !!player.knockedUntil;
     const motion = falling || knocked ? 0 : THREE.MathUtils.clamp(Number.isFinite(speed) ? speed : 0, 0, 18);
-    equipped = WEAPONS[player.weapon] ? player.weapon : 'flintlock'; stowed = falling;
+    const nextWeapon = WEAPONS[player.weapon] ? player.weapon : 'flintlock';
+    const reloadUntil = Number.isFinite(player.reloadUntil) ? player.reloadUntil : 0;
+    const canReload = player.mode === 'ground' && !knocked && player.online !== false && !(Number.isFinite(player.hp) && player.hp <= 0);
+    // A stale deadline must not transfer to a newly equipped gun or resume
+    // after a glide/knock/offline transition. A new server deadline releases it.
+    if (reloadUntil !== previousReloadUntil) cancelledReloadUntil = 0;
+    if (!canReload || (nextWeapon !== equipped && reloadUntil === previousReloadUntil)) cancelledReloadUntil = reloadUntil;
+    previousReloadUntil = reloadUntil;
+    equipped = nextWeapon; stowed = falling;
+    const handling = WEAPON_HANDLING[equipped];
+    const reload = sampleReloadAnimation(equipped, reloadUntil, elapsed, handling.left,
+      canReload && reloadUntil !== cancelledReloadUntil);
     // Distance-driven phase never changes frequency discontinuously at sprint.
     phase = (phase + motion * dt * 1.22) % (Math.PI * 2);
     locomotion = ease(locomotion, Math.min(1, motion / 4.5), 13, dt);
@@ -604,10 +629,6 @@ export function buildPirate(palette, color = '#eb785d') {
     aiming = ease(aiming, pose.aiming ? 1 : 0, 16, dt);
     glideBlend = ease(glideBlend, falling ? 1 : 0, 10, dt);
     knockBlend = ease(knockBlend, knocked ? 1 : 0, 10, dt);
-    const reloadDuration = WEAPONS[equipped].reload;
-    const reloadProgress = THREE.MathUtils.clamp(1 - ((player.reloadUntil || 0) - elapsed) / reloadDuration, 0, 1);
-    const reloadTarget = player.reloadUntil > elapsed ? Math.sin(reloadProgress * Math.PI) : 0;
-    reloadBlend = ease(reloadBlend, reloadTarget, 18, dt);
     recoil *= Math.exp(-18 * dt);
     figure.position.y = -.20 * knockBlend;
     figure.rotation.set(.07 * glideBlend, 0, .32 * knockBlend);
@@ -624,17 +645,22 @@ export function buildPirate(palette, color = '#eb785d') {
       legs[i].hip.rotation.z = (i ? -.055 : .055) * glideBlend;
       legs[i].knee.rotation.x = -Math.max(0, -step) * .76 * locomotion * (1 - glideBlend) - .17 * glideBlend - .36 * knockBlend;
     }
-    const pitch = THREE.MathUtils.clamp(Number.isFinite(player.pitch) ? player.pitch : 0, -1.2, 1.2);
-    const handling = WEAPON_HANDLING[equipped], steepness = Math.abs(Math.sin(pitch));
-    weaponRig.position.set(handling.stance[0],
-      handling.stance[1] + aiming * .035 + Math.max(0, Math.sin(pitch)) * .045 - Math.min(0, Math.sin(pitch)) * .10 - reloadBlend * .035 - knockBlend * .035,
-      handling.stance[2] - steepness * .055 + Math.min(0, Math.sin(pitch)) * .22 + recoil * .025 - reloadBlend * .025);
-    // Supported reload tilt and modest recoil keep the stock away from the face.
-    weaponRig.rotation.set(pitch + recoil * .055 + reloadBlend * .08 - knockBlend * .05,
-      .015 * reloadBlend, -.10 * Math.sin(pitch) * reloadBlend);
+    const pitch = THREE.MathUtils.lerp(THREE.MathUtils.clamp(Number.isFinite(player.pitch) ? player.pitch : 0, -1.2, 1.2), reload.pitch, reload.work);
+    const steepness = Math.abs(Math.sin(pitch));
+    const magazineReload = equipped === 'repeater' || equipped === 'burst';
+    weaponRig.position.set(THREE.MathUtils.lerp(handling.stance[0], equipped === 'flintlock' ? .34 : magazineReload ? .47 : .55, reload.work),
+      handling.stance[1] + aiming * .035 * (1 - reload.work) + Math.max(0, Math.sin(pitch)) * .045 - Math.min(0, Math.sin(pitch)) * .10 + reload.work * (magazineReload ? .03 : -.09) - knockBlend * .035,
+      handling.stance[2] - steepness * .055 + Math.min(0, Math.sin(pitch)) * .22 + recoil * .025 - reload.work * (equipped === 'longshot' ? .18 : .09));
+    // Work at chest height, then smoothly restore the live aim angle. This
+    // keeps a high/low camera pitch from swinging the receiver through the face.
+    weaponRig.rotation.set(pitch + recoil * .055 * (1 - reload.work) - knockBlend * .05,
+      .30 * reload.work, reload.roll * reload.work);
     for (const arm of arms) {
-      arm.anchor.position.fromArray(arm.side < 0 ? handling.left : handling.right);
-      arm.anchor.rotation.set(0, 0, arm.side < 0 ? handling.supportRoll : -.04);
+      // left-weapon-grip is the current wrist target: fore-end at rest, loading
+      // mechanism during a reload. The right socket always stays on the grip.
+      arm.anchor.position.fromArray(arm.side < 0 ? reload.hand : handling.right);
+      arm.anchor.rotation.set(0, arm.side < 0 ? -.12 * reload.release : 0,
+        arm.side < 0 ? handling.supportRoll * (1 - reload.release) : -.04);
     }
     // Move the gun a few centimetres into the intersection of the two reachable
     // wrist spheres, rather than stretching the character's arms to meet it.
@@ -656,9 +682,20 @@ export function buildPirate(palette, color = '#eb785d') {
     for (const [kind, weapon] of weaponEntries) {
       weapon.group.visible = !stowed && equipped === kind;
       weapon.stowed.visible = stowed && equipped === kind;
+      // Reset every mesh, including hidden guns, so cancelled reloads and swaps
+      // cannot leave a magazine or bolt displaced when that gun is used again.
+      weapon.action.position.copy(weapon.actionOrigin); weapon.action.rotation.set(0, 0, 0);
+      if (kind !== equipped) continue;
+      if (kind === 'flintlock' || kind === 'scatter') weapon.action.rotation.z = -1.15 * reload.open;
+      else if (kind === 'longshot') weapon.action.position.z += .17 * reload.open;
+      else {
+        weapon.action.position.x -= .26 * reload.open;
+        weapon.action.position.y -= .12 * reload.open;
+        if (kind === 'burst') weapon.action.position.z += .04 * reload.open;
+      }
     }
-    // Each wrist follows its gun socket exactly. Elbows solve the braced pose;
-    // gait, aim, swap, recoil and reload cannot swing a hand away from the gun.
+    // Each wrist follows its current target exactly. Fixed-length IK supports
+    // the gun with the right hand while the left performs the loading action.
     for (const arm of arms) {
       arm.wrist.copy(falling ? arm.glideTarget : arm.anchor.position);
       arm.wrist.applyMatrix4(falling ? gliderToTorso : weaponRig.matrix);

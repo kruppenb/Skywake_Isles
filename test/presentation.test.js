@@ -165,7 +165,7 @@ function minimumMeshClearance(mesh, relativeTo, measure) {
   return minimum;
 }
 
-test('gun grips stay attached with fixed arm lengths and body clearance through combat and glide poses', () => {
+test('gun and reload wrist targets preserve fixed arm lengths and body clearance through combat and glide poses', () => {
   const model = buildPirate(makePalette()), torso = model.group.getObjectByName('pirate-upper-body');
   const head = model.group.getObjectByName('pirate-head');
   const arms = ['left', 'right'].map(side => ({ side,
@@ -175,8 +175,8 @@ test('gun grips stay attached with fixed arm lengths and body clearance through 
   }));
   for (const weapon of WEAPON_ORDER) for (const aiming of [false, true]) {
     for (const pitch of [-1.2, -1.15, -.6, 0, .6, 1.1, 1.2]) {
-      for (const state of ['idle', 'moving', 'reload-start', 'reload', 'reload-end', 'recoil', 'knocked', 'gliding']) {
-        const reloading = state.startsWith('reload'), progress = state === 'reload-start' ? .15 : state === 'reload-end' ? .85 : .5;
+      for (const state of ['idle', 'moving', ...[.05, .10, .15, .18, .25, .34, .49, .58, .67, .76, .85, .94].map(p => `reload-${p}`), 'recoil', 'knocked', 'gliding']) {
+        const reloading = state.startsWith('reload-'), progress = reloading ? Number(state.slice(7)) : 0;
         const player = { weapon, pitch, mode: state === 'gliding' ? 'gliding' : 'ground', knockedUntil: state === 'knocked' ? 20 : 0,
           reloadUntil: reloading ? 10 + WEAPONS[weapon].reload * (1 - progress) : 0 };
         const context = `${weapon}, ${state}, pitch ${pitch}, aiming ${aiming}`;
@@ -201,11 +201,14 @@ test('gun grips stay attached with fixed arm lengths and body clearance through 
             near(palm.distanceTo(arm.glide.getWorldPosition(new THREE.Vector3())), 0, `${context}: physical palm surrounds glider handle`);
           }
         }
-        const gun = model.group.getObjectByName(`${state === 'gliding' ? 'stowed' : 'held'}-${weapon}`).children[0];
-        assert.ok(minimumMeshClearance(gun, torso, coatClearance) >= 1, `${context}: actual gun mesh clears coat`);
-        const faceClearance = minimumMeshClearance(gun, head, point => point.y > -.17 && point.y < .45
-          ? (point.x / .33) ** 2 + ((point.z + .02) / .28) ** 2 : Infinity);
-        assert.ok(faceClearance >= 1, `${context}: gun stays outside face and cheek envelope`);
+        const gun = model.group.getObjectByName(`${state === 'gliding' ? 'stowed' : 'held'}-${weapon}`);
+        gun.traverse(mesh => {
+          if (!mesh.isMesh) return;
+          assert.ok(minimumMeshClearance(mesh, torso, coatClearance) >= 1, `${context}: actual ${mesh.name || 'stowed gun'} mesh clears coat`);
+          const faceClearance = minimumMeshClearance(mesh, head, point => point.y > -.17 && point.y < .45
+            ? (point.x / .33) ** 2 + ((point.z + .02) / .28) ** 2 : Infinity);
+          assert.ok(faceClearance >= 1, `${context}: ${mesh.name || 'stowed gun'} stays outside face and cheek envelope`);
+        });
         assert.ok(model.getMuzzle().toArray().every(Number.isFinite), `${context}: muzzle remains finite`);
       }
     }
