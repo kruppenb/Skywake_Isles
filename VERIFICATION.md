@@ -1,3 +1,57 @@
+# Streaming defense waves and staged finale verification
+
+September 6, 2026. Optional-defense waves now surge in rank by rank instead
+of landing as one clump, and the final battle at Tideglass Lighthouse runs
+in stages (shrine crabs, Tidebreaker elites, the Tempest Crab, with a fourth
+stage reserved in `shared/finale.js`). Commit 65c9438, measured on this
+Windows host.
+
+- Spread: before the change `sideEventSpawns` placed almost every attacker at
+  the 3 m spacing minimum (nearest-neighbour averages of 3.0 to 3.9 m at the
+  market and farm for crews of 3 and 5) within 6 to 9 m of depth, so a wave
+  reached the supplies inside about two seconds. Afterwards all 45 site, crew
+  and wave combinations still return a full roster; nearest-neighbour
+  averages are 5.1 to 10.0 m at the market and farm and 4.0 to 5.8 m at the
+  yard's short surf-line front, wave depth spans 7.5 m (solo wave 1) to
+  22.5 m (wave 3), ranks carry delays of 0, 2.5, 5, 7.5 and 10 s, spitters
+  form a rank behind the crabs, and Tidebreakers carry the latest delay in
+  every final wave. Pending ranks count toward `remaining` until they surface.
+- Finale placement: stage 1 forms 9 (solo) to 21 (five pirates) crabs 38 to
+  48 m from the beacon within 17 degrees of each shrine's bearing (palm 173,
+  ember -55, moon 20 degrees), 4.8 to 12 m apart, each with a direct or
+  validated two-leg route to the dais; shrine directions surge 1.5 s apart
+  and ranks 2.5 s apart. Stage 2 places 2 to 4 Tidebreakers 32 to 37 m out on
+  the same bearings, and stage 3 spawns the Tempest Crab 16 m in front of
+  the beacon as before. Boss minions leave with the boss.
+- Tests: `npm test` ran 202 tests in 176.5 s with no failures, including the
+  new `test/finale.test.js` (7 cases), a rank-by-rank streaming test in the
+  side-events suite, and the five-client network test, which now fights all
+  three stages and reached victory. The scripted market defenses complete in
+  37.6 s (solo) and 49.1 s (five pirates) of the 180 s deadline.
+  `git diff --check` is clean.
+- Docker was rebuilt from a git-archive export of 65c9438 (project
+  `skywake-isles`, so the `skywake-isles_skywake-data` volume was kept) and
+  reported healthy; the five changed browser assets (`/ui.js`, `/main.js`,
+  `/world.js`, `/shared/finale.js`, `/shared/side-events.js`) returned
+  HTTP 200 with `no-cache` and matched the commit after CRLF normalization.
+- Live check on the deployed build: a Playwright-driven browser pirate
+  ("Watcher") boarded as captain with four Node bot pirates, set sail, walked
+  from the strand to the lighthouse dais, and watched the bots light the
+  beacon. The server emitted the stage-1 `finale` event with 21 spawns
+  (delays 0 to 8 s from palm, ember and moon), stage 2 with 4 Tidebreakers
+  and stage 3 with the boss. A DOM recorder sampling the HUD every 250 ms
+  (installed a few seconds into stage 1, so it caught that stage's "Stage 1
+  cleared! The next stage gathers…" panel text but not its banner) recorded
+  the banner "Tideglass Lighthouse / Stage 2 / 4 Tidebreakers march on the
+  lighthouse!" beside its notice toast, the objective panel "Defend the
+  lighthouse — Stage 2/3 · 4 Tidebreakers remaining" counting down, then
+  "Stage 3 / The Tempest Crab has the final compass!" in the gold final
+  style while the boss bar fell from 100% to 12% and the panel switched to
+  "Free the compass". Victory arrived after 118 s of voyage with 98 kills and
+  498 pearls; the page logged no console errors, warnings or runtime errors,
+  and up to 32 simultaneous effects (delayed spawn foam plus tracers)
+  rendered.
+
 # Walkover chests and salvaged duplicates verification
 
 September 6, 2026. Chests now open when a living, landed pirate walks within
