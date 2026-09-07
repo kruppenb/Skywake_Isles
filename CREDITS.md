@@ -10,6 +10,8 @@ Tideglass Market's limewashed cottage, closed Haven huts, teal tiled roofs, timb
 
 Saltwind Harbor's net-house, tavern and fisher's cottage with their sidings, roofs, work sites, pilings and lobster pots are original geometry from `tools/build-saltwind-harbor.py`. Driftwood Yard and Sunwake Strand's timber shed, shipwright's cottage, ribbed hull frame, timber stacks, lantern post, sawhorses, pitch kettle, pier sections, banner poles, pennant line, landing crates, driftwood logs and signpost are original geometry from `tools/build-driftwood-yard.py`. Both ship their deterministic Blender source, GLB and validation manifest together and borrow the same original stone, timber, slate, earth and foliage textures with recorded linear material tints; neither adds texture images or external art dependencies. Existing residents, furniture, palms, boats, gameplay layout and the landing dock's fallback geometry remain part of the original game.
 
+Palmheart Camp and Wilds' thatched trailkeepers' tent, stone fire ring, drying rack and gear, lashed lantern post, buttressed jungle hardwoods, jungle palms and elephant-ear ground plants are original geometry from `tools/build-palmheart-camp.py`. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, bark, earth and foliage textures with recorded linear material tints; it adds no texture images or external art dependencies. Bram, the chests, the shrine, its gateway and the camp's fallback geometry remain part of the original game.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |

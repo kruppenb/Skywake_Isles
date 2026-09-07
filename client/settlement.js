@@ -100,6 +100,8 @@ export function buildSettlements(palette) {
   const saltwindWork = new GeoBatch(palette), saltwindAuthored = new Set(['net-house', 'saltwind-tavern', 'fishers-cottage']);
   const driftwoodFallback = new THREE.Group(); driftwoodFallback.name = 'driftwood-yard-original-exterior'; group.add(driftwoodFallback);
   const driftwoodWork = new GeoBatch(palette), driftwoodAuthored = new Set(['timber-shed', 'shipwrights-cottage']);
+  const palmheartFallback = new THREE.Group(); palmheartFallback.name = 'palmheart-camp-original-exterior'; group.add(palmheartFallback);
+  const palmheartTent = new GeoBatch(palette), palmheartWork = new GeoBatch(palette);
   let farmRotorIndex = -1, originalFarmRotor = null;
   const stats = { places: POINTS_OF_INTEREST.length, buildings: BUILDINGS.length, enterableBuildings: BUILDINGS.filter(b => b.enterable).length, residents: RESIDENTS.length, boats: 0, propClusters: 0 };
   const hemisphere = new THREE.SphereGeometry(1, 20, 9, 0, TAU, 0, Math.PI / 2);
@@ -213,7 +215,7 @@ export function buildSettlements(palette) {
   for (const building of BUILDINGS) {
     if (building.enterable) { furnishedBuilding(building); continue; }
     const { x, z, radius: r, height, yaw, kind, color, roofColor } = building;
-    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : ['fruit-stall', 'sailcloth-stall'].includes(building.id) ? tideglassStalls : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
+    const sourceBatch = building.id === 'signal-tower' ? oldWatchTower : building.id === 'windward-mill' ? farmMill : building.id === 'trailkeepers-tent' ? palmheartTent : ['fruit-stall', 'sailcloth-stall'].includes(building.id) ? tideglassStalls : batches.get(building.poiId), firstVertex = sourceBatch.positions.length;
     const ground = heightAt(x, z);
     let high = ground, low = ground;
     for (let i = 0; i < 12; i++) {
@@ -435,8 +437,8 @@ export function buildSettlements(palette) {
         for (const side of [-1, 1]) f.line([side * .45, .13, -.4], [-side * .45, .13, .4], .11, '#685343');
         f.add('cone', [0, .38, 0], [.3, .53, .3], [0, 0, 0], '#dfaa65');
         for (const side of [-1, 1]) f.line([side * 1.1, .3, -1.2], [side * 1.1, .3, 1.2], .22, C.wood);
-      });
-      site(place, -5, 7, 1.7, f => { crate(f, -.6, 0); barrel(f, .6, .1, .8); f.line([-1.2, 0, -.6], [-1.2, 3.0, -.6], .07, C.wood); hangingFlag(f, -1.2, 2.85, -.6, C.coral, 1.0); });
+      }, 0, null, false, palmheartWork);
+      site(place, -5, 7, 1.7, f => { crate(f, -.6, 0); barrel(f, .6, .1, .8); f.line([-1.2, 0, -.6], [-1.2, 3.0, -.6], .07, C.wood); hangingFlag(f, -1.2, 2.85, -.6, C.coral, 1.0, palmheartFallback); }, 0, null, false, palmheartWork);
     } else if (place.kind === 'forge') {
       site(place, -1, 3, 1.6, f => {
         f.add('cylinder', [0, .31, 0], [.63, .62, .63], [0, 0, 0], C.wood);
@@ -496,10 +498,11 @@ export function buildSettlements(palette) {
       f.add('box', [0, 2.33, 0], [.40, .53, .4], [0, .3, 0], C.cream);
       f.add('cone', [0, 2.67, 0], [.35, .25, .35], [0, 0, 0], C.teal);
       for (const y of [2.06, 2.60]) f.add('box', [0, y, 0], [.44, .07, .44], [0, .3, 0], C.wood);
-    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : null);
+    }, 0, place.id === 'old-watch' ? 'lantern' : null, false, place.kind === 'harbor' ? saltwindWork : place.kind === 'boatyard' ? driftwoodWork : place.kind === 'camp' ? palmheartWork : null);
   }
   const saltwindWorkMesh = saltwindWork.mesh(); saltwindWorkMesh.name = 'saltwind-harbor-original-work-sites'; saltwindFallback.add(saltwindWorkMesh);
   const driftwoodWorkMesh = driftwoodWork.mesh(); driftwoodWorkMesh.name = 'driftwood-yard-original-work-sites'; driftwoodFallback.add(driftwoodWorkMesh);
+  const palmheartWorkMesh = palmheartWork.mesh(); palmheartWorkMesh.name = 'palmheart-camp-original-work-sites'; palmheartFallback.add(palmheartWorkMesh);
 
   for (const place of POINTS_OF_INTEREST) {
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
@@ -508,6 +511,7 @@ export function buildSettlements(palette) {
   const millFallbackMesh = farmMill.mesh(); millFallbackMesh.name = 'windward-mill-original'; farmFallback.add(millFallbackMesh);
   const fieldFallbackMesh = farmField.mesh(); fieldFallbackMesh.name = 'windward-farm-original-crops-hay-fences'; farmFallback.add(fieldFallbackMesh);
   const stallsFallbackMesh = tideglassStalls.mesh(); stallsFallbackMesh.name = 'tideglass-market-original-stalls'; tideglassFallback.add(stallsFallbackMesh);
+  const tentFallbackMesh = palmheartTent.mesh(); tentFallbackMesh.name = 'trailkeepers-tent-original'; palmheartFallback.add(tentFallbackMesh);
 
   // Fishing skiffs lie beyond the actual scalloped shoreline, at sea level.
   for (let i = 0; i < 2; i++) {
@@ -607,6 +611,8 @@ export function buildSettlements(palette) {
       interior.roof = kit?.buildings[interior.building.id].roof ?? interior.originalRoof;
     }
     driftwoodFallback.visible = !kit;
+  }, setPalmheartCampKit(kit = null) {
+    palmheartFallback.visible = !kit;
   } };
 }
 

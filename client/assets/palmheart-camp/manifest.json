@@ -1,0 +1,418 @@
+{
+  "schemaVersion": 1,
+  "generator": "tools/build-palmheart-camp.py",
+  "seed": 512023,
+  "blenderVersion": "5.2.1 LTS",
+  "coordinateSystem": "Y-up, meters, +Z front",
+  "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
+  "file": "kit.glb",
+  "bytes": 2792952,
+  "sha256": "b11cb2b701f88e323cc9304f0f5abe79f4c0937a6e15b308c59efc8b042c42d5",
+  "dependencies": [
+    {
+      "url": "/assets/old-watch/kit.glb",
+      "sha256": "3fce2c1f50178bf0a681fdec6aafba86b98140cc108ce6ae522b45e6370f152b",
+      "ownership": "Shared cache owns original material textures and reusable props"
+    }
+  ],
+  "materialBindings": {
+    "watch_stone": {
+      "source": "watch_stone"
+    },
+    "aged_timber": {
+      "source": "aged_timber"
+    },
+    "forged_iron": {
+      "source": "forged_iron"
+    },
+    "recess_shadow": {
+      "source": "recess_shadow"
+    },
+    "lantern_amber": {
+      "source": "lantern_amber"
+    },
+    "needle_foliage": {
+      "source": "needle_foliage"
+    },
+    "jungle_hardwood": {
+      "source": "aged_timber",
+      "color": [
+        1.6,
+        1.15,
+        0.85
+      ],
+      "normalScale": 0.5
+    },
+    "palm_thatch": {
+      "source": "needle_foliage",
+      "color": [
+        3.0,
+        2.3,
+        1.0
+      ],
+      "normalScale": 0.6,
+      "doubleSided": true
+    },
+    "woven_mat": {
+      "source": "ground_earth",
+      "color": [
+        4.6,
+        3.9,
+        2.4
+      ],
+      "normalScale": 0.35
+    },
+    "hemp_rope": {
+      "source": "needle_foliage",
+      "color": [
+        2.6,
+        1.7,
+        1.1
+      ]
+    },
+    "canvas_flap": {
+      "source": "ground_earth",
+      "color": [
+        7.5,
+        7.0,
+        5.6
+      ],
+      "doubleSided": true
+    },
+    "charred_wood": {
+      "source": "aged_timber",
+      "color": [
+        0.45,
+        0.4,
+        0.36
+      ],
+      "normalScale": 0.3
+    },
+    "jungle_bark": {
+      "source": "pine_bark",
+      "color": [
+        1.35,
+        1.2,
+        1.05
+      ],
+      "normalScale": 0.8
+    },
+    "broad_leaf": {
+      "source": "needle_foliage",
+      "color": [
+        0.85,
+        1.35,
+        0.75
+      ],
+      "normalScale": 0.5,
+      "doubleSided": true
+    },
+    "palm_frond": {
+      "source": "needle_foliage",
+      "color": [
+        1.05,
+        1.45,
+        0.7
+      ],
+      "normalScale": 0.5,
+      "doubleSided": true
+    },
+    "elephant_ear": {
+      "source": "needle_foliage",
+      "color": [
+        0.75,
+        1.3,
+        0.68
+      ],
+      "normalScale": 0.5,
+      "doubleSided": true
+    }
+  },
+  "prefabs": {
+    "camp_lantern": {
+      "bounds": {
+        "min": [
+          -0.4,
+          -0.06,
+          -0.4
+        ],
+        "max": [
+          0.4,
+          2.7,
+          0.4
+        ]
+      },
+      "dimensions": [
+        0.8,
+        2.76,
+        0.8
+      ],
+      "horizontalRadius": 0.40366,
+      "triangles": 548,
+      "primitives": 7,
+      "materials": [
+        "forged_iron",
+        "hemp_rope",
+        "jungle_bark",
+        "lantern_amber",
+        "needle_foliage",
+        "palm_thatch",
+        "watch_stone"
+      ]
+    },
+    "elephant_ear_clump": {
+      "bounds": {
+        "min": [
+          -0.55874,
+          0.02101,
+          -0.59692
+        ],
+        "max": [
+          0.66114,
+          1.00134,
+          0.6588
+        ]
+      },
+      "dimensions": [
+        1.21988,
+        0.98033,
+        1.25572
+      ],
+      "horizontalRadius": 0.67414,
+      "triangles": 358,
+      "primitives": 1,
+      "materials": [
+        "elephant_ear"
+      ]
+    },
+    "fire_ring": {
+      "bounds": {
+        "min": [
+          -1.3224,
+          -0.032,
+          -1.43065
+        ],
+        "max": [
+          1.3,
+          1.348,
+          1.31481
+        ]
+      },
+      "dimensions": [
+        2.6224,
+        1.38,
+        2.74546
+      ],
+      "horizontalRadius": 1.62727,
+      "triangles": 988,
+      "primitives": 7,
+      "materials": [
+        "charred_wood",
+        "forged_iron",
+        "hemp_rope",
+        "jungle_hardwood",
+        "lantern_amber",
+        "needle_foliage",
+        "watch_stone"
+      ]
+    },
+    "gear_rack": {
+      "bounds": {
+        "min": [
+          -1.38302,
+          -0.05,
+          -1.24556
+        ],
+        "max": [
+          1.25312,
+          3.0375,
+          1.026
+        ]
+      },
+      "dimensions": [
+        2.63615,
+        3.0875,
+        2.27156
+      ],
+      "horizontalRadius": 1.48676,
+      "triangles": 1405,
+      "primitives": 7,
+      "materials": [
+        "aged_timber",
+        "canvas_flap",
+        "forged_iron",
+        "hemp_rope",
+        "jungle_hardwood",
+        "needle_foliage",
+        "watch_stone"
+      ]
+    },
+    "jungle_palm": {
+      "bounds": {
+        "min": [
+          -2.68947,
+          -0.19165,
+          -2.65819
+        ],
+        "max": [
+          2.9321,
+          9.27407,
+          2.98889
+        ]
+      },
+      "dimensions": [
+        5.62158,
+        9.46572,
+        5.64708
+      ],
+      "horizontalRadius": 3.05149,
+      "triangles": 2620,
+      "primitives": 2,
+      "materials": [
+        "jungle_bark",
+        "palm_frond"
+      ]
+    },
+    "jungle_tree_a": {
+      "bounds": {
+        "min": [
+          -2.89675,
+          -0.19,
+          -3.01823
+        ],
+        "max": [
+          3.0169,
+          7.91106,
+          2.79575
+        ]
+      },
+      "dimensions": [
+        5.91365,
+        8.10106,
+        5.81398
+      ],
+      "horizontalRadius": 3.30239,
+      "triangles": 9350,
+      "primitives": 3,
+      "materials": [
+        "broad_leaf",
+        "jungle_bark",
+        "jungle_hardwood"
+      ]
+    },
+    "jungle_tree_b": {
+      "bounds": {
+        "min": [
+          -3.34374,
+          -0.19,
+          -3.29743
+        ],
+        "max": [
+          3.29661,
+          10.31798,
+          3.23039
+        ]
+      },
+      "dimensions": [
+        6.64035,
+        10.50798,
+        6.52782
+      ],
+      "horizontalRadius": 3.46695,
+      "triangles": 10794,
+      "primitives": 3,
+      "materials": [
+        "broad_leaf",
+        "jungle_bark",
+        "jungle_hardwood"
+      ]
+    },
+    "trailkeepers_tent": {
+      "bounds": {
+        "min": [
+          -2.34065,
+          -0.5,
+          -2.50249
+        ],
+        "max": [
+          2.34288,
+          3.94478,
+          2.50249
+        ]
+      },
+      "dimensions": [
+        4.68353,
+        4.44478,
+        5.00497
+      ],
+      "horizontalRadius": 2.8344,
+      "triangles": 2768,
+      "primitives": 8,
+      "materials": [
+        "canvas_flap",
+        "hemp_rope",
+        "jungle_hardwood",
+        "needle_foliage",
+        "palm_thatch",
+        "recess_shadow",
+        "watch_stone",
+        "woven_mat"
+      ]
+    }
+  },
+  "textures": [],
+  "embeddedImageCount": 0,
+  "decodedTextureBytes": 0,
+  "propEnvelopes": {
+    "trailkeepers_tent": {
+      "maxRadius": 2.95,
+      "minY": -0.5,
+      "maxY": 4.1
+    },
+    "fire_ring": {
+      "maxRadius": 1.7,
+      "minY": -0.05,
+      "maxY": 1.55
+    },
+    "gear_rack": {
+      "maxRadius": 1.7,
+      "minY": -0.05,
+      "maxY": 3.1
+    },
+    "camp_lantern": {
+      "maxRadius": 0.5,
+      "minY": -0.06,
+      "maxY": 2.7
+    },
+    "jungle_tree_a": {
+      "maxRadius": 3.4,
+      "minY": -0.2,
+      "maxY": 9.0,
+      "trunkRadius": 0.4
+    },
+    "jungle_tree_b": {
+      "maxRadius": 3.8,
+      "minY": -0.2,
+      "maxY": 11.0,
+      "trunkRadius": 0.44
+    },
+    "jungle_palm": {
+      "maxRadius": 3.3,
+      "minY": -0.2,
+      "maxY": 9.5,
+      "trunkRadius": 0.32
+    },
+    "elephant_ear_clump": {
+      "maxRadius": 0.9,
+      "minY": 0.0,
+      "maxY": 1.1
+    }
+  },
+  "trunkRadii": {
+    "jungle_palm": 0.30465,
+    "jungle_tree_a": 0.37959,
+    "jungle_tree_b": 0.418
+  },
+  "totalTriangles": 28831,
+  "totalPrimitives": 38
+}

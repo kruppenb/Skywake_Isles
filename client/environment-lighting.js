@@ -4,6 +4,7 @@ import { windwardFarmWeight } from '../shared/windward-farm.js';
 import { tideglassWeight } from '../shared/tideglass-market.js';
 import { saltwindHarborWeight } from '../shared/saltwind-harbor.js';
 import { driftwoodYardWeight, sunwakeStrandWeight } from '../shared/driftwood-yard.js';
+import { palmheartWeight } from '../shared/palmheart-camp.js';
 
 // Profiles are immutable color strings/scalars. Each frame is evaluated from
 // the captured island baseline, never from another area's last frame.
@@ -16,19 +17,22 @@ export const ENVIRONMENT_PROFILES = Object.freeze({
   // Golden working light over the yard; the strand is the airiest of them all.
   driftwoodYard: Object.freeze({ sky: '#bde0e4', skyStrength: .7, fog: '#d2e4dc', near: 100, far: 420, skyLight: '#f2efe0', groundLight: '#a89a78', ambient: 2.0, sunColor: '#ffefc8', sunIntensity: 2.65 }),
   sunwakeStrand: Object.freeze({ sky: '#bfe6ee', skyStrength: .65, fog: '#d6ebe8', near: 110, far: 440, skyLight: '#f4f5ee', groundLight: '#b0aa8c', ambient: 2.1, sunColor: '#fff4d6', sunIntensity: 2.7 }),
+  // Humid and green-filtered under the canopy: closer fog, deep green bounce.
+  palmheartCamp: Object.freeze({ sky: '#a9d3c4', skyStrength: .7, fog: '#b3cfb6', near: 80, far: 360, skyLight: '#d3e9cf', groundLight: '#4f6b45', ambient: 1.75, sunColor: '#f4ecc0', sunIntensity: 2.3 }),
 });
 
-export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false, driftwoodReady = false } = {}) {
-  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0 };
+export function environmentWeights(player, { oldWatchReady = false, farmReady = false, tideglassReady = false, saltwindReady = false, driftwoodReady = false, palmheartReady = false } = {}) {
+  if (!player || player.mode === 'aboard') return { baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0 };
   const oldWatch = oldWatchReady ? (farmReady ? oldWatchRadialWeight : oldWatchWeight)(player.x, player.z) : 0;
   const windwardFarm = farmReady ? windwardFarmWeight(player.x, player.z) : 0;
   const tideglassMarket = tideglassReady ? tideglassWeight(player.x, player.z) : 0;
   const saltwindHarbor = saltwindReady ? saltwindHarborWeight(player.x, player.z) : 0;
   const driftwoodYard = driftwoodReady ? driftwoodYardWeight(player.x, player.z) : 0;
   const sunwakeStrand = driftwoodReady ? sunwakeStrandWeight(player.x, player.z) : 0;
-  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor + driftwoodYard + sunwakeStrand, scale = total > 1 ? 1 / total : 1;
+  const palmheartCamp = palmheartReady ? palmheartWeight(player.x, player.z) : 0;
+  const total = oldWatch + windwardFarm + tideglassMarket + saltwindHarbor + driftwoodYard + sunwakeStrand + palmheartCamp, scale = total > 1 ? 1 / total : 1;
   return { baseline: 1 - Math.min(1, total), oldWatch: oldWatch * scale, windwardFarm: windwardFarm * scale, tideglassMarket: tideglassMarket * scale,
-    saltwindHarbor: saltwindHarbor * scale, driftwoodYard: driftwoodYard * scale, sunwakeStrand: sunwakeStrand * scale };
+    saltwindHarbor: saltwindHarbor * scale, driftwoodYard: driftwoodYard * scale, sunwakeStrand: sunwakeStrand * scale, palmheartCamp: palmheartCamp * scale };
 }
 
 export function createEnvironmentLighting({ scene, hemisphere = null, sun = null }) {
@@ -59,6 +63,6 @@ export function createEnvironmentLighting({ scene, hemisphere = null, sun = null
   }
   return { update(player, ready) { if (!disposed) apply(environmentWeights(player, ready)); }, dispose() {
     if (disposed) return;
-    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0 }); disposed = true;
+    apply({ baseline: 1, oldWatch: 0, windwardFarm: 0, tideglassMarket: 0, saltwindHarbor: 0, driftwoodYard: 0, sunwakeStrand: 0, palmheartCamp: 0 }); disposed = true;
   } };
 }

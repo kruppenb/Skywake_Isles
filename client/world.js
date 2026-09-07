@@ -22,6 +22,8 @@ import { saltwindHarborWeight } from '../shared/saltwind-harbor.js';
 import { createSaltwindHarbor } from './saltwind-harbor.js';
 import { driftwoodWeight, SUNWAKE_LANDING_CRATE_CANDIDATES } from '../shared/driftwood-yard.js';
 import { createDriftwoodYard } from './driftwood-yard.js';
+import { palmheartWeight } from '../shared/palmheart-camp.js';
+import { createPalmheartCamp } from './palmheart-camp.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
 import { TERRAIN_GRID_STEP, TERRAIN_GRID_COUNT, TERRAIN_GRID_HALF } from './environment-geometry.js';
@@ -166,14 +168,14 @@ export function buildScenery(palette, random) {
   const group = new THREE.Group(), land = new GeoBatch(palette), luminous = new GeoBatch(palette, palette.glow);
   const oldWatchDecoration = new GeoBatch(palette), farmDecoration = new GeoBatch(palette);
   const tideglassDecoration = new GeoBatch(palette), tideglassHuts = new GeoBatch(palette), tideglassHutSites = [], saltwindDecoration = new GeoBatch(palette);
-  const driftwoodDecoration = new GeoBatch(palette), sunwakeLanding = new GeoBatch(palette);
+  const driftwoodDecoration = new GeoBatch(palette), sunwakeLanding = new GeoBatch(palette), palmheartDecoration = new GeoBatch(palette);
   for (const obstacle of OBSTACLES) {
     if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
     if (obstacle.type === 'tree') {
       const size = clamp((obstacle.height || 7) / 7, .7, 1.5);
       if (region === 'moon') addBroadTree(land, x, y, z, size, true, random() * TAU);
-      else if (region === 'jungle') addBroadTree(land, x, y, z, size, false, random() * TAU);
+      else if (region === 'jungle') addBroadTree(palmheartWeight(x, z) > 0 ? palmheartDecoration : land, x, y, z, size, false, random() * TAU);
       else addPalm(land, x, y, z, size, random() * TAU);
     } else if (obstacle.type === 'hut') {
       const yaw = random() * .5, tideglass = obstacle.id === 'prop-16' || obstacle.id === 'prop-17';
@@ -195,7 +197,7 @@ export function buildScenery(palette, random) {
     if (y < 1.7 || reserved(x, z, 1.2) || OBSTACLES.some(o => o.pilot !== 'old-watch' && Math.hypot(x - o.x, z - o.z) < o.radius + 3)) continue;
     const region = regionAt(x, z)?.id, size = .58 + random() * .40;
     // Route completed-area detail after all original rejection/RNG decisions.
-    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : land;
+    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : palmheartWeight(x, z) > 0 ? palmheartDecoration : land;
     if (region === 'moon') {
       if (i % 3 === 0) addBroadTree(decoration, x, y, z, size, true, a);
       else addMushroom(decoration, x, y, z, size * (i % 4 === 0 ? 1.55 : 1), a);
@@ -211,7 +213,7 @@ export function buildScenery(palette, random) {
     const region = regionAt(x, z)?.id, s = .30 + random() * .5;
     // Only small ground plants are replaced here. The coastal palm canopy above
     // keeps its original geometry, density, positions and RNG consumption.
-    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : tideglassWeight(x, z) > .08 ? tideglassDecoration : saltwindHarborWeight(x, z) > .08 ? saltwindDecoration : driftwoodWeight(x, z) > .08 ? driftwoodDecoration : land;
+    const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : palmheartWeight(x, z) > 0 ? palmheartDecoration : tideglassWeight(x, z) > .08 ? tideglassDecoration : saltwindHarborWeight(x, z) > .08 ? saltwindDecoration : driftwoodWeight(x, z) > .08 ? driftwoodDecoration : land;
     if (region === 'volcano') decoration.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, random() * TAU, 0], '#bb9876');
     else {
       const color = region === 'moon' ? '#a599c8' : i % 3 === 0 ? '#91b773' : '#579868';
@@ -302,9 +304,10 @@ export function buildScenery(palette, random) {
   const saltwindLegacyVegetation = saltwindDecoration.mesh(); saltwindLegacyVegetation.name = 'saltwind-harbor-original-vegetation'; group.add(saltwindLegacyVegetation);
   const driftwoodLegacyVegetation = driftwoodDecoration.mesh(); driftwoodLegacyVegetation.name = 'driftwood-yard-original-vegetation'; group.add(driftwoodLegacyVegetation);
   const sunwakeLandingFallback = sunwakeLanding.mesh(); sunwakeLandingFallback.name = 'sunwake-strand-original-landing'; group.add(sunwakeLandingFallback);
+  const palmheartLegacyVegetation = palmheartDecoration.mesh(); palmheartLegacyVegetation.name = 'palmheart-wilds-original-vegetation'; group.add(palmheartLegacyVegetation);
   group.userData.tideglassHutSites = tideglassHutSites;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
-    driftwoodLegacyVegetation, sunwakeLandingFallback, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -365,6 +368,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const tideglassMarket = createTideglassMarket({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.tideglassLegacyVegetation, hutSites: scenery.tideglassHutSites, hutFallback: scenery.tideglassHutFallback });
   const saltwindHarbor = createSaltwindHarbor({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.saltwindLegacyVegetation });
   const driftwoodYard = createDriftwoodYard({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.driftwoodLegacyVegetation, landingFallback: scenery.sunwakeLandingFallback });
+  const palmheartCamp = createPalmheartCamp({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.palmheartLegacyVegetation });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], pendingSurges = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
@@ -865,7 +869,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     tideglassMarket.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     saltwindHarbor.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     driftwoodYard.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady() });
+    palmheartCamp.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+    environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady(), palmheartReady: palmheartCamp.isReady() });
     updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
@@ -903,11 +908,11 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
     oldWatch.dispose();
-    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
+    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
