@@ -324,3 +324,42 @@ warmed high-quality preview averaged about 60 fps over 240 frames, with a
 preview used 266 calls. These are short measurements on this machine, not a
 performance guarantee for other hardware. No additional physical LAN device
 was tested for this expansion.
+
+## Airship gunnery — 2026-09-08
+
+Implemented in the isolated `codex/airship-gunnery` worktree. The original
+239-test baseline passed. The completed change passed all 269 tests with no
+failures or skips (246.6 seconds), plus JavaScript syntax and `git diff --check`.
+The existing five-client voyage still completes the island and final battle.
+
+The additional public WebSocket test uses two real crew connections and ordinary
+movement/actions to verify different simultaneous gun operators, exclusive seats,
+synchronized shots and target health, cooldowns, unchanged handheld ammunition
+and economy, disconnect/reconnect, dismounting, gliding, the beach return lift,
+remaining aboard past the opening flight, and target respawning. Authority tests
+also cover both lifts in voyage/finale, invalid distance/height/phase/health,
+equipment preservation, nearest spherical hits, misses, reset and cleanup.
+
+A Chrome browser playthrough on an isolated server walked to a cannon, fired
+nine shots, landed six hits and destroyed three flying crabs. It stayed aboard
+past 28 seconds, held/repeated Space to dismount without accidentally gliding,
+used E to remount and leave, glided to the lighthouse lift and returned, then
+repeated the trip while holding a movement key. The second return settled at
+deck coordinates (0, 0) without continued movement. No browser exceptions,
+console errors or failed asset requests were observed.
+
+Visual checks covered the larger ship, four cannon stations, winged targets,
+both lift pads, map labels, gun sights at traverse/elevation limits, and the
+1440×1000 and 1024×768 gameplay layouts. The compact ship banner ends at y=578,
+above the equipment panel at y=612. Model tests verify cannon socket/camera
+agreement, walking/deck support at all stations, low/level shot clearance through
+the actual hull and rail geometry, and a bounded pool of eight target models with
+correct disposal. The cannon pivots are raised and downward aim narrows near
+the traverse limits to keep the deck out of the firing ray. Thin decorative
+rigging can still cross high-angle views.
+
+This is practice gunnery: flying targets respawn and award no pearls or kills;
+the existing final battle is unchanged. A future airship combat phase can use
+the shared stations and return route. Verification used this host and loopback
+clients; no additional physical LAN device was tested. QA screenshots, logs,
+temporary saves and browser helpers remain untracked.

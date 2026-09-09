@@ -1,12 +1,13 @@
 import { WORLD_RADIUS, SHIP_DURATION, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
 import { resolveWorldCollision } from './collision.js';
+import { SHIP_DECK, SHIP_GUNS, gunAim, gunOperator } from './airship.js';
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const finite = (x, fallback = 0) => Number.isFinite(x) ? x : fallback;
 export function makePlayerPosition() {
   const ship = shipAt(0);
   return { x: ship.x, y: ship.y, z: ship.z, yaw: 0, pitch: 0, vy: 0,
-    mode: 'aboard', jumpHeld: false, grounded: true, deckX: 0, deckZ: 0 };
+    mode: 'aboard', jumpHeld: false, grounded: true, deckX: 0, deckZ: 0, gunId: null, shipReturned: false };
 }
 
 export function movePlayer(p, input = {}, dt, elapsed = 0) {
@@ -24,8 +25,17 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
 
   if (p.mode === 'aboard') {
     const ship = shipAt(elapsed);
-    p.deckX = clamp(finite(p.deckX) + dx * speed * dt, -4, 4);
-    p.deckZ = clamp(finite(p.deckZ) + dz * speed * dt, -8, 8);
+    const gun = SHIP_GUNS.find(station => station.id === p.gunId);
+    if (gun) {
+      const operator = gunOperator(gun);
+      Object.assign(p, gunAim(gun, p.yaw, p.pitch), { deckX: operator.x, deckZ: operator.z,
+        x: ship.x + operator.x, z: ship.z + operator.z, y: ship.y, vy: 0, grounded: true });
+      if (jump) p.gunId = null;
+      return p;
+    }
+    p.gunId = null;
+    p.deckX = clamp(finite(p.deckX) + dx * speed * dt, SHIP_DECK.minX, SHIP_DECK.maxX);
+    p.deckZ = clamp(finite(p.deckZ) + dz * speed * dt, SHIP_DECK.minZ, SHIP_DECK.maxZ);
     for (const obstacle of SHIP_OBSTACLES) {
       if (obstacle.type === 'circle') {
         const ox = p.deckX - obstacle.x, oz = p.deckZ - obstacle.z;
@@ -33,6 +43,12 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
         if (distance < radius) {
           p.deckX = obstacle.x + (distance > 0.0001 ? ox / distance : 1) * radius;
           p.deckZ = obstacle.z + (distance > 0.0001 ? oz / distance : 0) * radius;
+          // A gun pedestal meets the rail. Slide around it inside the deck
+          // instead of letting collision resolution push pirates overboard.
+          p.deckX = clamp(p.deckX, SHIP_DECK.minX, SHIP_DECK.maxX);
+          if (Math.hypot(p.deckX - obstacle.x, p.deckZ - obstacle.z) < radius - 1e-8) {
+            p.deckZ = obstacle.z + (oz < 0 ? -1 : 1) * Math.sqrt(Math.max(0, radius * radius - (p.deckX - obstacle.x) ** 2));
+          }
         }
       } else {
         const minX = obstacle.minX - 0.6, maxX = obstacle.maxX + 0.6;
@@ -53,7 +69,7 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
     p.y = ship.y;
     p.vy = 0;
     p.grounded = true;
-    if (elapsed >= SHIP_DURATION) {
+    if (elapsed >= SHIP_DURATION && !p.shipReturned) {
       p.x = SPAWN.x + clamp(p.deckX, -3, 3); p.z = SPAWN.z + clamp(p.deckZ, -3, 3);
       p.y = 42; p.mode = 'gliding'; p.grounded = false; p.vy = -6;
     } else if (jump) {

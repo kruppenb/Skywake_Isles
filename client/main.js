@@ -1,11 +1,12 @@
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { GameNet } from './net.js';
-import { createUI, findInteractable, sideEventAnnouncement, finaleAnnouncement } from './ui.js';
+import { createUI, findInteractable, sideEventAnnouncement, finaleAnnouncement, cannonPresentation, flyingTargetAtRay } from './ui.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { weaponPresentation } from './weapon-presentation.js';
-import { SEED, SHRINES, CHESTS, heightAt } from '/shared/world.js';
+import { SEED, SHRINES, CHESTS, heightAt, shipAt } from '/shared/world.js';
+import { SHIP_GUNS, GUN_COOLDOWN, gunAim, gunMuzzle } from '/shared/airship.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES, weaponStats } from '/shared/weapons.js';
 
 const canvas = document.getElementById('world');
@@ -14,7 +15,7 @@ const STEP = PREDICTION_STEP;
 const neutral = (view) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: view?.yaw || 0, pitch: view?.pitch || 0 });
 const previewState = () => ({
   phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
-  players: [], enemies: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
+  players: [], enemies: [], shipGuns: [], flyingTargets: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
   chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), pearls: 0, shards: 0, bossId: null,
   pings: [], drops: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
 });
@@ -30,6 +31,8 @@ let nextShotAt = 0;
 let pendingWeaponAction = null;
 let forcePrediction = false;
 let lastAuthoritativeMode = null;
+let lastAuthoritativeGunId = null;
+let lastAuthoritativeReturned = false;
 let lastVictoryRound = null;
 let running = true;
 let animationFrame = 0;
@@ -128,6 +131,8 @@ function resetToWelcome() {
   receivedAt = performance.now();
   renderClock.observe(state, receivedAt, true);
   lastAuthoritativeMode = null;
+  lastAuthoritativeGunId = null;
+  lastAuthoritativeReturned = false;
   ui.reset();
   input.reset(); input.releasePointer(); input.setEnabled(false);
   lastUIAt = 0;
@@ -177,14 +182,31 @@ function receiveState(next) {
     }
     if (state.phase === 'finale') ui.toast('The final battle begins! Defend the lighthouse with your crew.');
   }
-  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer);
+  const gunChanged = (authoritative.gunId || null) !== lastAuthoritativeGunId;
+  const returned = authoritative.shipReturned && authoritative.mode === 'aboard'
+    && (!lastAuthoritativeReturned || lastAuthoritativeMode !== 'aboard');
+  if (gunChanged || returned) {
+    // Keep a held Space through the dismount ACK. Sending a neutral packet here
+    // would release its jump edge and let the same physical press jump overboard.
+    const boarding = !!authoritative.gunId || returned;
+    if (boarding) input.reset();
+    nextShotAt = 0;
+    ui.clearWeaponPresentation();
+    const gun = SHIP_GUNS.find((entry) => entry.id === authoritative.gunId);
+    if (gunChanged && gun) input.setView(gun.yaw, .1);
+    if (boarding) sendNeutralInput();
+  }
+  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer || gunChanged || returned);
+  lastAuthoritativeGunId = authoritative.gunId || null;
+  lastAuthoritativeReturned = !!authoritative.shipReturned;
   forcePrediction = false;
   if (lastAuthoritativeMode !== authoritative.mode) {
     if (lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding') audio.play('drop');
     if (lastAuthoritativeMode === 'gliding' && authoritative.mode === 'ground') {
       audio.play('land');
-      ui.toast('Boots on the island! Walk over treasure to open it; E awakens compass shrines.');
+      ui.toast('Boots on the island! Cyan ↑ airship lifts at Sunwake beach and the lighthouse return you to the guns. Find them on M.');
     }
+    if (lastAuthoritativeMode === 'ground' && authoritative.mode === 'aboard') ui.toast('Back aboard! E mans a deck gun. Space opens your glider when you are ready.');
     lastAuthoritativeMode = authoritative.mode;
   }
   synchronizeInput();
@@ -271,6 +293,12 @@ function receiveEvent(event) {
 // Locate what the visible center reticle touches. The muzzle then aims toward
 // that point, correcting the third-person camera's height and shoulder offset.
 function aimPoint(player) {
+  const gun = SHIP_GUNS.find((entry) => entry.id === player.gunId);
+  if (gun && player.mode === 'aboard') {
+    const aim = gunAim(gun, input.yaw, input.pitch);
+    const muzzle = gunMuzzle(gun, shipAt(renderClock.elapsed), aim.yaw, aim.pitch);
+    return { ...aim, enemy: flyingTargetAtRay(state, muzzle.from, muzzle.direction) };
+  }
   const ray = world.aimRay();
   const origin = ray.origin;
   const direction = ray.direction;
@@ -314,14 +342,23 @@ function performAction(action) {
     return;
   }
   if (ui.menuOpen || state.phase === 'lobby' || state.phase === 'victory') return;
-  const player = renderedPlayer || simulationPlayer;
+  const player = renderedPlayer && (renderedPlayer.gunId || null) === (simulationPlayer.gunId || null) ? renderedPlayer : simulationPlayer;
   if (player.knockedUntil > state.elapsed) return;
   const base = input.snapshot();
+  const gun = player.mode === 'aboard' && SHIP_GUNS.find((entry) => entry.id === player.gunId);
+  if (gun && !['fire', 'interact', 'ping'].includes(action)) return;
   if (action === 'fire') {
     const now = performance.now();
-    if (now < nextShotAt || player.mode !== 'ground') return;
-    nextShotAt = now + weaponStats(player.weapon, player.rarity).cooldown * 1000 + 10;
+    if (now < nextShotAt || (!gun && player.mode !== 'ground')) return;
+    if (gun && (state.shipGuns?.find((entry) => entry.id === gun.id)?.readyAt || 0) > renderClock.elapsed) return;
+    nextShotAt = now + (gun ? GUN_COOLDOWN : weaponStats(player.weapon, player.rarity).cooldown) * 1000 + 10;
     const aim = aimPoint(player);
+    if (gun) {
+      input.setView(aim.yaw, aim.pitch);
+      sendInput({ ...base, yaw: aim.yaw, pitch: aim.pitch });
+      net.action('fire');
+      return;
+    }
     sendInput({ ...base, yaw: aim.yaw, pitch: aim.pitch });
     net.action('fire');
     // Facing changes used for the shot never change the player's mouse view or
@@ -329,7 +366,13 @@ function performAction(action) {
     sendInput(base);
   } else if (action === 'interact') {
     const target = findInteractable(state, player);
-    if (target) { sendInput(base); net.action('interact', target.id); }
+    if (target && !target.disabled) {
+      // Stop held movement before requesting a lift, so fixed ticks queued
+      // before its snapshot cannot carry island input onto the returned deck.
+      if (target.kind === 'airship-return') { input.reset(); sendInput(neutral(input)); }
+      else sendInput(base);
+      net.action('interact', target.id);
+    }
   } else if (WEAPON_ORDER.includes(action)) {
     if (!player.inventory?.[action]) { ui.toast(`Find the ${WEAPONS[action].name} in chests.`); input.focus(); return; }
     if (action !== player.weapon) { pendingWeaponAction = 'swap'; input.setLookScale(1); ui.clearWeaponPresentation(); }
@@ -350,6 +393,8 @@ function performAction(action) {
 function fixedUpdate(elapsed) {
   if (!net.connected || !simulationPlayer || state.phase === 'victory') return;
   const controls = input.snapshot();
+  const gun = SHIP_GUNS.find((entry) => entry.id === simulationPlayer.gunId);
+  if (gun) Object.assign(controls, gunAim(gun, controls.yaw, controls.pitch));
   if (state.phase === 'lobby') controls.jump = false;
   const packet = { ...controls, seq: ++sequence };
   if (!net.sendInput(packet)) return;
@@ -365,6 +410,8 @@ function frame(now) {
   if (!document.hidden && rawDt < .5) { frameTimes.push(rawDt); if (frameTimes.length > 240) frameTimes.shift(); }
   try {
     const elapsed = renderClock.sample(now);
+    const gun = SHIP_GUNS.find((entry) => entry.id === simulationPlayer?.gunId);
+    if (gun) { const aim = gunAim(gun, input.yaw, input.pitch); input.setView(aim.yaw, aim.pitch); }
     if (document.hidden || rawDt > .5 || now - receivedAt > 500) {
       if (!forcePrediction) resetPredictionHistory();
       input.reset();
@@ -388,17 +435,19 @@ function frame(now) {
       snapshotTime: state.elapsed, snapshotReceivedAt: receivedAt, round: state.round,
     };
     const renderState = { ...state, elapsed };
-    const presentation = weaponPresentation(state, state.players.find((player) => player.id === net.id), {
+    const presentationOptions = {
       elapsed, connected: !!net.connected, controlsActive: input.active && !document.hidden && document.hasFocus(),
       menuOpen: ui.menuOpen, aiming: view.aiming, pendingAction: pendingWeaponAction,
-    });
+    };
+    const authoritative = state.players.find((player) => player.id === net.id);
+    const presentation = cannonPresentation(state, renderedPlayer, presentationOptions) || weaponPresentation(state, authoritative, presentationOptions);
     view.scoped = presentation.scoped;
     input.setLookScale(presentation.sensitivity);
     ui.updateWeaponPresentation(presentation, renderedPlayer, view);
     world.update(dt, renderState, renderedPlayer, view);
     world.render();
     if (now - lastUIAt >= 65) {
-      ui.setTarget(renderedPlayer && renderedPlayer.mode === 'ground' ? aimPoint(renderedPlayer).enemy : null);
+      ui.setTarget(renderedPlayer && (renderedPlayer.mode === 'ground' || renderedPlayer.gunId) ? aimPoint(renderedPlayer).enemy : null);
       ui.update(renderState, renderedPlayer, world, view);
       lastUIAt = now;
     }

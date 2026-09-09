@@ -64,7 +64,7 @@ export function createAudio() {
     const v = distant ? .22 : 1;
     switch (kind) {
       case 'shot': {
-        const voice = { flintlock: [.11, 165, 2500], scatter: [.18, 100, 1800], repeater: [.065, 220, 3600], burst: [.075, 185, 3200], longshot: [.24, 75, 2300] }[weapon] || [.11, 165, 2500];
+        const voice = { flintlock: [.11, 165, 2500], scatter: [.18, 100, 1800], repeater: [.065, 220, 3600], burst: [.075, 185, 3200], longshot: [.24, 75, 2300], cannon: [.38, 58, 1200] }[weapon] || [.11, 165, 2500];
         noise(voice[0], .34 * v, voice[2]);
         tone(voice[1], voice[0] + .03, .3 * v, 'triangle', 0, 48);
         tone(weapon === 'longshot' ? 950 : 650, .045, .065 * v, 'square', 0, 190);

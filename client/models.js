@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { sampleReloadAnimation } from './reload-animation.js';
+import { SHIP_SCALE, SHIP_GUNS, gunAim, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH } from '../shared/airship.js';
 
 // Original, compact geometry for Skywake Isles. A part is baked into a colored
 // batch whenever it does not need to articulate; the island is not a forest of
@@ -174,7 +175,9 @@ export function addHut(batch, x, y, z, size = 1, angle = 0) {
 }
 
 export function buildGalleon(palette) {
-  const group = new THREE.Group(), b = new GeoBatch(palette);
+  const group = new THREE.Group(), base = new THREE.Group(), b = new GeoBatch(palette);
+  group.name = 'airship'; base.name = 'airship-scaled-hull';
+  base.scale.set(SHIP_SCALE.x, SHIP_SCALE.y, SHIP_SCALE.z); group.add(base);
   const sailMaterial = palette.solid.clone();
   sailMaterial.transparent = true;
   const sailBatch = new GeoBatch(palette, sailMaterial);
@@ -204,10 +207,18 @@ export function buildGalleon(palette) {
     for (let j = 0; j < rows.length - 1; j++) {
       const [az, aw] = rows[j], [bz, bw] = rows[j + 1];
       b.line([side * aw, .2, az], [side * bw, .2, bz], .2, '#684733');
-      b.line([side * aw, 1.05, az], [side * bw, 1.05, bz], .13, '#f0c05d');
+      // Broad gun ports give the full swivel arc an unobstructed rail opening.
+      const ports = SHIP_GUNS.filter(gun => Math.sign(gun.x) === side).map(gun => [(gun.z - 3.6) / SHIP_SCALE.z, (gun.z + 3.6) / SHIP_SCALE.z]);
+      const cuts = [az, bz, ...ports.flat().filter(z => z > az && z < bz)].sort((a, c) => a - c);
+      const insidePort = z => ports.some(([low, high]) => z >= low && z <= high);
+      const railWidth = z => THREE.MathUtils.lerp(aw, bw, (z - az) / (bz - az));
+      for (let k = 0; k < cuts.length - 1; k++) {
+        const start = cuts[k], end = cuts[k + 1];
+        if (!insidePort((start + end) / 2)) b.line([side * railWidth(start), 1.05, start], [side * railWidth(end), 1.05, end], .13, '#f0c05d');
+      }
       b.line([side * aw * .99, -1.1, az], [side * bw * .99, -1.1, bz], .11, '#e8b655');
       b.line([side * aw * .77, -2.9, az], [side * bw * .77, -2.9, bz], .08, '#34718a');
-      b.line([side * aw, .1, az], [side * aw, 1.04, az], .09, '#7c5636');
+      if (!insidePort(az)) b.line([side * aw, .1, az], [side * aw, 1.04, az], .09, '#7c5636');
     }
     for (let z of [-7, -2, 3, 7]) {
       b.add('sphere', [side * 4.43, -1.8, z], [.13, .34, .40], [0, 0, 0], '#e5b04e');
@@ -266,12 +277,115 @@ export function buildGalleon(palette) {
   }
   const sails = sailBatch.mesh();
   const cabin = cabinBatch.mesh();
-  group.add(b.mesh(), sails, cabin);
+  const hullMesh = b.mesh(); hullMesh.name = 'airship-hull-and-deck';
+  sails.name = 'airship-sails'; cabin.name = 'airship-cabin';
+  base.add(hullMesh, sails, cabin);
   const pennantBatch = new GeoBatch(palette);
   const flag = surface([0, 0, 0, 3.2, -.2, 0, 2.4, -.95, 0, 0, -1.3, 0], [0, 1, 2, 0, 2, 3]);
   pennantBatch.add(flag, [0, 0, 0], [1, 1, 1], [0, 0, 0], '#ed8366'); flag.dispose();
-  const pennant = pennantBatch.mesh(); pennant.position.set(0, 18.4, -4.8); group.add(pennant);
-  return { group, sails, cabin, animate(time) { pennant.rotation.y = -.3 + Math.sin(time * 2) * .18; } };
+  const pennant = pennantBatch.mesh(); pennant.position.set(0, 18.4, -4.8); base.add(pennant);
+  // Stations use shared, already enlarged deck coordinates, outside the scaled hull.
+  const guns = new Map(SHIP_GUNS.map(gun => {
+    const model = buildDeckCannon(palette, gun); group.add(model.group); return [gun.id, model];
+  }));
+  return { group, base, sails, cabin, guns, animate(time) { pennant.rotation.y = -.3 + Math.sin(time * 2) * .18; } };
+}
+
+export function buildDeckCannon(palette, gun) {
+  const group = new THREE.Group(), swivel = new THREE.Group(), elevation = new THREE.Group(), barrel = new THREE.Group();
+  group.name = gun.id; group.userData.gunId = gun.id; group.position.set(gun.x, 0, gun.z);
+  swivel.name = 'cannon-swivel'; elevation.name = 'cannon-elevation'; barrel.name = 'cannon-recoil-barrel';
+  const port = gun.x < 0, fore = gun.z < -4;
+  const wood = port ? '#956445' : '#ac7649', steel = port ? '#294b60' : '#364858', brass = fore ? '#e9b95e' : '#d49a49';
+  const base = new GeoBatch(palette);
+  base.add('cylinder', [0, .11, 0], [.58, .22, .58], [0, 0, 0], '#405967');
+  base.add('cylinder', [0, .12 + (GUN_PIVOT_HEIGHT - .5) / 2, 0], [.42, GUN_PIVOT_HEIGHT - .5, .42], [0, 0, 0], wood);
+  for (const y of [.3, GUN_PIVOT_HEIGHT - .47]) base.add('cylinder', [0, y, 0], [.45, .12, .45], [0, 0, 0], brass);
+  base.add('cylinder', [0, GUN_PIVOT_HEIGHT - .32, 0], [.5, .2, .5], [0, 0, 0], steel);
+  const pedestal = base.mesh(); pedestal.name = 'cannon-pedestal'; group.add(pedestal, swivel);
+  swivel.position.y = GUN_PIVOT_HEIGHT;
+  const fork = new GeoBatch(palette);
+  for (const side of [-1, 1]) {
+    fork.add('box', [side * .42, -.12, 0], [.16, .57, .62], [0, 0, side * -.13], steel);
+    fork.add('cylinder', [side * .49, 0, 0], [.17, .15, .17], [0, 0, Math.PI / 2], brass);
+  }
+  swivel.add(fork.mesh(), elevation); elevation.add(barrel);
+  const tube = new GeoBatch(palette);
+  tube.add('sphere', [0, 0, .15], [.34, .34, .45], [0, 0, 0], steel);
+  tube.line([0, 0, .1], [0, 0, -GUN_MUZZLE_LENGTH + .08], .28, steel, .88);
+  for (const z of [-.12, -.75, -1.7, -GUN_MUZZLE_LENGTH + .1]) {
+    tube.add('cylinder', [0, 0, z], [.315, .13, .315], [Math.PI / 2, 0, 0], brass);
+  }
+  tube.add('cylinder', [0, 0, -GUN_MUZZLE_LENGTH + .009], [.232, .018, .232], [Math.PI / 2, 0, 0], '#102c3a');
+  tube.add('box', [0, .32, -1.4], [.07, .13, .12], [0, 0, 0], brass);
+  tube.line([0, -.1, .4], [0, -.24, .84], .075, wood);
+  tube.line([-.32, -.24, .84], [.32, -.24, .84], .07, wood);
+  barrel.add(tube.mesh());
+  const muzzle = new THREE.Object3D(); muzzle.name = 'cannon-muzzle'; muzzle.position.z = -GUN_MUZZLE_LENGTH; elevation.add(muzzle);
+  let recoil = 0;
+  function animate(dt, yaw = gun.yaw, pitch = .1, occupantId = null) {
+    const aim = gunAim(gun, yaw, pitch);
+    swivel.rotation.y = aim.yaw; elevation.rotation.x = aim.pitch;
+    recoil *= Math.exp(-16 * Math.max(0, dt)); barrel.position.z = recoil * .36;
+    group.userData.occupantId = occupantId;
+  }
+  animate(0);
+  return { group, swivel, elevation, barrel, muzzle, animate,
+    fire() { recoil = 1; barrel.position.z = .36; },
+    getMuzzle(target = new THREE.Vector3()) { muzzle.updateWorldMatrix(true, false); return muzzle.getWorldPosition(target); },
+  };
+}
+
+export function buildFlyingCrab(palette) {
+  const group = new THREE.Group(), body = new THREE.Group(), shell = new GeoBatch(palette), wings = [];
+  group.name = 'flying-crab'; body.name = 'flying-crab-body'; group.add(body);
+  shell.add('sphere', [0, 0, 0], [1.25, .64, .92], [0, 0, 0], '#df7156');
+  shell.add('sphere', [0, .16, -.02], [1.03, .56, .77], [0, 0, 0], '#f49c76');
+  shell.add('sphere', [0, -.3, -.15], [.84, .32, .65], [0, 0, 0], '#ffe3b2');
+  for (const side of [-1, 1]) {
+    shell.line([side * .48, .15, -.55], [side * .55, .64, -.8], .075, '#7e493f');
+    shell.add('sphere', [side * .55, .64, -.8], [.19, .21, .19], [0, 0, 0], '#263f50');
+    shell.add('sphere', [side * .59, .69, -.94], [.055, .06, .045], [0, 0, 0], '#fff2d0');
+    shell.line([side * .78, -.2, -.45], [side * 1.35, -.48, -.98], .12, '#e98763');
+    shell.add('sphere', [side * 1.42, -.37, -1.1], [.32, .23, .4], [0, side * -.3, 0], '#f0a07a');
+    for (let i = 0; i < 3; i++) {
+      shell.line([side * .83, -.28, -.1 + i * .32], [side * 1.23, -.68, .15 + i * .32], .06, '#ac594b');
+      shell.line([side * 1.23, -.68, .15 + i * .32], [side * 1.43, -.57, .30 + i * .32], .055, '#ffd6a8');
+    }
+    const wing = new THREE.Group(), feathers = new GeoBatch(palette); wing.name = side < 0 ? 'left-cream-wing' : 'right-cream-wing';
+    wing.position.set(side * .8, .35, .2);
+    for (let i = 0; i < 4; i++) {
+      feathers.add('sphere', [side * (.57 + i * .16), .02, -.42 + i * .35], [.82 - i * .07, .085, .23], [0, side * (-.4 + i * .16), side * .08], i % 2 ? '#f5d4a1' : '#fff1ce');
+    }
+    feathers.line([0, 0, -.48], [side * 1.15, .02, -.66], .055, '#ac7252');
+    wing.add(feathers.mesh()); body.add(wing); wings.push({ wing, side });
+  }
+  body.add(shell.mesh());
+  return { group, body, wings, animate(time, reducedMotion = false) {
+    // Keep the target root at its authoritative sphere center; only the small body pose bobs.
+    body.position.y = reducedMotion ? 0 : Math.sin(time * 2.1) * .07;
+    body.rotation.z = reducedMotion ? 0 : Math.sin(time * 1.4) * .05;
+    for (const { wing, side } of wings) wing.rotation.z = side * (reducedMotion ? .18 : .18 + Math.sin(time * 7.5) * .52);
+  } };
+}
+
+export function buildAirshipLift(palette) {
+  const group = new THREE.Group(), marker = new THREE.Group(), base = new GeoBatch(palette), icon = new GeoBatch(palette, palette.glow);
+  const cyan = '#baf9f0', brass = '#e5b55f';
+  base.add('cylinder', [0, .03, 0], [1.65, .16, 1.65], [0, 0, 0], '#335665');
+  base.add('cylinder', [0, .13, 0], [1.45, .08, 1.45], [0, 0, 0], '#69b8b4');
+  base.add('ring', [0, .19, 0], [1.45, 1.45, .6], [Math.PI / 2, 0, 0], brass);
+  for (let i = 0; i < 4; i++) {
+    const angle = i * Math.PI / 2, x = Math.cos(angle) * 1.9, z = Math.sin(angle) * 1.9;
+    base.add('cylinder', [x, .3, z], [.15, .6, .15], [0, 0, 0], brass);
+    base.add('sphere', [x, .64, z], [.18, .16, .18], [0, 0, 0], cyan);
+  }
+  icon.add('cylinder', [0, 0, 0], [.14, .9, .14], [0, 0, 0], cyan);
+  icon.add('cone', [0, .72, 0], [.6, .65, .6], [0, 0, 0], cyan);
+  icon.add('ring', [0, -.6, 0], [.66, .66, .4], [Math.PI / 2, 0, 0], brass);
+  marker.name = 'airship-lift-up-arrow'; marker.position.y = 3.6; marker.add(icon.mesh({ shadow: false }));
+  group.add(base.mesh(), marker);
+  return { group, marker, animate(time, reducedMotion = false) { marker.position.y = 3.6 + (reducedMotion ? 0 : Math.sin(time * 1.8) * .22); } };
 }
 
 // Lofted, softly squared volumes give the characters jaws, shoulders and seams
@@ -608,7 +722,7 @@ export function buildPirate(palette, color = '#eb785d') {
   function animate(time = 0, speed = 0, player = {}, pose = {}) {
     const dt = THREE.MathUtils.clamp(Number.isFinite(pose.dt) ? pose.dt : 1 / 60, 0, .1);
     const elapsed = Number.isFinite(pose.elapsed) ? pose.elapsed : 0;
-    const falling = player.mode === 'gliding', knocked = !!player.knockedUntil;
+    const falling = player.mode === 'gliding', knocked = !!player.knockedUntil, mounted = player.mode === 'aboard' && !!player.gunId;
     const motion = falling || knocked ? 0 : THREE.MathUtils.clamp(Number.isFinite(speed) ? speed : 0, 0, 18);
     const nextWeapon = WEAPONS[player.weapon] ? player.weapon : 'flintlock';
     const reloadUntil = Number.isFinite(player.reloadUntil) ? player.reloadUntil : 0;
@@ -680,8 +794,8 @@ export function buildPirate(palette, color = '#eb785d') {
       gliderToTorso.multiplyMatrices(figure.matrix, torso.matrix).invert().multiply(glider.matrix);
     }
     for (const [kind, weapon] of weaponEntries) {
-      weapon.group.visible = !stowed && equipped === kind;
-      weapon.stowed.visible = stowed && equipped === kind;
+      weapon.group.visible = !mounted && !stowed && equipped === kind;
+      weapon.stowed.visible = !mounted && stowed && equipped === kind;
       // Reset every mesh, including hidden guns, so cancelled reloads and swaps
       // cannot leave a magazine or bolt displaced when that gun is used again.
       weapon.action.position.copy(weapon.actionOrigin); weapon.action.rotation.set(0, 0, 0);
@@ -699,6 +813,7 @@ export function buildPirate(palette, color = '#eb785d') {
     for (const arm of arms) {
       arm.wrist.copy(falling ? arm.glideTarget : arm.anchor.position);
       arm.wrist.applyMatrix4(falling ? gliderToTorso : weaponRig.matrix);
+      if (mounted) arm.wrist.set(arm.side * .28, .38, -.48);
       arm.hand.position.copy(arm.wrist);
       if (falling) {
         arm.hand.rotation.set(0, arm.side * .2, arm.side * -.45);

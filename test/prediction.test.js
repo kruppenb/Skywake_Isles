@@ -4,6 +4,7 @@ import { LocalPrediction, RenderClock, PREDICTION_STEP, PREDICTION_HISTORY_LIMIT
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { COLORS, SHIP_DURATION, SPAWN, heightAt, shipAt } from '../shared/world.js';
 import { Game } from '../server/game.js';
+import { SHIP_GUNS, gunAim, gunOperator } from '../shared/airship.js';
 
 const controls = (changes = {}) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: 0, pitch: 0, ...changes });
 const pirate = (changes = {}) => ({ ...makePlayerPosition(), id: 'p0', lastInputSeq: -1, knockedUntil: 0, hp: 100, ...changes });
@@ -300,4 +301,58 @@ test('downed and victory ticks acknowledge no-op inputs without movement or futu
   game.setInput(player.id, { seq: 8, ...controls({ right: 1 }) });
   assert.equal(player.lastInputSeq, 7); game.tick();
   assert.equal(player.lastInputSeq, 8); xyzNear(player, before);
+});
+
+test('return and gun mounting discard old walking history and keep a stationary constrained operator', () => {
+  const prediction = new LocalPrediction(); prediction.reset(ground(), { simulationTime: SHIP_DURATION + 4 });
+  prediction.step(1, controls({ forward: 1, jump: true }), SHIP_DURATION + 4.05, 'voyage');
+  const returned = pirate({ shipReturned: true, deckX: 0, deckZ: 0, lastInputSeq: 1 });
+  prediction.reconcile(returned, { phase: 'voyage', elapsed: SHIP_DURATION + 4.05, alpha: .7 });
+  assert.equal(prediction.pending.length, 0); assert.equal(prediction.history.length, 0);
+  assert.equal(prediction.current.mode, 'aboard'); assert.equal(prediction.current.jumpHeld, false);
+  prediction.step(2, controls(), SHIP_DURATION + 4.1, 'voyage');
+  assert.equal(prediction.current.mode, 'aboard', 'return after flight never auto-drops');
+  for (const gun of SHIP_GUNS) {
+    const operator = gunOperator(gun);
+    const mounted = { ...returned, gunId: gun.id, deckX: operator.x, deckZ: operator.z, lastInputSeq: 2 };
+    prediction.reconcile(mounted, { phase: 'voyage', elapsed: SHIP_DURATION + 4.1, alpha: .7 });
+    assert.equal(prediction.pending.length, 0);
+    for (let i = 0; i < 10; i++) {
+      prediction.step(i + 3, controls({ forward: 1, right: 1, sprint: true, yaw: gun.yaw + 2, pitch: 1.1 }), SHIP_DURATION + 4.15 + i * .05, 'voyage');
+      const pose = prediction.sample(.73, SHIP_DURATION + 4.18 + i * .05), ship = shipAt(SHIP_DURATION + 4.18 + i * .05);
+      near(pose.deckX, operator.x); near(pose.deckZ, operator.z); near(pose.y, ship.y);
+      near(pose.yaw, gunAim(gun, gun.yaw + 2, 1.1).yaw); near(pose.pitch, .8);
+    }
+  }
+});
+
+test('Space dismount stays predicted through an unconsumed snapshot, then a fresh press glides', () => {
+  const gun = SHIP_GUNS[0], operator = gunOperator(gun), time = SHIP_DURATION + 20;
+  const start = pirate({ gunId: gun.id, shipReturned: true, deckX: operator.x, deckZ: operator.z });
+  const prediction = new LocalPrediction(); prediction.reset(start, { simulationTime: time });
+  prediction.step(1, controls({ jump: true, yaw: gun.yaw }), time + .05, 'voyage');
+  assert.equal(prediction.current.gunId, null); assert.equal(prediction.current.mode, 'aboard');
+  prediction.reconcile(start, { phase: 'voyage', elapsed: time + .05, alpha: .4 });
+  assert.equal(prediction.current.gunId, null, 'an old mounted snapshot cannot steal the dismount edge');
+  const acknowledged = { ...prediction.current, lastInputSeq: 1 };
+  prediction.reconcile(acknowledged, { phase: 'voyage', elapsed: time + .05, alpha: .4 });
+  assert.equal(prediction.pending.length, 0); assert.equal(prediction.current.gunId, null);
+  prediction.step(2, controls({ jump: true }), time + .1, 'voyage');
+  assert.equal(prediction.current.mode, 'aboard', 'holding the first Space does not jump off');
+  prediction.step(3, controls(), time + .15, 'voyage');
+  prediction.step(4, controls({ jump: true }), time + .2, 'voyage');
+  assert.equal(prediction.current.mode, 'gliding'); assert.equal(prediction.sample(0, time + .2).mode, 'gliding');
+});
+
+test('a repeat lift trip discards a pending ground jump even when shipReturned was already true', () => {
+  const prediction = new LocalPrediction(), time = SHIP_DURATION + 50;
+  const onIsland = { ...ground(), shipReturned: true };
+  prediction.reset(onIsland, { simulationTime: time });
+  prediction.step(1, controls({ jump: true, forward: 1 }), time + .05, 'voyage');
+  const aboard = pirate({ shipReturned: true, deckX: 0, deckZ: 0, lastInputSeq: -1 });
+  prediction.reconcile(aboard, { phase: 'voyage', elapsed: time + .05, alpha: .8 });
+  assert.equal(prediction.current.mode, 'aboard'); assert.equal(prediction.current.jumpHeld, false);
+  assert.equal(prediction.pending.length, 0); assert.equal(prediction.history.length, 0);
+  prediction.step(2, controls(), time + .1, 'voyage');
+  assert.equal(prediction.current.mode, 'aboard'); near(prediction.sample(.5, time + .12).deckZ, 0);
 });

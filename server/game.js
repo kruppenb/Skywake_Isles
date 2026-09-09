@@ -1,4 +1,5 @@
-import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt } from '../shared/world.js';
+import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt, shipAt } from '../shared/world.js';
+import { SHIP_GUNS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_DAMAGE, GUN_RANGE, gunAim, gunOperator, gunMuzzle } from '../shared/airship.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
@@ -8,7 +9,8 @@ import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SID
 import { FINALE_STAGES, FINALE_STAGE_DELAY, FINALE_FRONT, FINALE_ELITE_FRONT, FINALE_ARC, FINALE_RANK_SIZE, FINALE_DIRECTION_DELAY, shardBearing, finaleStageRoster } from '../shared/finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
-const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_FLYING_TARGET = ['id', 'type', 'x', 'y', 'z', 'yaw', 'radius', 'hp', 'maxHp'];
 const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'scale', 'attackRadius'];
 const PUBLIC_SIDE_EVENT = ['id', 'status', 'wave', 'remaining', 'integrity', 'maxIntegrity', 'startedAt', 'endsAt', 'finishedAt'];
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -242,10 +244,14 @@ export class Game {
     // client can label "stage 2/3" without importing the stage table.
     this.finale = { stage: 0, stages: FINALE_STAGES.length, remaining: 0, _nextStageAt: 0, _crewCount: 1, _pending: [], _mark: null };
     this.pings = []; this.drops = []; this.enemies.clear();
+    this.shipGuns = SHIP_GUNS.map(gun => ({ id: gun.id, occupantId: null, readyAt: 0 }));
+    this.flyingTargets = Array.from({ length: 8 }, (_, index) => ({ id: `flying-crab-${index + 1}`, type: 'flying-crab',
+      radius: 2, hp: 80, maxHp: 80, x: 0, y: 0, z: 0, yaw: 0, _index: index, _respawnAt: 0 }));
     for (const p of this.players.values()) this.resetPlayer(p);
   }
 
   resetPlayer(p) {
+    this.releaseGun(p);
     Object.assign(p, makePlayerPosition(), {
       ready: false, hp: 100, maxHp: 100, ammo: 8, maxAmmo: 8, weapon: 'flintlock', rarity: 'common',
       inventory: { flintlock: { rarity: 'common', ammo: 8 }, scatter: { rarity: 'common', ammo: 5 } },
@@ -290,6 +296,7 @@ export class Game {
     const p = this.players.get(id);
     if (!p || (!p.online && this.onlineCount >= MAX_PLAYERS)) return null;
     p.online = true; p._expiresAt = 0; p._input = restInput(p); p._inputAt = this.clock;
+    this.releaseGun(p);
     p.lastInputSeq = -1; p._receivedInputSeq = -1;
     if (!this.hostId) this.hostId = id;
     return p;
@@ -298,6 +305,7 @@ export class Game {
   disconnect(id, leave = false) {
     const p = this.players.get(id);
     if (!p) return;
+    this.releaseGun(p);
     p.online = false; p._expiresAt = this.clock + 60; p._input = restInput(p); p._burst = null;
     if (leave) this.players.delete(id);
     if (this.hostId === id) {
@@ -320,6 +328,8 @@ export class Game {
     p._input = { forward: clamp(input.forward, -1, 1), right: clamp(input.right, -1, 1),
       yaw: ((input.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI,
       pitch: clamp(input.pitch, -1.35, 1.35), jump: input.jump === true, sprint: input.sprint === true };
+    const gun = SHIP_GUNS.find(station => station.id === p.gunId);
+    if (gun) Object.assign(p._input, gunAim(gun, p._input.yaw, p._input.pitch));
     p.yaw = p._input.yaw; p.pitch = p._input.pitch; p._inputAt = this.clock;
     return good();
   }
@@ -335,6 +345,7 @@ export class Game {
       if (this.phase !== 'lobby') return bad('The voyage has already begun.');
       this.phase = 'voyage'; this.elapsed = 0; this.stats.voyages++;
       for (const crew of this.players.values()) this.resetPlayer(crew);
+      this.tickFlyingTargets();
       for (const spawn of encounterSpawns(this.onlineCount)) {
         const enemy = this.spawnEnemy(spawn.type, spawn.x, spawn.z, spawn.zone);
         enemy._camp = spawn.group;
@@ -349,15 +360,116 @@ export class Game {
       return good();
     }
     if (this.phase !== 'voyage' && this.phase !== 'finale') return bad('Set sail to begin the adventure.');
-    if (p.knockedUntil) return bad('Your crew will rescue you in a moment.', 'DOWNED');
+    if (p.knockedUntil || p.hp <= 0) return bad('Your crew will rescue you in a moment.', 'DOWNED');
     if (action === 'ping') return this.ping(p);
+    if (action === 'interact') return this.interact(p, target);
+    if (p.gunId) return action === 'fire' ? this.fireCannon(p) : bad('Leave the deck gun to use your equipment.', 'MOUNTED');
     if (p.mode === 'aboard') return bad('Jump from the ship to join the adventure.');
     if (action === 'fire') return this.fire(p);
     if (action === 'melee') return this.melee(p);
     if (action === 'reload') return this.reload(p);
     if (action === 'swap') return this.swap(p, target);
     if (action === 'heal') return this.heal(p);
-    if (action === 'interact') return this.interact(p, target);
+    return good();
+  }
+
+  releaseGun(p) {
+    for (const station of this.shipGuns) if (station.occupantId === p.id) station.occupantId = null;
+    p.gunId = null;
+  }
+
+  interactGun(p, target) {
+    if (p.gunId) {
+      if (target && target !== p.gunId) return bad('Leave this gun before choosing another.', 'MOUNTED');
+      this.releaseGun(p);
+      p._input = restInput(p);
+      return good();
+    }
+    const ship = shipAt(this.elapsed);
+    const nearby = SHIP_GUNS.filter(gun => (!target || gun.id === target) &&
+      Math.hypot(p.x - ship.x - gun.x, p.y - ship.y, p.z - ship.z - gun.z) <= GUN_INTERACTION_RANGE);
+    nearby.sort((a, b) => Math.hypot(p.deckX - a.x, p.deckZ - a.z) - Math.hypot(p.deckX - b.x, p.deckZ - b.z));
+    const gun = nearby[0];
+    if (!gun) return bad('Walk closer to a deck gun.', 'TOO_FAR');
+    const station = this.shipGuns.find(item => item.id === gun.id);
+    if (station.occupantId) return bad('A crewmate is already using that gun.', 'GUN_OCCUPIED');
+    station.occupantId = p.id;
+    p.gunId = gun.id; p.shipReturned = true; p._burst = null; p.jumpHeld = false;
+    Object.assign(p, gunAim(gun, gun.yaw, 0.1));
+    p._input = restInput(p); p._inputAt = this.clock;
+    movePlayer(p, p._input, 0, this.elapsed);
+    return good();
+  }
+
+  returnToAirship(p, point) {
+    if (!p.online || p.hp <= 0 || p.knockedUntil || p.mode !== 'ground' || !p.grounded ||
+      (this.phase !== 'voyage' && this.phase !== 'finale') ||
+      Math.hypot(p.x - point.x, p.y - heightAt(point.x, point.z), p.z - point.z) > RETURN_RANGE || !canReach(p, point)) {
+      return bad('Stand on the airship lift with a clear path to its center.', 'TOO_FAR');
+    }
+    this.releaseGun(p);
+    Object.assign(p, { mode: 'aboard', shipReturned: true, deckX: 0, deckZ: 0, yaw: 0, pitch: 0.1,
+      jumpHeld: false, grounded: true, vy: 0, _burst: null });
+    p._input = restInput(p); p._inputAt = this.clock;
+    movePlayer(p, p._input, 0, this.elapsed);
+    this.emit({ kind: 'airship-return', playerId: p.id, id: point.id });
+    return good();
+  }
+
+  tickFlyingTargets() {
+    if (this.phase !== 'voyage' && this.phase !== 'finale') return;
+    const ship = shipAt(this.elapsed);
+    for (const target of this.flyingTargets) {
+      if (target.hp <= 0) {
+        if (this.elapsed + 1e-8 < target._respawnAt) continue;
+        target.hp = target.maxHp; target._respawnAt = 0;
+      }
+      const index = target._index, speed = 0.055 + index * 0.004;
+      const angle = index * Math.PI / 4 + this.elapsed * speed;
+      const rx = 28 + (index % 4) * 6, rz = 24 + (index % 4) * 4;
+      target.x = ship.x + Math.cos(angle) * rx;
+      target.z = ship.z + Math.sin(angle) * rz;
+      target.y = ship.y + 9 + Math.sin(angle * 0.7 + index) * 4;
+      target.yaw = Math.atan2(Math.sin(angle) * rx, -Math.cos(angle) * rz);
+    }
+  }
+
+  fireCannon(p) {
+    const gun = SHIP_GUNS.find(station => station.id === p.gunId), ship = shipAt(this.elapsed);
+    const station = this.shipGuns.find(item => item.id === p.gunId);
+    if (!p.online || p.hp <= 0 || p.knockedUntil || p.mode !== 'aboard' || !gun || station?.occupantId !== p.id ||
+      (this.phase !== 'voyage' && this.phase !== 'finale')) return bad('Man a deck gun before firing.', 'NOT_MOUNTED');
+    const operator = gunOperator(gun);
+    if (Math.hypot(p.x - ship.x - operator.x, p.y - ship.y, p.z - ship.z - operator.z) > 0.5) return bad('Stay at the gun to fire.', 'TOO_FAR');
+    if (this.elapsed + 1e-8 < station.readyAt) return good();
+    station.readyAt = this.elapsed + GUN_COOLDOWN;
+    Object.assign(p, gunAim(gun, p.yaw, p.pitch));
+    const { from, direction } = gunMuzzle(gun, ship, p.yaw, p.pitch);
+    let hit = null, nearest = GUN_RANGE;
+    for (const target of this.flyingTargets) {
+      if (target.hp <= 0) continue;
+      const x = target.x - from.x, y = target.y - from.y, z = target.z - from.z;
+      const along = x * direction.x + y * direction.y + z * direction.z;
+      const discriminant = target.radius ** 2 - (x * x + y * y + z * z - along * along);
+      if (discriminant < 0) continue;
+      const root = Math.sqrt(discriminant), enter = along - root, leave = along + root;
+      const surface = enter >= 0 ? enter : leave;
+      if (surface < 0 || surface > nearest) continue;
+      const point = { x: from.x + direction.x * surface, y: from.y + direction.y * surface, z: from.z + direction.z * surface };
+      if (!hasWorldLineOfSight(from, point)) continue;
+      nearest = surface; hit = target;
+    }
+    const endpoint = { x: from.x + direction.x * nearest, y: from.y + direction.y * nearest, z: from.z + direction.z * nearest };
+    const to = hit ? endpoint : clipShotEndpoint(from, endpoint), damage = hit ? Math.min(hit.hp, GUN_DAMAGE) : 0;
+    this.emit({ kind: 'shot', weapon: 'cannon', gunId: gun.id, playerId: p.id, from, to, ...(hit ? { hitId: hit.id, damage } : {}) });
+    if (hit) {
+      hit.hp -= damage;
+      this.emit({ kind: 'hit', targetId: hit.id, sourceId: p.id, damage, x: hit.x, y: hit.y, z: hit.z });
+      if (hit.hp <= 0) {
+        hit._respawnAt = this.elapsed + 7;
+        this.emit({ kind: 'target-down', id: hit.id, type: hit.type, sourceId: p.id, x: hit.x, y: hit.y, z: hit.z });
+      }
+    }
     return good();
   }
 
@@ -501,9 +613,15 @@ export class Game {
   }
 
   interact(p, target) {
+    if (p.mode === 'aboard') return this.interactGun(p, target);
     if (p.mode !== 'ground') return bad('Land near the treasure to interact.', 'TOO_FAR');
     const options = [];
     for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
+    if (p.grounded) for (const point of AIRSHIP_RETURNS) {
+      if (Math.hypot(p.x - point.x, p.y - heightAt(point.x, point.z), p.z - point.z) <= RETURN_RANGE) {
+        options.push({ id: point.id, kind: 'airship-return', range: RETURN_RANGE, point });
+      }
+    }
     // Chests open by walking over them (see tick); an explicit or nearby E
     // target remains a fallback for clients that still send it.
     for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHEST_POINTS.get(chest.id) });
@@ -518,11 +636,13 @@ export class Game {
       }
     }
     if (this.shards === 3 && this.phase === 'voyage') options.push({ id: BEACON.id, kind: 'beacon', range: 4, point: BEACON });
-    const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range && Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3 && canReach(p, o.point));
+    const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range &&
+      (o.kind === 'airship-return' || Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3) && canReach(p, o.point));
     reachable.sort((a, b) => (a.kind === 'revive' ? -10 : distance(p, a.point)) - (b.kind === 'revive' ? -10 : distance(p, b.point)));
     const option = reachable[0];
     if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
+    if (option.kind === 'airship-return') return this.returnToAirship(p, option.point);
     if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
     if (option.kind === 'loot') return this.pickupWeapon(p, option.data);
     if (option.kind === 'chest') this.openChest(p, option.data, option.point);
@@ -745,7 +865,10 @@ export class Game {
       if (this.phase === 'victory') { p.lastInputSeq = p._receivedInputSeq; continue; }
       if (p.knockedUntil) { if (this.elapsed >= p.knockedUntil) this.revive(p); p.lastInputSeq = p._receivedInputSeq; continue; }
       const input = this.clock - p._inputAt < 0.4 ? p._input : restInput(p);
+      if (p.gunId && this.shipGuns.find(gun => gun.id === p.gunId)?.occupantId !== p.id) this.releaseGun(p);
+      const mounted = p.gunId;
       movePlayer(p, this.phase === 'lobby' ? { ...input, jump: false } : input, dt, this.phase === 'lobby' ? 0 : this.elapsed);
+      if (mounted && p.gunId !== mounted) this.releaseGun(p);
       p.lastInputSeq = p._receivedInputSeq;
       if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.inventory[p.weapon].ammo = p.ammo; p.reloadUntil = 0; }
       if ((this.phase === 'voyage' || this.phase === 'finale') && p.hp > 0 && p.mode === 'ground' && p.grounded) {
@@ -771,6 +894,7 @@ export class Game {
     }
     this.resetAbandonedRound();
     if (this.phase !== 'voyage' && this.phase !== 'finale') return;
+    this.tickFlyingTargets();
     this.tickSideEvents(false);
     for (const e of [...this.enemies.values()]) this.tickEnemy(e, dt);
     this.tickFinale();
@@ -894,7 +1018,7 @@ export class Game {
   win() {
     if (this.phase === 'victory') return;
     this.phase = 'victory'; this.enemies.clear();
-    for (const p of this.players.values()) p._burst = null;
+    for (const p of this.players.values()) { p._burst = null; this.releaseGun(p); }
     this.victory = { pearls: this.pearls, duration: this.elapsed,
       rescues: [...this.players.values()].reduce((sum, p) => sum + p.rescues, 0),
       kills: [...this.players.values()].reduce((sum, p) => sum + p.kills, 0) };
@@ -907,6 +1031,8 @@ export class Game {
     return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
       players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), collectedDropIds: [...p.collectedDropIds], inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
+      shipGuns: this.shipGuns.map(gun => ({ ...gun })),
+      flyingTargets: (this.phase === 'voyage' || this.phase === 'finale') ? this.flyingTargets.filter(target => target.hp > 0).map(target => cleanObject(target, PUBLIC_FLYING_TARGET)) : [],
       sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
       finale: cleanObject(this.finale, ['stage', 'stages', 'remaining']),
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),

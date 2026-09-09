@@ -6,6 +6,8 @@ import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { cameraTravel, scopeCameraPose } from './camera.js';
+import { SHIP_GUNS } from '../shared/airship.js';
+import { createAirshipPresentation, gunCameraPose, updateDeckCannons } from './airship.js';
 import { SCOPE_FOV } from './weapon-presentation.js';
 import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
@@ -380,11 +382,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
   const ship = buildGalleon(palette); scene.add(ship.group);
+  const airship = createAirshipPresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], pendingSurges = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
   let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
-  let cameraShipPose = null, cameraFollowPose = null;
+  let cameraShipPose = null, cameraFollowPose = null, cameraGunId = null;
   let width = 1, height = 1, frameCount = 0, fps = 60, fpsElapsed = 0, lowQuality = quality === 'low';
   const direction = new THREE.Vector3(), right = new THREE.Vector3(), desiredCamera = new THREE.Vector3(), cameraTarget = new THREE.Vector3();
   const projectVector = new THREE.Vector3(), raycaster = new THREE.Raycaster();
@@ -485,7 +488,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   }
 
   function showHit(event) {
-    const target = enemies.get(event.targetId) || players.get(event.targetId);
+    const target = enemies.get(event.targetId) || airship.targets.get(event.targetId) || players.get(event.targetId);
     const x = event.x ?? target?.group.position.x, y = event.y ?? (target?.group.position.y || 0) + 1, z = event.z ?? target?.group.position.z;
     if ([x, y, z].every(Number.isFinite)) {
       burst(x, y, z, '#ffe9bd', 8, .75);
@@ -493,7 +496,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     }
     if (target) target.flashUntil = clockTime + .13;
   }
-  function muzzleEffects(model, from, shotDirection) {
+  function muzzleEffects(model, from, shotDirection, cannon = false) {
     const flash = new THREE.Group(); flash.name = 'muzzle-flash';
     const amber = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({ color: '#ffc05a', transparent: true, opacity: .85, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
     const core = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({ color: '#fff8cf', transparent: true, opacity: 1, depthWrite: false, toneMapped: false }));
@@ -503,7 +506,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     addEffect(flash, .08, (object, age) => {
       if (model?.group.parent) model.getMuzzle?.(object.position);
       const fade = 1 - age / .08; amber.material.opacity = fade * .85; core.material.opacity = fade;
-      object.scale.setScalar(.75 + fade * .3);
+      object.scale.setScalar((.75 + fade * .3) * (cannon ? 2.5 : 1));
     });
     const smoke = new THREE.Group(); smoke.name = 'muzzle-smoke'; smoke.position.copy(from);
     for (let i = 0; i < 3; i++) {
@@ -514,7 +517,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     addEffect(smoke, .48, (object, age) => {
       object.children.forEach((puff, index) => {
         puff.position.copy(puff.userData.velocity).multiplyScalar(age);
-        puff.scale.setScalar(.09 + age * (.52 + index * .13)); puff.material.opacity = .27 * (1 - age / .48);
+        puff.scale.setScalar((.09 + age * (.52 + index * .13)) * (cannon ? 2.6 : 1)); puff.material.opacity = .27 * (1 - age / .48);
       });
     });
   }
@@ -524,16 +527,17 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     addEffect(ring, .18, (object, age) => { object.scale.setScalar(1 + age * 7); object.material.opacity = .9 * (1 - age / .18); });
   }
   function showShot(event) {
-    const model = players.get(event.playerId), from = new THREE.Vector3(), to = new THREE.Vector3(event.to.x, event.to.y, event.to.z);
+    const cannon = event.weapon === 'cannon';
+    const model = cannon ? ship.guns.get(event.gunId) : players.get(event.playerId), from = new THREE.Vector3(), to = new THREE.Vector3(event.to.x, event.to.y, event.to.z);
     from.set(event.from.x, event.from.y, event.from.z);
-    if (model?.getMuzzle) model.getMuzzle(from);
+    if (!cannon && model?.getMuzzle) model.getMuzzle(from);
     const flight = makeTracerFlight(from, to, event.weapon);
     if (!flight) return;
     const shotDirection = to.clone().sub(from).normalize();
     const shotTime = typeof performance === 'undefined' ? clockTime : performance.now() / 1000;
     const previous = discharges.get(event.playerId);
     if (!previous || previous.weapon !== event.weapon || shotTime - previous.time >= .08) {
-      model?.fire?.(event.weapon); muzzleEffects(model, from, shotDirection);
+      model?.fire?.(event.weapon); muzzleEffects(cannon ? null : model, from, shotDirection, cannon);
       discharges.set(event.playerId, { weapon: event.weapon, time: shotTime });
     }
     const tracer = new THREE.Group(); tracer.name = 'bullet-tracer';
@@ -544,6 +548,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: '#fffbdc', transparent: true, opacity: 1, depthWrite: false, toneMapped: false }));
     outer.name = 'tracer-amber-trail'; core.name = 'tracer-pale-core'; head.name = 'tracer-moving-head'; head.scale.set(.11, .18, .11);
     tracer.add(outer, core, head);
+    if (cannon) { outer.scale.x = outer.scale.z = core.scale.x = core.scale.z = 2.2; head.scale.multiplyScalar(2.2); }
     const impact = { key: `${event.playerId}:${event.hitId}`, hit: null };
     if (event.hitId) {
       const queue = pendingImpacts.get(impact.key) || []; queue.push(impact); pendingImpacts.set(impact.key, queue);
@@ -583,6 +588,11 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     } else if (event.kind === 'hit') {
       const pending = pendingImpacts.get(`${event.sourceId}:${event.targetId}`)?.find(impact => !impact.hit);
       if (pending) pending.hit = event; else showHit(event);
+    } else if (event.kind === 'target-down') {
+      if ([event.x, event.y, event.z].every(Number.isFinite)) {
+        burst(event.x, event.y, event.z, '#ffd9a4', 22, 1.8);
+        burst(event.x, event.y, event.z, '#ec9576', 12, 1.1);
+      }
     } else if (event.kind === 'defeated') {
       if (Number.isFinite(event.x)) {
         const boss = event.type === 'tempest', mini = event.type === 'tidebreaker';
@@ -672,7 +682,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       model.group.userData.movementSpeed = model.speed;
       model.animate(time, model.speed, player, { dt, aiming: isLocal && !!view.aiming, elapsed });
       model.lastPose = { ...player }; model.generation = sample?.generation;
-      model.group.visible = !(isLocal && view.scoped) && (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
+      model.group.visible = !(isLocal && (view.scoped || player.gunId)) && (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
     }
     for (const [id, model] of players) if (!seen.has(id)) { disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
   }
@@ -775,6 +785,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const GROUND_CAMERA_BACK = 7.45, AIM_CAMERA_BACK = 5.7;
     const NORMAL_GAMEPLAY_FOV = 50, AIM_GAMEPLAY_FOV = 43, GLIDING_FOV = 58;
     const menu = view.menu || !player;
+    const gun = !menu && player.mode === 'aboard' ? SHIP_GUNS.find(candidate => candidate.id === player.gunId) : null;
+    const gunChanged = cameraGunId !== (gun?.id || null);
     const travel = cameraTravel(cameraFollowPose, player, { menu, round: view.round });
     cameraFollowPose = travel.anchor;
     if (travel.delta) { camera.position.x += travel.delta.x; camera.position.y += travel.delta.y; camera.position.z += travel.delta.z; }
@@ -789,6 +801,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       cameraTarget.set(6, 18, 4);
       camera.position.lerp(desiredCamera, cameraReady ? 1 - Math.exp(-dt * 2) : 1); camera.lookAt(cameraTarget);
       camera.fov = latestView.scoped ? 53 : smooth(camera.fov, 53, dt * 3);
+    } else if (gun) {
+      const pose = gunCameraPose(gun, shipPose, view.yaw ?? player.yaw, view.pitch ?? player.pitch);
+      camera.position.set(pose.origin.x, pose.origin.y, pose.origin.z);
+      direction.set(pose.direction.x, pose.direction.y, pose.direction.z);
+      cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
+      camera.fov = 55;
     } else if (view.scoped) {
       const pose = scopeCameraPose(player, view.yaw, view.pitch);
       camera.position.set(pose.origin.x, pose.origin.y, pose.origin.z);
@@ -828,12 +846,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       if (safeFraction < 1) desiredCamera.lerpVectors(anchor, desiredCamera, safeFraction);
       desiredCamera.y = Math.max(desiredCamera.y, heightAt(desiredCamera.x, desiredCamera.z) + 1.25);
       if (player.mode === 'aboard') desiredCamera.y = Math.max(desiredCamera.y, player.y + 1.6);
-      const snap = !cameraReady || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu || latestView.scoped;
+      const snap = !cameraReady || gunChanged || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu || latestView.scoped;
       camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 18));
       // Center ray is exactly input direction, including after collision.
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
       const targetFov = view.aiming ? AIM_GAMEPLAY_FOV : player.mode === 'gliding' ? GLIDING_FOV : NORMAL_GAMEPLAY_FOV;
-      camera.fov = latestView.scoped ? targetFov : smooth(camera.fov, targetFov, dt * 8);
+      camera.fov = latestView.scoped || gunChanged ? targetFov : smooth(camera.fov, targetFov, dt * 8);
     }
     if (!menu && Math.hypot(player.x - sun.target.position.x, player.z - sun.target.position.z) > 8) {
       sun.target.position.set(player.x, 0, player.z); sun.position.set(player.x - 60, 130, player.z + 70);
@@ -849,8 +867,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       if (!menu && player.mode === 'aboard') {
         // Keep the full shoulder view; only the cabin yields when it hides the torso.
         ship.group.updateMatrixWorld(true);
-        cabinCamera.copy(camera.position); ship.group.worldToLocal(cabinCamera);
-        cabinTorso.set(player.x, player.y + 1.3, player.z); ship.group.worldToLocal(cabinTorso);
+        cabinCamera.copy(camera.position); ship.base.worldToLocal(cabinCamera);
+        cabinTorso.set(player.x, player.y + 1.3, player.z); ship.base.worldToLocal(cabinTorso);
         const distanceSquared = cabinCamera.distanceToSquared(cabinTorso);
         cabinRay.origin.copy(cabinCamera);
         cabinRay.direction.subVectors(cabinTorso, cabinCamera).normalize();
@@ -860,6 +878,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       ship.cabin.material.depthWrite = !fade && ship.cabin.material.opacity > .95;
     }
     cameraShipPose = !menu && player.mode === 'aboard' ? { ...shipPose } : null;
+    cameraGunId = gun?.id || null;
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(); cameraReady = true;
   }
 
@@ -871,8 +890,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const time = Number.isFinite(view.time) ? view.time : clockTime;
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
     ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time);
+    updateDeckCannons(ship, state, localPlayer, view, dt);
     ocean.animate(time); sky.animate(time);
     updateCamera(dt, localPlayer, view, shipPose);
+    airship.update(dt, state, time, camera, reducedMotionPreference.matches, clockTime);
     settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
     oldWatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     windwardFarm.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
@@ -920,10 +941,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
-    oldWatch.dispose();
+    oldWatch.dispose(); airship.dispose();
     windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();

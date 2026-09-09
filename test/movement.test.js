@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { SPAWN, BEACON, SHRINES, OBSTACLES, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt, shipAt, seededRandom } from '../shared/world.js';
+import { SHIP_DECK } from '../shared/airship.js';
 
 function ground(x = SPAWN.x, z = SPAWN.z) {
   return { ...makePlayerPosition(), x, z, y: heightAt(x, z), mode: 'ground', grounded: true };
@@ -48,8 +49,11 @@ test('movement normalization and yaw use the documented third-person basis', () 
 
 test('lobby deck, voluntary drop, glide landing, and automatic drop are safe', () => {
   const p = makePlayerPosition();
-  for (let i = 0; i < 100; i++) movePlayer(p, { right: 1, forward: 1, yaw: 0 }, 0.05, 0);
-  assert.equal(p.deckX, 4); assert.equal(p.deckZ, -8);
+  // Follow the clear aisle past the mast and fore gun before testing the bow rail.
+  for (let i = 0; i < 8; i++) movePlayer(p, { right: 1, yaw: 0 }, 0.05, 0);
+  for (let i = 0; i < 100; i++) movePlayer(p, { forward: 1, yaw: 0 }, 0.05, 0);
+  for (let i = 0; i < 20; i++) movePlayer(p, { right: 1, yaw: 0 }, 0.05, 0);
+  assert.equal(p.deckX, SHIP_DECK.maxX); assert.equal(p.deckZ, SHIP_DECK.minZ);
   assert.equal(p.y, shipAt(0).y);
   movePlayer(p, { jump: true, yaw: 0 }, 0.05, 1);
   assert.equal(p.mode, 'gliding');
@@ -76,14 +80,14 @@ test('jump is edge triggered, obstacles collide, and water returns pirates safel
 });
 
 test('aboard movement respects both masts and the cabin while keeping the deck usable', () => {
-  const p = makePlayerPosition(); p.deckX = -1.2; p.deckZ = -4.8;
+  const p = makePlayerPosition(); p.deckX = -1.2; p.deckZ = -7.2;
   for (let i = 0; i < 20; i++) movePlayer(p, { right: 1 }, 0.05, 0);
-  assert.ok(Math.hypot(p.deckX, p.deckZ + 4.8) >= 0.7999);
-  const q = makePlayerPosition(); q.deckX = 1.5; q.deckZ = 5.2;
+  assert.ok(Math.hypot(p.deckX, p.deckZ + 7.2) >= 0.8999);
+  const q = makePlayerPosition(); q.deckX = 1.5; q.deckZ = 8.3;
   for (let i = 0; i < 20; i++) movePlayer(q, { forward: -1 }, 0.05, 0);
-  assert.ok(q.deckZ <= 5.8501, 'cannot walk through the aft cabin wall');
+  assert.ok(q.deckZ <= 9.0751, 'cannot walk through the aft cabin wall');
   for (let i = 0; i < 20; i++) movePlayer(q, { right: 1 }, 0.05, 0);
-  assert.equal(q.deckX, 4, 'side deck remains reachable');
+  assert.equal(q.deckX, SHIP_DECK.maxX, 'side deck remains reachable');
 });
 
 test('prediction is deterministic and invalid numeric input cannot corrupt position', () => {

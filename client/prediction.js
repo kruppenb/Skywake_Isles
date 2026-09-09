@@ -11,7 +11,8 @@ const distance = (a, b) => {
   const from = point(a), to = point(b);
   return Math.hypot(from.x - to.x, from.y - to.y, from.z - to.z);
 };
-const MOVEMENT_FIELDS = new Set(['x', 'y', 'z', 'deckX', 'deckZ', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded']);
+const MOVEMENT_FIELDS = new Set(['x', 'y', 'z', 'deckX', 'deckZ', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'gunId', 'shipReturned']);
+const gunChanged = (a, b) => (a?.gunId || null) !== (b?.gunId || null);
 const TIME_EPSILON = 1e-7;
 
 // Snapshot delivery changes the target clock offset, never the visible time.
@@ -54,12 +55,12 @@ export class RenderClock {
 export function interpolatePose(previous, current, alpha, elapsed, correction = { x: 0, y: 0, z: 0 }) {
   if (!current) return null;
   const pose = { ...current };
-  const from = point(previous?.mode === current.mode ? previous : current);
+  const from = point(previous?.mode === current.mode && !gunChanged(previous, current) ? previous : current);
   const to = point(current);
   const fraction = clamp(alpha, 0, 1);
-  const x = from.x + (to.x - from.x) * fraction + correction.x;
-  const y = from.y + (to.y - from.y) * fraction + correction.y;
-  const z = from.z + (to.z - from.z) * fraction + correction.z;
+  const x = from.x + (to.x - from.x) * fraction + (current.gunId ? 0 : correction.x);
+  const y = from.y + (to.y - from.y) * fraction + (current.gunId ? 0 : correction.y);
+  const z = from.z + (to.z - from.z) * fraction + (current.gunId ? 0 : correction.z);
   if (current.mode === 'aboard') {
     const ship = shipAt(elapsed);
     pose.deckX = x; pose.deckZ = z;
@@ -71,7 +72,7 @@ export function interpolatePose(previous, current, alpha, elapsed, correction = 
 }
 
 function shiftedPrevious(previous, current, next) {
-  if (!previous || previous.mode !== next.mode || current.mode !== next.mode) return { ...next };
+  if (!previous || previous.mode !== next.mode || current.mode !== next.mode || gunChanged(previous, next) || gunChanged(current, next)) return { ...next };
   const result = { ...previous };
   const fields = next.mode === 'aboard' ? ['deckX', 'deckZ'] : ['x', 'y', 'z'];
   for (const field of fields) result[field] += next[field] - current[field];
@@ -99,7 +100,7 @@ export class LocalPrediction {
     this.previous = { ...this.current };
     if (!this.current.knockedUntil && phase !== 'victory') {
       movePlayer(this.current, input, PREDICTION_STEP, phase === 'lobby' ? 0 : elapsed);
-      if (this.previous.mode !== this.current.mode || distance(this.previous, this.current) > 5) {
+      if (this.previous.mode !== this.current.mode || gunChanged(this.previous, this.current) || distance(this.previous, this.current) > 5) {
         this.previous = { ...this.current };
         this.correction = { x: 0, y: 0, z: 0 };
       }
@@ -127,7 +128,10 @@ export class LocalPrediction {
     const oldPose = this.sample(alpha, renderElapsed);
     const recovered = this.authoritative && !!this.authoritative.knockedUntil !== !!player.knockedUntil;
     const replaced = this.current && this.current.id !== player.id;
-    if (force || !this.current || recovered || replaced) {
+    const stationChanged = this.authoritative && gunChanged(this.authoritative, player);
+    const returned = this.authoritative && !!this.authoritative.shipReturned !== !!player.shipReturned;
+    const boarded = this.authoritative && this.authoritative.mode !== 'aboard' && player.mode === 'aboard';
+    if (force || !this.current || recovered || replaced || stationChanged || returned || boarded) {
       this.reset(player, { simulationTime });
       return;
     }
@@ -149,14 +153,16 @@ export class LocalPrediction {
     // A just-sent jump may belong to this client tick while the authority's
     // matching tick ran before its packet arrived. Keep that airborne edge
     // until it is consumed instead of briefly landing/reboarding the pirate.
-    if (!this.current.grounded && player.grounded && !player.jumpHeld && this.pending.some(entry => entry.input.jump)) {
+    const pendingJump = this.pending.some(entry => entry.input.jump);
+    const leavingGun = !this.current.gunId && player.gunId && !player.jumpHeld && pendingJump;
+    if (leavingGun || (!this.current.grounded && player.grounded && !player.jumpHeld && pendingJump)) {
       for (const [key, value] of Object.entries(player)) if (!MOVEMENT_FIELDS.has(key)) this.current[key] = value;
       this.authoritative = { ...player };
       this.future = null;
       return;
     }
     if (simulationTime > this.simulationTime + TIME_EPSILON) {
-      if (simulationTime - this.simulationTime > .5 || this.current.mode !== player.mode || distance(this.current, player) > 5) {
+      if (simulationTime - this.simulationTime > .5 || this.current.mode !== player.mode || gunChanged(this.current, player) || distance(this.current, player) > 5) {
         this.reset(player, { simulationTime });
         return;
       }
@@ -185,7 +191,7 @@ export class LocalPrediction {
     // displacement while rebasing both ends. Reusing an old, unshifted previous
     // pose here makes every acknowledgement produce a small backwards step.
     previous ??= shiftedPrevious(this.previous, this.current, next);
-    const discontinuity = this.current.mode !== next.mode || distance(this.current, next) > 5;
+    const discontinuity = this.current.mode !== next.mode || gunChanged(this.current, next) || distance(this.current, next) > 5;
     this.current = next;
     this.previous = discontinuity || previous.mode !== next.mode ? { ...next } : previous;
     this.correction = { x: 0, y: 0, z: 0 };
@@ -196,6 +202,7 @@ export class LocalPrediction {
       this.future = null;
       return;
     }
+    if (next.gunId) return;
     // Preserve the displayed pose at this exact alpha, including the remaining
     // visual offset, then decay just this one offset on subsequent frames.
     const before = point(oldPose), after = point(this.sample(alpha, renderElapsed));

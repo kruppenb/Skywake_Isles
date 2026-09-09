@@ -1,5 +1,6 @@
 import { BUILDINGS, EXPLORATION_CHESTS, buildingLocalPoint } from './exploration.js';
 import { OLD_WATCH_PROPS } from './old-watch.js';
+import { SHIP_SCALE, SHIP_GUNS } from './airship.js';
 
 // Original designed island. These values are shared by rendering and authority.
 export const MAX_PLAYERS = 5;
@@ -9,12 +10,15 @@ export const SEED = 271828;
 export const COLORS = ['#f4a261', '#55c9ba', '#b19cff', '#f58faf', '#ffdb70'];
 export const SPAWN = { x: 0, z: 94 };
 export const BEACON = { id: 'beacon', x: 0, z: 4 };
-// Local deck coordinates match the original galleon's solid cabin and masts.
+// Local deck coordinates match the enlarged galleon's solid cabin and masts.
 export const SHIP_OBSTACLES = [
   { id: 'fore-mast', type: 'circle', x: 0, z: -4.8, radius: 0.2 },
   { id: 'aft-mast', type: 'circle', x: 0, z: 4.4, radius: 0.2 },
   { id: 'cabin', type: 'box', minX: -3.2, maxX: 3.2, minZ: 6.45, maxZ: 10.45 },
-];
+].map(obstacle => obstacle.type === 'circle'
+  ? { ...obstacle, x: obstacle.x * SHIP_SCALE.x, z: obstacle.z * SHIP_SCALE.z, radius: obstacle.radius * Math.max(SHIP_SCALE.x, SHIP_SCALE.z) }
+  : { ...obstacle, minX: obstacle.minX * SHIP_SCALE.x, maxX: obstacle.maxX * SHIP_SCALE.x, minZ: obstacle.minZ * SHIP_SCALE.z, maxZ: obstacle.maxZ * SHIP_SCALE.z })
+  .concat(SHIP_GUNS.map(gun => ({ id: gun.id, type: 'circle', x: gun.x, z: gun.z, radius: 0.55 })));
 export const REGIONS = [
   { id: 'beach', name: 'Sunwake Strand', x: 0, z: 94, radius: 42, color: '#f4d89a', accent: '#ffce62', description: 'Golden coves and a friendly landing beach.' },
   { id: 'jungle', name: 'Palmheart Wilds', x: -68, z: 12, radius: 46, color: '#3b9e69', accent: '#9deb75', description: 'Tall palms shelter an ancient compass shrine.' },

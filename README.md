@@ -35,10 +35,10 @@ Use a desktop or laptop with a keyboard, mouse, and a browser supporting WebGL2.
 | Mouse | Look; click the game to capture the pointer |
 | Right mouse drag | Look when pointer capture is unavailable |
 | Shift | Sprint |
-| Space | Jump; leave the flying ship and deploy your glider |
-| Left mouse | Fire the equipped blaster |
+| Space | Leave a deck cannon; jump or leave the flying ship and deploy your glider |
+| Left mouse (hold) | Fire the equipped blaster or mounted deck cannon |
 | F | Cutlass swing |
-| E | Open treasure, activate a shrine, restore the lighthouse, or revive a nearby friend |
+| E | Man or leave a deck cannon, use an airship lift, activate a shrine, restore the lighthouse, or revive a nearby friend |
 | Q | Healing pulse for you and nearby crew |
 | R | Reload |
 | 1 / 2 / 3 / 4 / 5 | Flintlock / scatter blaster / tide repeater / burst carbine / longshot |
@@ -50,7 +50,11 @@ The shared world continues while a player's menu is open. Sound and graphics set
 
 ## Your voyage
 
-The ship cruises above the island for 28 seconds. Jump when ready, steer while gliding, and land safely. Pirates still aboard at the end are automatically dropped above Sunwake Strand. Explore Sunwake Strand, Palmheart Wilds, Emberpeak Caldera, Moonbloom Grove, and central Tideglass Haven. The map and colored shrine markers guide the crew.
+The larger Skywake has a deck 50% wider and longer, with four brass swivel cannons. The ship cruises above the island for 28 seconds, then parks. Jump when ready, steer while gliding, and land safely. Pirates who have not manned a gun or returned by lift are automatically dropped above Sunwake Strand at the end of the flight. Explore Sunwake Strand, Palmheart Wilds, Emberpeak Caldera, Moonbloom Grove, and central Tideglass Haven. The map and colored shrine markers guide the crew.
+
+Press E beside a free deck cannon to man it. Several crew can shoot together from different stations; each gun has one operator. Aim with the mouse and hold left click to fire, with unlimited ammunition and a short reload between shots. E or Space leaves the gun; another Space opens your glider. Eight harmless winged flying crabs orbit the ship as practice targets, take two cannon hits, and return seven seconds after being shot down. Cannons and targets are available during the voyage and finale; this first gunnery feature does not damage island enemies or advance the final fight, and practice awards no pearls or kills.
+
+To return, stand on a pale cyan lift with a brass rim and floating ↑ marker at Sunwake beach or beside Tideglass Lighthouse, then press E. Both lifts are marked and named on the island map (M). Returning preserves health and equipment, and you stay aboard until you choose to jump. Manning a cannon also lets you stay after the opening flight. You can return and glide down again throughout the adventure.
 
 Branching footpaths lead to eight places with their own daily bustle: Saltwind Harbor's tavern and fishing boats, the striped awnings of Tideglass Market, Windward Farm's turning windmill, the ruins of Old Watch, Palmheart Camp, the caldera forge at Cinderworks, Moonwatch's observatory, and the hull under repair at Driftwood Yard. Friendly fishers, merchants, farmers, a smith, a lookout, a scholar, and shipwrights tend their work sites. Walk through the open doorways of nine furnished buildings to explore taverns, cottages, warehouses, a barn, forge, and barracks. Each contains a chest. Roofs cut away while you are inside, and pale gaps on map footprints mark entrances. Solid walls block movement, shots and interactions; open doors let you fight between indoors and outdoors.
 
@@ -76,7 +80,7 @@ Start with a Common Flintlock and Scatter Blaster, then find the other three gun
 | Burst Carbine | 18 | Three timed shots per burst, up to 48 m |
 | Longshot | 4 | Slow, powerful scoped shots, up to 80 m |
 
-The cutlass is always available. Q restores up to 35 health in a nine-meter radius and has a 20-second cooldown. Health also regenerates after eight seconds without damage.
+On foot, the cutlass is always available. Q restores up to 35 health in a nine-meter radius and has a 20-second cooldown. Leave a deck cannon before using hand weapons or healing. Health also regenerates after eight seconds without damage.
 
 Falling into the sea returns you safely to the landing beach. A knocked pirate can be revived by a nearby friend with E, or is automatically rescued after eight seconds with brief immunity. The whole crew being knocked down never ends the voyage.
 

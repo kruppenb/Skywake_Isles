@@ -4,7 +4,8 @@ const lerp = (a, b, amount) => a + (b - a) * amount;
 const poseFields = ['x', 'y', 'z', 'pitch', 'deckX', 'deckZ', 'vy'];
 
 export function poseDiscontinuity(previous, current, dt = .05) {
-  if (!previous || previous.mode !== current.mode || !!previous.knockedUntil !== !!current.knockedUntil) return true;
+  if (!previous || previous.mode !== current.mode || (previous.gunId || null) !== (current.gunId || null)
+    || !!previous.shipReturned !== !!current.shipReturned || !!previous.knockedUntil !== !!current.knockedUntil) return true;
   const aboard = current.mode === 'aboard';
   const dx = finite(current[aboard ? 'deckX' : 'x']) - finite(previous[aboard ? 'deckX' : 'x']);
   const dz = finite(current[aboard ? 'deckZ' : 'z']) - finite(previous[aboard ? 'deckZ' : 'z']);
@@ -15,7 +16,7 @@ export function poseDiscontinuity(previous, current, dt = .05) {
 // The ship's own movement is transport, not a footstep. Use the same rule for
 // local predicted poses and the displayed, interpolated poses of other crew.
 export function displayedSpeed(previous, current, dt, reset = false) {
-  if (reset || !(dt > 0) || dt > .2 || poseDiscontinuity(previous, current, dt) || current.knockedUntil || current.mode === 'gliding') return 0;
+  if (reset || !(dt > 0) || dt > .2 || poseDiscontinuity(previous, current, dt) || current.knockedUntil || current.gunId || current.mode === 'gliding') return 0;
   const aboard = current.mode === 'aboard';
   const x = aboard ? 'deckX' : 'x', z = aboard ? 'deckZ' : 'z';
   return Math.min(12, Math.hypot(finite(current[x]) - finite(previous[x]), finite(current[z]) - finite(previous[z])) / dt);

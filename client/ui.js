@@ -5,6 +5,7 @@ import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
 import { FINALE_STAGES } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
+import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_RANGE } from '../shared/airship.js';
 import { createLootReveal } from './loot-reveal.js';
 
 const $ = (id) => document.getElementById(id);
@@ -67,7 +68,25 @@ export function finaleAnnouncement(event) {
 }
 
 export function findInteractable(state, player) {
-  if (!player || player.mode !== 'ground' || player.knockedUntil > state.elapsed || state.phase === 'victory') return null;
+  if (!player || player.knockedUntil > state.elapsed || state.phase === 'victory') return null;
+  if (player.mode === 'aboard') {
+    if (!['voyage', 'finale'].includes(state.phase) || player.online === false || !(player.hp > 0)) return null;
+    const mounted = SHIP_GUNS.find((gun) => gun.id === player.gunId);
+    if (mounted) return { ...mounted, kind: 'gun', label: 'Leave gun' };
+    const nearby = SHIP_GUNS.map((gun) => ({ ...gun, distance: Math.hypot(player.deckX - gun.x, player.deckZ - gun.z) }))
+      .filter((gun) => gun.distance <= GUN_INTERACTION_RANGE).sort((a, b) => a.distance - b.distance);
+    for (const gun of nearby) {
+      const occupantId = state.shipGuns?.find((entry) => entry.id === gun.id)?.occupantId;
+      if (!occupantId || occupantId === player.id) return { ...gun, kind: 'gun', label: `Man ${gun.name}` };
+    }
+    if (nearby.length) {
+      const gun = nearby[0], occupantId = state.shipGuns?.find((entry) => entry.id === gun.id)?.occupantId;
+      const occupant = state.players.find((entry) => entry.id === occupantId);
+      return { ...gun, kind: 'gun', disabled: true, label: `${gun.name} · ${occupant?.name || 'Crew'} at gun` };
+    }
+    return null;
+  }
+  if (player.mode !== 'ground') return null;
   const options = [];
   const reachable = (target) => hasWorldLineOfSight(
     { x: player.x, y: player.y + 1.1, z: player.z },
@@ -75,6 +94,15 @@ export function findInteractable(state, player) {
   for (const friend of state.players) {
     if (friend.id !== player.id && friend.online && friend.knockedUntil > state.elapsed && distance(player, friend) <= 3.5 && reachable(friend)) {
       options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance(player, friend) - 10 });
+    }
+  }
+  if (['voyage', 'finale'].includes(state.phase) && player.grounded && player.hp > 0 && player.online !== false) {
+    for (const lift of AIRSHIP_RETURNS) {
+      const ground = heightAt(lift.x, lift.z);
+      const separation = Math.hypot(player.x - lift.x, player.y - ground, player.z - lift.z);
+      if (separation > RETURN_RANGE || !hasWorldLineOfSight(
+        { x: player.x, y: player.y + 1.25, z: player.z }, { x: lift.x, y: ground + .8, z: lift.z })) continue;
+      options.push({ ...lift, kind: 'airship-return', label: 'Teleport to airship', color: '#a5f5f0', distance: separation });
     }
   }
   // Chests open by walking over them, so they never ask for E; only shrines,
@@ -98,8 +126,43 @@ export function findInteractable(state, player) {
   return options.sort((a, b) => a.distance - b.distance)[0] || null;
 }
 
+export function airshipBanner(state, player) {
+  if (player?.mode !== 'aboard') return null;
+  if (player.gunId) return { text: 'Mouse aim · Hold click fire · E / Space leave gun', button: 'Leave gun' };
+  if (player.shipReturned) return { text: 'Welcome aboard! E man a deck gun · Space jump & glide', button: 'Jump & glide' };
+  return { text: `${Math.max(0, Math.ceil(SHIP_DURATION - state.elapsed))}s until the crew drops. E man a deck gun or Space glide.`, button: 'Jump & glide' };
+}
+
+export function cannonPresentation(state, player, { elapsed = state.elapsed, connected = false, controlsActive = false, menuOpen = false } = {}) {
+  const gun = SHIP_GUNS.find((entry) => entry.id === player?.gunId);
+  if (!gun || player.mode !== 'aboard') return null;
+  const active = connected && controlsActive && !menuOpen && ['voyage', 'finale'].includes(state.phase)
+    && player.online !== false && player.hp > 0 && !(player.knockedUntil > elapsed);
+  const remaining = Math.max(0, (state.shipGuns?.find((entry) => entry.id === gun.id)?.readyAt || 0) - elapsed);
+  return { active, scoped: false, reloading: active && remaining > 0, reloadProgress: clamp(1 - remaining / GUN_COOLDOWN, 0, 1),
+    sensitivity: 1, remaining, name: 'Deck cannon' };
+}
+
+// Flying target snapshots give the sphere center directly, unlike ground crabs.
+export function flyingTargetAtRay(state, origin, direction) {
+  let nearest = GUN_RANGE, target = null;
+  for (const candidate of state.flyingTargets || []) {
+    if (!(candidate.hp > 0)) continue;
+    const ox = origin.x - candidate.x, oy = origin.y - candidate.y, oz = origin.z - candidate.z;
+    const b = ox * direction.x + oy * direction.y + oz * direction.z;
+    const c = ox * ox + oy * oy + oz * oz - candidate.radius ** 2;
+    const discriminant = b * b - c;
+    if (discriminant < 0) continue;
+    const root = Math.sqrt(discriminant), entry = -b - root, exit = -b + root;
+    const distance = entry >= 0 ? entry : exit;
+    if (distance >= 0 && distance <= nearest) { nearest = distance; target = candidate; }
+  }
+  return target;
+}
+
 export function nearestObjective(state, player) {
   if (!player) return null;
+  if (player.gunId) return null;
   if (player.mode === 'aboard' || player.mode === 'gliding') return { ...SPAWN, id: 'strand', name: 'Sunwake Strand', kind: 'landing' };
   if (state.phase === 'finale') {
     const boss = state.enemies.find((enemy) => enemy.id === state.bossId);
@@ -207,7 +270,7 @@ function createMapPainter() {
     const mapEvents = state.phase === 'voyage' ? sideEventEntries(state).filter((event) => ['available', 'active'].includes(event.status)) : [];
     const occupied = [];
     if (large) {
-      for (const point of [...SHRINES, BEACON, ...POINTS_OF_INTEREST, ...mapEvents]) {
+      for (const point of [...SHRINES, BEACON, ...POINTS_OF_INTEREST, ...mapEvents, ...AIRSHIP_RETURNS]) {
         const position = mapPoint(point); const radius = point === BEACON ? 17 : point.placeId ? 12 : point.radius ? 7 : 15;
         occupied.push({ x: position.x - radius, y: position.y - radius, width: radius * 2, height: radius * 2 });
       }
@@ -263,10 +326,19 @@ function createMapPainter() {
     }
     // At a defense settlement, its shield and title also identify the place.
     // Every destination uses the same collision-aware label placement below.
-    const destinations = [...mapEvents, ...POINTS_OF_INTEREST.filter((place) => !mapEvents.some((event) => event.placeId === place.id))];
+    const destinations = [...AIRSHIP_RETURNS.map((lift) => ({ ...lift, kind: 'airship-return' })), ...mapEvents,
+      ...POINTS_OF_INTEREST.filter((place) => !mapEvents.some((event) => event.placeId === place.id))];
     for (const place of destinations) {
-      const position = mapPoint(place); const isEvent = !!place.placeId; const discovered = discoveries.has(isEvent ? place.placeId : place.id);
-      if (isEvent) shield(ctx, position.x, position.y, large ? 8 : 4.5, place.status === 'active');
+      const position = mapPoint(place); const isEvent = !!place.placeId, isLift = place.kind === 'airship-return';
+      const discovered = isLift || discoveries.has(isEvent ? place.placeId : place.id);
+      if (isLift) {
+        const radius = large ? 8 : 5;
+        ctx.beginPath(); ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#baf9f3'; ctx.fill(); ctx.strokeStyle = '#856331'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = '#174555'; ctx.lineWidth = large ? 1.8 : 1.3;
+        ctx.beginPath(); ctx.moveTo(position.x, position.y + radius * .5); ctx.lineTo(position.x, position.y - radius * .5);
+        ctx.moveTo(position.x - radius * .45, position.y); ctx.lineTo(position.x, position.y - radius * .5); ctx.lineTo(position.x + radius * .45, position.y); ctx.stroke();
+      } else if (isEvent) shield(ctx, position.x, position.y, large ? 8 : 4.5, place.status === 'active');
       else {
         ctx.beginPath(); ctx.arc(position.x, position.y, large ? 4 : 2, 0, Math.PI * 2);
         ctx.fillStyle = discovered ? '#286e67' : '#e9efda'; ctx.fill();
@@ -274,8 +346,8 @@ function createMapPainter() {
       }
       if (!large) continue;
       ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
-      const statusLine = isEvent ? `${place.status === 'active' ? `Wave ${place.wave}/${SIDE_EVENT_WAVES}` : 'Optional defense'} · ${place.reward} pearls` : '';
-      const labelWidth = Math.max(ctx.measureText(place.name).width, ctx.measureText(statusLine).width) + 10; const labelHeight = isEvent ? 31 : 18;
+      const statusLine = isLift ? 'E · Teleport to airship' : isEvent ? `${place.status === 'active' ? `Wave ${place.wave}/${SIDE_EVENT_WAVES}` : 'Optional defense'} · ${place.reward} pearls` : '';
+      const labelWidth = Math.max(ctx.measureText(place.name).width, ctx.measureText(statusLine).width) + 10; const labelHeight = statusLine ? 31 : 18;
       const candidates = [
         [12, -labelHeight / 2], [-labelWidth - 12, -labelHeight / 2], [-labelWidth / 2, -labelHeight - 12], [-labelWidth / 2, 14],
         [12, -labelHeight - 12], [-labelWidth - 12, -labelHeight - 12], [12, 15], [-labelWidth - 12, 15],
@@ -291,10 +363,10 @@ function createMapPainter() {
       ctx.beginPath(); ctx.moveTo(position.x, position.y);
       ctx.lineTo(clamp(position.x, label.x, label.x + label.width), clamp(position.y, label.y, label.y + label.height));
       ctx.strokeStyle = '#315e6677'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = isEvent ? '#123c51f2' : discovered ? '#e9f5dfed' : '#eef1e3dd'; ctx.fillRect(label.x, label.y, label.width, label.height);
+      ctx.fillStyle = isLift ? '#d7faf1f2' : isEvent ? '#123c51f2' : discovered ? '#e9f5dfed' : '#eef1e3dd'; ctx.fillRect(label.x, label.y, label.width, label.height);
       ctx.textAlign = 'left'; ctx.fillStyle = isEvent ? SIDE_EVENT_COLOR : discovered ? '#19594f' : '#3b6269';
       ctx.fillText(place.name, label.x + 5, label.y + 12);
-      if (isEvent) { ctx.fillStyle = '#fff6dd'; ctx.font = '10px "Trebuchet MS",sans-serif'; ctx.fillText(statusLine, label.x + 5, label.y + 25); }
+      if (statusLine) { ctx.fillStyle = isLift ? '#315e66' : '#fff6dd'; ctx.font = '10px "Trebuchet MS",sans-serif'; ctx.fillText(statusLine, label.x + 5, label.y + 25); }
     }
     for (const ping of state.pings) {
       if (ping.expiresAt < elapsed) continue;
@@ -583,10 +655,12 @@ export function createUI(callbacks = {}) {
       show(refs['scope-overlay'], presentation.scoped);
       document.body.classList.toggle('scoped', presentation.scoped);
       show(refs.reticle, presentation.active && !presentation.scoped);
-      refs.reticle.classList.toggle('scatter', player?.weapon === 'scatter');
+      refs.reticle.classList.toggle('scatter', !player?.gunId && player?.weapon === 'scatter');
+      refs.reticle.classList.toggle('cannon', !!player?.gunId);
       refs.reticle.classList.toggle('reloading', presentation.reloading);
       show(refs['look-hint'], presentation.active && (!view.locked || player?.weapon === 'longshot'));
-      text(refs['look-hint'], presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
+      text(refs['look-hint'], player?.gunId ? 'Hold right mouse to aim · Hold click fire · E / Space leave gun'
+        : presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
         : player?.weapon === 'longshot' ? 'Hold right mouse to scope Longshot · R reload · Esc menu'
           : 'Click to aim · Hold right mouse to look · R reload · Esc menu');
     },
@@ -606,6 +680,7 @@ export function createUI(callbacks = {}) {
       if (!playing && !refs['wave-banner'].hidden) api.announce(null);
       show(refs['victory-overlay'], won);
       document.body.classList.toggle('is-playing', joined);
+      document.body.classList.toggle('cannon-mounted', !!player?.gunId);
       if (!joined) return;
       if (lastPhase !== state.phase) {
         lastPhase = state.phase;
@@ -633,7 +708,9 @@ export function createUI(callbacks = {}) {
       let detail = objective ? `${objective.name} · ${objectiveDistance} m away` : 'Explore the island with your crew.';
       let activeShrine = null;
       if (player.mode === 'aboard') {
-        title = 'Jump from the ship'; detail = 'Press Space. Your glider opens automatically.';
+        title = player.gunId ? 'Try the deck cannon' : player.shipReturned ? 'The sky is yours again' : 'Take a gun or jump & glide';
+        detail = player.gunId ? 'Aim at the winged flying crabs. Two hits, then a fresh target returns.'
+          : 'E at a deck gun to practice. Space opens your glider.';
       } else if (player.mode === 'gliding') {
         title = 'Glide onto the island'; detail = 'Steer with WASD. Sunwake Strand is a friendly landing spot.';
       } else if (state.phase === 'finale') {
@@ -697,36 +774,44 @@ export function createUI(callbacks = {}) {
       refs['health-bar'].parentElement.classList.toggle('low-health', hp < 35);
       const downed = player.knockedUntil > state.elapsed;
       text(refs['health-status'], downed ? 'A friend can help you up' : player.invulnerableUntil > state.elapsed ? 'Safe landing shield' : hp < player.maxHp ? 'Rest a moment to recover' : 'Ready for adventure');
-      const reload = Math.max(0, player.reloadUntil - state.elapsed);
-      refs['ammo-count'].replaceChildren(document.createTextNode(reload > 0 ? '…' : String(player.ammo)));
-      const reserve = document.createElement('span'); reserve.textContent = `/ ${player.maxAmmo}`; refs['ammo-count'].append(reserve);
-      text(refs['reload-label'], reload > 0 ? `Reloading · ${reload.toFixed(1)}s` : 'R reload · ∞ reserve');
+      const cannon = cannonPresentation(state, player), mounted = !!cannon;
+      const reload = cannon ? cannon.remaining : Math.max(0, player.reloadUntil - state.elapsed);
+      refs['ammo-count'].replaceChildren(document.createTextNode(cannon ? '∞' : reload > 0 ? '…' : String(player.ammo)));
+      if (!cannon) { const reserve = document.createElement('span'); reserve.textContent = `/ ${player.maxAmmo}`; refs['ammo-count'].append(reserve); }
+      refs['ammo-count'].setAttribute('aria-label', cannon ? 'Unlimited cannon ammunition' : `${player.ammo} of ${player.maxAmmo} rounds`);
+      text(refs['reload-label'], cannon ? reload > 0 ? `Reloading · ${reload.toFixed(1)}s` : 'Ready · Unlimited ammo'
+        : reload > 0 ? `Reloading · ${reload.toFixed(1)}s` : 'R reload · ∞ reserve');
       for (const [index, weapon] of WEAPON_ORDER.entries()) {
         const slot = refs[`weapon-${weapon}`], owned = player.inventory?.[weapon];
         const rarity = RARITIES[owned?.rarity] || RARITIES.common;
-        slot.classList.toggle('selected', player.weapon === weapon); slot.classList.toggle('empty', !owned);
-        slot.setAttribute('aria-pressed', String(player.weapon === weapon));
+        slot.classList.toggle('selected', !mounted && player.weapon === weapon); slot.classList.toggle('empty', !owned);
+        slot.disabled = mounted;
+        slot.setAttribute('aria-pressed', String(!mounted && player.weapon === weapon));
         slot.setAttribute('aria-label', `${index + 1}: ${WEAPONS[weapon].name}, ${owned ? rarity.name : 'find in chests'}`);
         slot.style.setProperty('--rarity', owned ? rarity.color : '#8199a3');
         text(slot.querySelector('.weapon-rarity'), owned ? rarity.name : 'Find in chests');
       }
-      text(refs['equipped-name'], `${RARITIES[player.rarity]?.name || 'Common'} ${WEAPONS[player.weapon]?.name || 'Flintlock'}`);
-      refs['equipped-name'].style.color = RARITIES[player.rarity]?.color || RARITIES.common.color;
+      text(refs['equipped-name'], cannon ? cannon.name : `${RARITIES[player.rarity]?.name || 'Common'} ${WEAPONS[player.weapon]?.name || 'Flintlock'}`);
+      refs['equipped-name'].style.color = cannon ? '#ffe4a2' : RARITIES[player.rarity]?.color || RARITIES.common.color;
       const heal = Math.max(0, Math.ceil(player.healUntil - state.elapsed));
-      text(refs['heal-label'], heal ? `Heal ready in ${heal}s` : 'Healing pulse'); refs['heal-button'].classList.toggle('ready', !heal); refs['heal-button'].disabled = !!heal || downed;
+      text(refs['heal-label'], heal ? `Heal ready in ${heal}s` : 'Healing pulse'); refs['heal-button'].classList.toggle('ready', !heal && !mounted); refs['heal-button'].disabled = !!heal || downed || mounted;
       show(refs['knocked-banner'], downed);
       if (downed) text(refs['knocked-text'], `A crewmate can help you up. Otherwise, a safe rescue arrives in ${Math.ceil(player.knockedUntil - state.elapsed)}s.`);
       show(refs['ship-banner'], player.mode === 'aboard');
-      if (player.mode === 'aboard') text(refs['ship-banner-text'], `${Math.max(0, Math.ceil(SHIP_DURATION - state.elapsed))}s until the crew drops. Ready when you are!`);
+      const banner = airshipBanner(state, player);
+      if (banner) { text(refs['ship-banner-text'], banner.text); text(refs['drop-button'], `Space · ${banner.button}`); }
       const interact = findInteractable(state, player);
       show(refs['interact-hint'], !!interact && !downed);
-      if (interact) { text(refs['interact-hint'].lastElementChild, interact.label); refs['interact-hint'].style.borderColor = interact.color || '#ffd16c'; }
+      if (interact) {
+        text(refs['interact-hint'].lastElementChild, interact.label); refs['interact-hint'].style.borderColor = interact.color || '#ffd16c';
+        refs['interact-hint'].classList.toggle('occupied', !!interact.disabled);
+      }
       refs['hit-marker'].classList.toggle('active', now < hitUntil);
       const boss = state.enemies.find((enemy) => enemy.id === state.bossId && enemy.hp > 0);
       show(refs['boss-health'], state.phase === 'finale' && !!boss);
       if (boss) { refs['boss-meter'].value = boss.hp / boss.maxHp; text(refs['boss-percent'], `${Math.ceil(boss.hp / boss.maxHp * 100)}%`); }
-      show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && player.mode === 'ground');
-      if (target) { text(refs['target-health'].firstElementChild, ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
+      show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && (player.mode === 'ground' || mounted));
+      if (target) { text(refs['target-health'].firstElementChild, target.type === 'flying-crab' ? 'Flying crab' : ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
       const bearing = ((-view.yaw * 180 / Math.PI) % 360 + 360) % 360;
       for (const point of compassPoints) {
         const delta = ((point.degrees - bearing + 540) % 360) - 180;
