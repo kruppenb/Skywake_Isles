@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { heightAt } from '../shared/world.js';
-import { coastRockDressing } from '../shared/island.js';
+import { coastRockDressing, ISLAND_LANDMARK_COUNTS } from '../shared/island.js';
 import { createEnvironmentAssets, disposeOwnedResources } from './environment-assets.js';
 import { renderedHeightAt } from './environment-geometry.js';
 
-export const ISLAND_PREFABS = ['coast_palm_a', 'coast_palm_b', 'coast_rock_a', 'coast_rock_b', 'fishing_skiff_a', 'fishing_skiff_b'];
+// The three shrines the second island slice authors: the Palmheart gateway, the
+// Moonbloom ring and its grove, and the Emberpeak caldera.
+export const ISLAND_LANDMARK_PREFABS = ['palm_gate_pillar', 'palm_gate_lintel', 'moon_gate_ring', 'moon_gate_orb',
+  'shrine_mushroom', 'shrine_moon_crystal', 'caldera_ridge_a', 'caldera_ridge_b', 'caldera_amber_crystal', 'ember_core', 'ember_core_rock'];
+export const ISLAND_PREFABS = ['coast_palm_a', 'coast_palm_b', 'coast_rock_a', 'coast_rock_b', 'fishing_skiff_a', 'fishing_skiff_b', ...ISLAND_LANDMARK_PREFABS];
 export const ISLAND_MATERIAL_BINDINGS = Object.freeze({
   palm_trunk:  { source: 'pine_bark',      color: [2.70, 2.60, 2.60], normalScale: .80 },
   coast_frond: { source: 'needle_foliage', color: [3.20, 3.30, 2.00], normalScale: .50, doubleSided: true },
@@ -19,9 +23,29 @@ export const ISLAND_MATERIAL_BINDINGS = Object.freeze({
   skiff_canvas:{ source: 'ground_earth',   color: [8.50, 8.00, 6.80], normalScale: .18, doubleSided: true },
   hemp_rope:   { source: 'needle_foliage', color: [2.60, 1.70, 1.10] },
   forged_iron: { source: 'forged_iron' },
+  // Palmheart's gateway is jungle stone: worn olive-jade blocks with pale
+  // yellow-green carved edges, not another Old Watch grey-green wall.
+  jungle_gate_stone: { source: 'watch_stone',   color: [2.70, 3.00, 1.90], normalScale: .75 },
+  jungle_gate_edge:  { source: 'watch_stone',   color: [4.00, 4.20, 2.70], normalScale: .60 },
+  // Moonbloom keeps the grove's silver-lilac language: dressed lunar stone, the
+  // lilac caps on pale stems, and one cyan emissive slot for the ring inlay,
+  // the orb and the crystal shards - an emissive binding, never a scene light.
+  lunar_stone: { source: 'watch_stone',   color: [4.00, 3.60, 5.20], normalScale: .55 },
+  lunar_cap:   { source: 'watch_stone',   color: [3.40, 2.60, 8.00], normalScale: .35 },
+  lunar_stem:  { source: 'aged_timber',   color: [4.40, 4.50, 4.30], normalScale: .30 },
+  lunar_glow:  { source: 'lantern_amber', color: [.80, 2.90, 12.0], emissive: [.16, .40, .44], emissiveIntensity: 1 },
+  // Emberpeak is fractured charcoal basalt with iron-brown weathered shoulders
+  // and amber seams. The dark stone comes from the binding, never from
+  // near-black vertex colours, which the Cinderworks pass proved unreadable.
+  caldera_basalt:    { source: 'watch_stone',   color: [1.85, 1.45, 1.40], normalScale: .90 },
+  caldera_weathered: { source: 'watch_stone',   color: [2.70, 1.70, 1.10], normalScale: .80 },
+  caldera_glow:      { source: 'lantern_amber', color: [1.15, .75, .50], emissive: [.55, .16, .025], emissiveIntensity: 1 },
 });
 const SHARED_URL = '/assets/old-watch/kit.glb', ISLAND_URL = '/assets/island/kit.glb';
-const PALM_CELL = 64;
+const PALM_CELL = 64, LANDMARK_CELL = 64;
+// The three roots that take over the original luminous draws never cast a
+// shadow, so the caldera core and both crystal kinds keep that silhouette.
+const LANDMARK_SHADOWLESS = new Set(['shrine_moon_crystal', 'caldera_amber_crystal', 'ember_core']);
 // One uniform drives the canopy hook. Only the green and dead fronds move; the
 // trunks, coconuts, rocks and moored skiffs keep a rigid silhouette.
 const CANOPY_WIND = { key: 'island-canopy-wind-v1', hook: 'transformed.x += sin(islandWind + instanceMatrix[3].x * .47 + instanceMatrix[3].z * .31) * max(position.y - 3.0, 0.0) * .010;' };
@@ -43,6 +67,17 @@ function sourceMaterials(scene) {
 function place(prefab, x, y, z, yaw = 0) {
   const root = prefab.clone(true); root.position.set(x, y, z); root.rotation.y = yaw;
   root.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+  return root;
+}
+// A landmark stands on the exact transform buildScenery recorded for the draw it
+// replaces: an analytic ground or pivot height, a full XYZ rotation and a scale
+// that is non-uniform on the crescent towers.
+function placeLandmark(prefab, site) {
+  const root = prefab.clone(true), shadow = !LANDMARK_SHADOWLESS.has(prefab.name);
+  root.position.set(site.x, site.y, site.z);
+  root.rotation.set(site.rotation[0], site.rotation[1], site.rotation[2]);
+  root.scale.set(site.scale[0], site.scale[1], site.scale[2]);
+  root.traverse(object => { if (object.isMesh) { object.castShadow = shadow; object.receiveShadow = true; } });
   return root;
 }
 
@@ -87,7 +122,45 @@ function batches(prefab, points, parent, wind) {
   return result;
 }
 
-export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [] } = {}) {
+// Repeated landmarks - the eighteen crescent towers, the ring rocks, both
+// crystal kinds and the grove mushrooms - collapse to one InstancedMesh per
+// source primitive per 64 m cell. Unlike the palm canopy this helper takes the
+// captured transform whole: it never resamples the terrain, never applies a
+// uniform-only scale and never thins or distance-hides, because a missing
+// gateway pillar or caldera tower would change the island's skyline.
+function landmarkBatches(prefab, sites, parent) {
+  if (!sites.length) return [];
+  const cells = new Map(), result = [], transform = new THREE.Object3D(), matrix = new THREE.Matrix4();
+  const shadow = !LANDMARK_SHADOWLESS.has(prefab.name);
+  for (const site of sites) {
+    const key = Math.floor(site.x / LANDMARK_CELL) + ':' + Math.floor(site.z / LANDMARK_CELL);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(site);
+  }
+  const template = prefab.clone(true); template.updateMatrixWorld(true);
+  template.traverse(source => {
+    if (!source.isMesh) return;
+    for (const [key, cellSites] of cells) {
+      // The bound material is shared, not cloned: no landmark sways, so a copy
+      // would only add a resource to dispose.
+      const mesh = new THREE.InstancedMesh(source.geometry, source.material, cellSites.length);
+      mesh.name = 'island-landmark-' + prefab.name + '-' + key;
+      cellSites.forEach((site, index) => {
+        transform.position.set(site.x, site.y, site.z);
+        transform.rotation.set(site.rotation[0], site.rotation[1], site.rotation[2]);
+        transform.scale.set(site.scale[0], site.scale[1], site.scale[2]); transform.updateMatrix();
+        matrix.multiplyMatrices(transform.matrix, source.matrixWorld); mesh.setMatrixAt(index, matrix);
+      });
+      mesh.castShadow = shadow; mesh.receiveShadow = true; mesh.computeBoundingSphere();
+      mesh.userData.fullCount = cellSites.length; mesh.userData.landmarkPrefab = prefab.name;
+      const [cx, cz] = key.split(':').map(Number); mesh.userData.cellCenter = { x: (cx + .5) * LANDMARK_CELL, z: (cz + .5) * LANDMARK_CELL };
+      parent.add(mesh); result.push(mesh);
+    }
+  });
+  return result;
+}
+
+export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [], landmarkSites = [] } = {}) {
   const prefabs = prefabRoots(kit.scene, ISLAND_PREFABS);
   const materials = sourceMaterials(shared.scene), slots = sourceMaterials(kit.scene);
   for (const name of slots.keys()) {
@@ -104,6 +177,10 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
       if (binding.color) material.color.multiply(new THREE.Color(...binding.color));
       if (binding.normalScale != null) material.normalScale.setScalar(binding.normalScale);
       if (binding.doubleSided) material.side = THREE.DoubleSide;
+      // The shrine glints are emissive clones of the shared lantern material;
+      // the kit adds no scene light and never edits a borrowed source.
+      if (binding.emissive) material.emissive.setRGB(...binding.emissive);
+      if (binding.emissiveIntensity != null) material.emissiveIntensity = binding.emissiveIntensity;
       bindings.set(name, material);
     }
     const bound = Object.fromEntries(Object.entries(prefabs).map(([name, prefab]) => {
@@ -129,28 +206,56 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
       const root = place(bound[index % 2 ? 'fishing_skiff_b' : 'fishing_skiff_a'], 0, 0, 0, 0);
       root.name = 'island-skiff-' + index; return root;
     });
-    return { group, wind, detail: [], canopy, skiffs: authored, ownedRoots: [group, boundLibrary, ...authored],
+    // The three shrines stand on the transforms buildScenery recorded while it
+    // drew the originals. A repeated root is instanced per cell; the four
+    // one-offs - the carved lintel, the moon gate and its orb, and the magma
+    // core - are shared-material clones.
+    const byPrefab = new Map();
+    for (const site of landmarkSites) {
+      if (!bound[site.prefab]) throw new Error('Island landmark prefab is missing: ' + site.prefab);
+      if (!byPrefab.has(site.prefab)) byPrefab.set(site.prefab, []);
+      byPrefab.get(site.prefab).push(site);
+    }
+    const landmarkMeshes = [];
+    for (const name of ISLAND_LANDMARK_PREFABS) {
+      const sites = byPrefab.get(name) ?? [];
+      if (sites.length > 1) { landmarkMeshes.push(...landmarkBatches(bound[name], sites, group)); continue; }
+      for (const site of sites) {
+        const root = placeLandmark(bound[name], site); root.name = 'island-landmark-' + site.id; group.add(root);
+        root.traverse(object => { if (object.isMesh) landmarkMeshes.push(object); });
+      }
+    }
+    const landmarkCounts = Object.fromEntries(Object.keys(ISLAND_LANDMARK_COUNTS)
+      .map(kind => [kind, landmarkSites.filter(site => site.kind === kind).length]));
+    return { group, wind, detail: [], canopy, skiffs: authored, landmarkMeshes, ownedRoots: [group, boundLibrary, ...authored],
       counts: { prefabs: ISLAND_PREFABS.length, palms: palmSites.length, collidablePalms: palmSites.filter(site => site.id).length,
-        rocks: rocks.length, skiffs: authored.length, canopyMeshes: canopy.length, cellSize: PALM_CELL } };
+        rocks: rocks.length, skiffs: authored.length, canopyMeshes: canopy.length, cellSize: PALM_CELL,
+        landmarks: landmarkSites.length, landmarkMeshes: landmarkMeshes.length, landmarkCounts, landmarkCellSize: LANDMARK_CELL } };
   } catch (error) { disposeOwnedResources([group, boundLibrary], borrowed); throw error; }
 }
 
-export function createIsland({ scene, settlements, assets = null, legacyScenery = null, palmSites = [], rockSites = [], load } = {}) {
+export function createIsland({ scene, settlements, assets = null, legacyScenery = null, landmarkFallback = null, palmSites = [], rockSites = [], landmarkSites = [], load } = {}) {
   const cache = assets ?? createEnvironmentAssets(load ? { load } : {}), ownsCache = !assets;
   const leases = [cache.acquire(SHARED_URL), cache.acquire(ISLAND_URL)];
   let disposed = false, kit = null, sources = [], status = 'loading', error = null;
   const release = () => { for (const lease of leases) lease.release(); if (ownsCache) cache.dispose(); };
+  // Both original batches - the coast strand and the shrine solid/glow pair -
+  // come back together, whatever failed.
   const restoreFallback = () => {
     try { settlements.setIslandKit(null); }
     catch (failure) { error = [error, 'Fallback restore: ' + String(failure?.message ?? failure)].filter(Boolean).join('; '); }
     if (legacyScenery) legacyScenery.visible = true;
+    if (landmarkFallback) landmarkFallback.visible = true;
   };
   const ready = Promise.all(leases.map(lease => lease.ready)).then(([shared, island]) => {
     if (disposed) return false;
     sources = [island.scene, shared.scene];
-    kit = buildIslandKit(island, shared, { palmSites, rockSites, skiffs: settlements.group.userData.skiffs ?? [] });
+    kit = buildIslandKit(island, shared, { palmSites, rockSites, landmarkSites, skiffs: settlements.group.userData.skiffs ?? [] });
+    // Nothing is hidden until every coast palm, surf rock, skiff and shrine
+    // landmark is installed and the settlement has taken the kit.
     scene.add(kit.group); settlements.setIslandKit(kit);
     if (legacyScenery) legacyScenery.visible = false;
+    if (landmarkFallback) landmarkFallback.visible = false;
     status = 'ready'; return true;
   }).catch(failure => {
     error = String(failure?.message ?? failure);

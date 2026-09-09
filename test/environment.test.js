@@ -187,6 +187,19 @@ test('routing scenery into area batches preserves all original geometry and the 
     { id: 'prop-17', x: 18, z: 27, radius: 3.2, height: 5, yaw: .014833393855951726 },
   ], 'replacement huts retain the original layout and random yaws');
   assert.equal(scenery.group.userData.tideglassHutSites, scenery.tideglassHutSites);
+  // The shrine slice retargets its solid draws into one batch and moves the
+  // luminous batch whole; both hang under a single fallback group with one
+  // parent each, so no shrine item is drawn twice or left behind.
+  assert.equal(scenery.landmarkFallback.name, 'island-shrines-original-scenery');
+  assert.deepEqual(scenery.landmarkFallback.children, [scenery.landmarkLegacyScenery, scenery.landmarkLegacyGlow]);
+  assert.equal(scenery.landmarkLegacyScenery.parent, scenery.landmarkFallback);
+  assert.equal(scenery.landmarkLegacyGlow.parent, scenery.landmarkFallback);
+  assert.equal(scenery.landmarkFallback.visible, true);
+  assert.equal(scenery.landmarkLegacyGlow.castShadow, false, 'the original glow draws still skip the shadow pass');
+  assert.ok(scenery.landmarkLegacyScenery.geometry.attributes.position.count > 0);
+  assert.ok(scenery.landmarkLegacyGlow.geometry.attributes.position.count > 0);
+  assert.equal(scenery.group.userData.landmarkSites, scenery.landmarkSites);
+  assert.equal(scenery.landmarkSites.length, 50, 'every original shrine draw is recorded for the authored kit');
   assert.equal(scenery.tideglassHutFallback.visible, true); assert.equal(scenery.tideglassLegacyVegetation.visible, true);
   assert.ok(scenery.tideglassHutFallback.geometry.attributes.position.count > 0);
   const plants = scenery.tideglassLegacyVegetation.geometry.attributes.position;

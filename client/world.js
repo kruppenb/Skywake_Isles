@@ -30,7 +30,7 @@ import { cinderworksWeight } from '../shared/cinderworks.js';
 import { createCinderworks } from './cinderworks.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { createMoonwatch } from './moonwatch.js';
-import { isCoastRegion } from '../shared/island.js';
+import { isCoastRegion, ISLAND_LANDMARK_NOMINALS } from '../shared/island.js';
 import { createIsland } from './island.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
@@ -179,6 +179,10 @@ export function buildScenery(palette, random) {
   const driftwoodDecoration = new GeoBatch(palette), sunwakeLanding = new GeoBatch(palette), palmheartDecoration = new GeoBatch(palette);
   const cinderworksDecoration = new GeoBatch(palette), moonwatchDecoration = new GeoBatch(palette);
   const coastDecoration = new GeoBatch(palette), coastPalmSites = [], coastRockSites = [];
+  // Every original shrine draw moves into this batch, and the sites it stands on
+  // are recorded as the authored kit installs them. The glow draws stay in the
+  // luminous batch above - all of them are shrine items already.
+  const landmarkDecoration = new GeoBatch(palette), landmarkSites = [];
   for (const obstacle of OBSTACLES) {
     if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
@@ -254,37 +258,70 @@ export function buildScenery(palette, random) {
   for (let i = 0; i < 18; i++) {
     const a = -.45 * Math.PI + i / 17 * .9 * Math.PI;
     const x = volcano.x + Math.sin(a) * (15 + random() * 3), z = volcano.z - Math.cos(a) * (17 + random() * 3), y = heightAt(x, z), h = 5 + random() * 6;
-    land.add('pebble', [x, y + h * .36, z], [3.8, h * .62, 3.5], [.10, a, -.08], i % 2 ? '#9b6d5a' : '#bd795e');
-    land.add('cone', [x, y + h * .9, z], [2.4, h * .45, 2.2], [0, a, -.08], '#d7956d');
+    landmarkDecoration.add('pebble', [x, y + h * .36, z], [3.8, h * .62, 3.5], [.10, a, -.08], i % 2 ? '#9b6d5a' : '#bd795e');
+    landmarkDecoration.add('cone', [x, y + h * .9, z], [2.4, h * .45, 2.2], [0, a, -.08], '#d7956d');
     if (i % 3 === 0) addCrystal(luminous, x + 1, y + .2, z + 1.8, 1.1, a, '#ffd276');
+    // One fractured tower replaces each original pebble-and-cone pair; the lean
+    // and roll are authored into the silhouette, so only the yaw carries over.
+    landmarkSites.push({ id: 'caldera-ridge-' + i, kind: 'ridges', prefab: i % 2 ? 'caldera_ridge_b' : 'caldera_ridge_a',
+      x, y, z, rotation: [0, a, 0], scale: [1, h / ISLAND_LANDMARK_NOMINALS.caldera_ridge_a.height, 1], height: h });
+    if (i % 3 === 0) landmarkSites.push({ id: 'caldera-amber-crystal-' + i, kind: 'amberCrystals', prefab: 'caldera_amber_crystal',
+      x: x + 1, y: y + .2, z: z + 1.8, rotation: [0, a, 0], scale: [1.1, 1.1, 1.1], size: 1.1 });
   }
   const coreX = volcano.x, coreZ = volcano.z - 22, coreY = heightAt(coreX, coreZ);
   luminous.add('sphere', [coreX, coreY + .30, coreZ], [5.0, .50, 4.0], [0, 0, 0], '#f8b968');
+  landmarkSites.push({ id: 'ember-core', kind: 'cores', prefab: 'ember_core', x: coreX, y: coreY, z: coreZ, rotation: [0, 0, 0], scale: [1, 1, 1] });
   for (let i = 0; i < 10; i++) {
     const a = i / 10 * TAU;
-    land.add('pebble', [coreX + Math.sin(a) * 5.2, coreY + 1.1, coreZ + Math.cos(a) * 4.2], [1.8, 1.7, 1.8], [0, a, .2], '#816465');
+    landmarkDecoration.add('pebble', [coreX + Math.sin(a) * 5.2, coreY + 1.1, coreZ + Math.cos(a) * 4.2], [1.8, 1.7, 1.8], [0, a, .2], '#816465');
+    // The ring rocks are centred on the original pebble, not the ground, and
+    // keep its [0, a, .2] tilt.
+    landmarkSites.push({ id: 'ember-core-rock-' + i, kind: 'coreRocks', prefab: 'ember_core_rock',
+      x: coreX + Math.sin(a) * 5.2, y: coreY + 1.1, z: coreZ + Math.cos(a) * 4.2, rotation: [0, a, .2], scale: [1, 1, 1] });
   }
   const moon = SHRINES.find(s => s.id === 'moon') || { x: 76, z: 32 };
-  for (const [dx, dz, s] of [[-14, -12, 2.1], [15, -9, 2.6], [18, 11, 1.8], [-9, 16, 1.6]]) {
+  // The point-of-interest filter runs before the yaw draw, exactly as it did, so
+  // three of the four candidate caps are admitted and the RNG stream is intact.
+  for (const [index, [dx, dz, s]] of [[-14, -12, 2.1], [15, -9, 2.6], [18, 11, 1.8], [-9, 16, 1.6]].entries()) {
     const x = moon.x + dx, z = moon.z + dz;
     if (POINTS_OF_INTEREST.some(p => Math.hypot(x - p.x, z - p.z) < p.radius + s * 1.65)) continue;
-    addMushroom(land, x, heightAt(x, z), z, s, random() * TAU);
+    const yaw = random() * TAU, y = heightAt(x, z);
+    addMushroom(landmarkDecoration, x, y, z, s, yaw);
+    landmarkSites.push({ id: 'moon-mushroom-' + index, kind: 'mushrooms', prefab: 'shrine_mushroom',
+      x, y, z, rotation: [0, yaw, 0], scale: [s, s, s], size: s });
   }
   for (let i = 0; i < 11; i++) {
     const a = i / 11 * TAU, x = moon.x + Math.sin(a) * 13.7, z = moon.z + Math.cos(a) * 13.7;
-    if (routeDistance(x, z) > 6) addCrystal(luminous, x, heightAt(x, z), z, .7 + random() * .6, a, '#a1e8e5');
+    if (routeDistance(x, z) > 6) {
+      const size = .7 + random() * .6, y = heightAt(x, z);
+      addCrystal(luminous, x, y, z, size, a, '#a1e8e5');
+      landmarkSites.push({ id: 'moon-crystal-' + i, kind: 'moonCrystals', prefab: 'shrine_moon_crystal',
+        x, y, z, rotation: [0, a, 0], scale: [size, size, size], size });
+    }
   }
   const gateX = moon.x + 2, gateZ = moon.z - 13, gateY = heightAt(gateX, gateZ);
-  land.add('ring', [gateX, gateY + 4.7, gateZ], [3.9, 3.9, 3.9], [0, -.45, -.18], '#c3afd8');
-  land.add('sphere', [gateX + 2.4, gateY + 6.8, gateZ], [.75, .75, .75], [0, 0, 0], '#dbd4e5');
+  landmarkDecoration.add('ring', [gateX, gateY + 4.7, gateZ], [3.9, 3.9, 3.9], [0, -.45, -.18], '#c3afd8');
+  landmarkDecoration.add('sphere', [gateX + 2.4, gateY + 6.8, gateZ], [.75, .75, .75], [0, 0, 0], '#dbd4e5');
+  // The ring hangs on its own centre and the orb on the sphere centre, so both
+  // authored roots keep the original pivot rather than a ground origin.
+  landmarkSites.push({ id: 'moon-gate-ring', kind: 'moonGates', prefab: 'moon_gate_ring',
+    x: gateX, y: gateY + 4.7, z: gateZ, rotation: [0, -.45, -.18], scale: [1, 1, 1] });
+  landmarkSites.push({ id: 'moon-gate-orb', kind: 'orbs', prefab: 'moon_gate_orb',
+    x: gateX + 2.4, y: gateY + 6.8, z: gateZ, rotation: [0, 0, 0], scale: [1, 1, 1] });
   const palm = SHRINES.find(s => s.id === 'palm') || { x: -68, z: 12 };
   for (const dx of [-4.8, 4.8]) {
     const x = palm.x + dx, z = palm.z - 11, y = heightAt(x, z);
-    land.add('box', [x, y + 2.6, z], [2.1, 5.2, 2.1], [0, dx * .01, .04], '#7c9a83');
-    land.add('box', [x, y + 5.5, z], [2.7, .8, 2.7], [0, -.04, 0], '#b2b98d');
-    land.add('sphere', [x + .3, y + 5.95, z], [1.7, .35, 1.4], [0, 0, 0], '#4c9164');
+    landmarkDecoration.add('box', [x, y + 2.6, z], [2.1, 5.2, 2.1], [0, dx * .01, .04], '#7c9a83');
+    landmarkDecoration.add('box', [x, y + 5.5, z], [2.7, .8, 2.7], [0, -.04, 0], '#b2b98d');
+    landmarkDecoration.add('sphere', [x + .3, y + 5.95, z], [1.7, .35, 1.4], [0, 0, 0], '#4c9164');
+    // One carved pillar replaces the body, capital and crest of each side; the
+    // pillar stands on its own ground height, so the beam spans uneven footings.
+    landmarkSites.push({ id: 'palm-gate-pillar-' + (dx < 0 ? 'west' : 'east'), kind: 'pillars', prefab: 'palm_gate_pillar',
+      x, y, z, rotation: [0, dx * .01, .04], scale: [1, 1, 1] });
   }
-  land.add('box', [palm.x, heightAt(palm.x, palm.z - 11) + 6.35, palm.z - 11], [11.5, 1.1, 2.0], [0, 0, -.035], '#a5b58b');
+  landmarkDecoration.add('box', [palm.x, heightAt(palm.x, palm.z - 11) + 6.35, palm.z - 11], [11.5, 1.1, 2.0], [0, 0, -.035], '#a5b58b');
+  landmarkSites.push({ id: 'palm-gate-lintel', kind: 'lintels', prefab: 'palm_gate_lintel',
+    x: palm.x, y: heightAt(palm.x, palm.z - 11) + 6.35, z: palm.z - 11, rotation: [0, 0, -.035], scale: [1, 1, 1] });
   // Keep the lighthouse behind the open interaction dais and finale arena.
   addLighthouse(land, BEACON.x, heightAt(BEACON.x, BEACON.z - 24), BEACON.z - 24);
   for (let i = 0; i < 20; i++) {
@@ -321,7 +358,7 @@ export function buildScenery(palette, random) {
       land.line([x + k * .28, y + h * .55, z], [x + k * .28 + .28, y + h * .9, z + .18], .08, '#eab6b0', .5);
     }
   }
-  group.add(land.mesh(), luminous.mesh({ shadow: false }));
+  group.add(land.mesh());
   const legacyVegetation = oldWatchDecoration.mesh(); legacyVegetation.name = 'old-watch-original-vegetation'; group.add(legacyVegetation);
   const farmLegacyVegetation = farmDecoration.mesh(); farmLegacyVegetation.name = 'windward-farm-original-vegetation'; group.add(farmLegacyVegetation);
   const tideglassLegacyVegetation = tideglassDecoration.mesh(); tideglassLegacyVegetation.name = 'tideglass-market-original-vegetation'; group.add(tideglassLegacyVegetation);
@@ -333,11 +370,20 @@ export function buildScenery(palette, random) {
   const cinderworksLegacyScenery = cinderworksDecoration.mesh(); cinderworksLegacyScenery.name = 'cinderworks-original-scenery'; group.add(cinderworksLegacyScenery);
   const moonwatchLegacyScenery = moonwatchDecoration.mesh(); moonwatchLegacyScenery.name = 'moonwatch-original-scenery'; group.add(moonwatchLegacyScenery);
   const coastLegacyScenery = coastDecoration.mesh(); coastLegacyScenery.name = 'island-coast-original-scenery'; group.add(coastLegacyScenery);
+  // The shrines' solid and glow draws are one fallback: the luminous batch holds
+  // nothing but shrine items, so it moves here whole instead of being split or
+  // duplicated, and both meshes are hidden and restored together.
+  const landmarkFallback = new THREE.Group(); landmarkFallback.name = 'island-shrines-original-scenery';
+  const landmarkLegacyScenery = landmarkDecoration.mesh(); landmarkLegacyScenery.name = 'island-shrines-original-solid';
+  const landmarkLegacyGlow = luminous.mesh({ shadow: false }); landmarkLegacyGlow.name = 'island-shrines-original-glow';
+  landmarkFallback.add(landmarkLegacyScenery, landmarkLegacyGlow); group.add(landmarkFallback);
   group.userData.tideglassHutSites = tideglassHutSites;
   group.userData.coastPalmSites = coastPalmSites; group.userData.coastRockSites = coastRockSites;
+  group.userData.landmarkSites = landmarkSites;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
     driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery,
-    coastLegacyScenery, coastPalmSites, coastRockSites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    coastLegacyScenery, coastPalmSites, coastRockSites, landmarkFallback, landmarkLegacyScenery, landmarkLegacyGlow, landmarkSites,
+    volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -401,7 +447,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const palmheartCamp = createPalmheartCamp({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.palmheartLegacyVegetation });
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
-  const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites });
+  const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, landmarkFallback: scenery.landmarkFallback,
+    palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites, landmarkSites: scenery.landmarkSites });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();

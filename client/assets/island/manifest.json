@@ -6,8 +6,8 @@
   "coordinateSystem": "Y-up, meters, +Z front",
   "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
   "file": "kit.glb",
-  "bytes": 906160,
-  "sha256": "47274b381cc1615aa2d9be77102503125ea76845d5ea92dd89a7f6e3ee7c7a8d",
+  "bytes": 1484528,
+  "sha256": "a1672bb7cf1b6077af6cae0229f3436993e4fe6b3c454709882f3a8123758df6",
   "dependencies": [
     {
       "url": "/assets/old-watch/kit.glb",
@@ -110,9 +110,179 @@
     },
     "forged_iron": {
       "source": "forged_iron"
+    },
+    "jungle_gate_stone": {
+      "source": "watch_stone",
+      "color": [
+        2.7,
+        3.0,
+        1.9
+      ],
+      "normalScale": 0.75
+    },
+    "jungle_gate_edge": {
+      "source": "watch_stone",
+      "color": [
+        4.0,
+        4.2,
+        2.7
+      ],
+      "normalScale": 0.6
+    },
+    "lunar_stone": {
+      "source": "watch_stone",
+      "color": [
+        4.0,
+        3.6,
+        5.2
+      ],
+      "normalScale": 0.55
+    },
+    "lunar_cap": {
+      "source": "watch_stone",
+      "color": [
+        3.4,
+        2.6,
+        8.0
+      ],
+      "normalScale": 0.35
+    },
+    "lunar_stem": {
+      "source": "aged_timber",
+      "color": [
+        4.4,
+        4.5,
+        4.3
+      ],
+      "normalScale": 0.3
+    },
+    "lunar_glow": {
+      "source": "lantern_amber",
+      "color": [
+        0.8,
+        2.9,
+        12.0
+      ],
+      "emissive": [
+        0.16,
+        0.4,
+        0.44
+      ],
+      "emissiveIntensity": 1.0
+    },
+    "caldera_basalt": {
+      "source": "watch_stone",
+      "color": [
+        1.85,
+        1.45,
+        1.4
+      ],
+      "normalScale": 0.9
+    },
+    "caldera_weathered": {
+      "source": "watch_stone",
+      "color": [
+        2.7,
+        1.7,
+        1.1
+      ],
+      "normalScale": 0.8
+    },
+    "caldera_glow": {
+      "source": "lantern_amber",
+      "color": [
+        1.15,
+        0.75,
+        0.5
+      ],
+      "emissive": [
+        0.55,
+        0.16,
+        0.025
+      ],
+      "emissiveIntensity": 1.0
     }
   },
   "prefabs": {
+    "caldera_amber_crystal": {
+      "bounds": {
+        "min": [
+          -0.52966,
+          -0.3,
+          -0.35449
+        ],
+        "max": [
+          0.41449,
+          3.0,
+          0.54966
+        ]
+      },
+      "dimensions": [
+        0.94415,
+        3.3,
+        0.90415
+      ],
+      "horizontalRadius": 0.69369,
+      "triangles": 186,
+      "primitives": 1,
+      "materials": [
+        "caldera_glow"
+      ]
+    },
+    "caldera_ridge_a": {
+      "bounds": {
+        "min": [
+          -2.29973,
+          -2.6,
+          -2.27949
+        ],
+        "max": [
+          2.37989,
+          11.2,
+          2.32283
+        ]
+      },
+      "dimensions": [
+        4.67962,
+        13.8,
+        4.60232
+      ],
+      "horizontalRadius": 2.55496,
+      "triangles": 542,
+      "primitives": 3,
+      "materials": [
+        "caldera_basalt",
+        "caldera_glow",
+        "caldera_weathered"
+      ]
+    },
+    "caldera_ridge_b": {
+      "bounds": {
+        "min": [
+          -2.44244,
+          -2.6,
+          -2.27101
+        ],
+        "max": [
+          1.96095,
+          11.1,
+          2.41424
+        ]
+      },
+      "dimensions": [
+        4.40339,
+        13.7,
+        4.68525
+      ],
+      "horizontalRadius": 2.54869,
+      "triangles": 542,
+      "primitives": 3,
+      "materials": [
+        "caldera_basalt",
+        "caldera_glow",
+        "caldera_weathered"
+      ]
+    },
     "coast_palm_a": {
       "bounds": {
         "min": [
@@ -219,6 +389,60 @@
         "coast_stone"
       ]
     },
+    "ember_core": {
+      "bounds": {
+        "min": [
+          -4.45602,
+          -0.2,
+          -3.80567
+        ],
+        "max": [
+          4.71468,
+          0.798,
+          3.45565
+        ]
+      },
+      "dimensions": [
+        9.1707,
+        0.998,
+        7.26132
+      ],
+      "horizontalRadius": 4.85956,
+      "triangles": 784,
+      "primitives": 3,
+      "materials": [
+        "caldera_basalt",
+        "caldera_glow",
+        "caldera_weathered"
+      ]
+    },
+    "ember_core_rock": {
+      "bounds": {
+        "min": [
+          -1.02193,
+          -0.86675,
+          -0.97751
+        ],
+        "max": [
+          1.08728,
+          0.79932,
+          0.86363
+        ]
+      },
+      "dimensions": [
+        2.10921,
+        1.66606,
+        1.84114
+      ],
+      "horizontalRadius": 1.17273,
+      "triangles": 196,
+      "primitives": 3,
+      "materials": [
+        "caldera_basalt",
+        "caldera_glow",
+        "caldera_weathered"
+      ]
+    },
     "fishing_skiff_a": {
       "bounds": {
         "min": [
@@ -276,6 +500,162 @@
         "skiff_coral",
         "skiff_plank"
       ]
+    },
+    "moon_gate_orb": {
+      "bounds": {
+        "min": [
+          -0.742,
+          -0.7,
+          -0.742
+        ],
+        "max": [
+          0.742,
+          0.7,
+          0.742
+        ]
+      },
+      "dimensions": [
+        1.484,
+        1.4,
+        1.484
+      ],
+      "horizontalRadius": 0.742,
+      "triangles": 216,
+      "primitives": 2,
+      "materials": [
+        "lunar_glow",
+        "lunar_stone"
+      ]
+    },
+    "moon_gate_ring": {
+      "bounds": {
+        "min": [
+          -4.26147,
+          -4.24129,
+          -0.43978
+        ],
+        "max": [
+          4.23178,
+          4.24999,
+          0.43978
+        ]
+      },
+      "dimensions": [
+        8.49325,
+        8.49128,
+        0.87956
+      ],
+      "horizontalRadius": 4.27457,
+      "triangles": 1212,
+      "primitives": 2,
+      "materials": [
+        "lunar_glow",
+        "lunar_stone"
+      ]
+    },
+    "palm_gate_lintel": {
+      "bounds": {
+        "min": [
+          -5.75,
+          -0.55,
+          -0.91
+        ],
+        "max": [
+          5.75,
+          0.55,
+          0.91
+        ]
+      },
+      "dimensions": [
+        11.5,
+        1.1,
+        1.82
+      ],
+      "horizontalRadius": 5.79245,
+      "triangles": 1208,
+      "primitives": 2,
+      "materials": [
+        "jungle_gate_edge",
+        "jungle_gate_stone"
+      ]
+    },
+    "palm_gate_pillar": {
+      "bounds": {
+        "min": [
+          -1.25655,
+          -0.45,
+          -1.12737
+        ],
+        "max": [
+          1.25655,
+          6.12,
+          1.12737
+        ]
+      },
+      "dimensions": [
+        2.51309,
+        6.57,
+        2.25474
+      ],
+      "horizontalRadius": 1.62607,
+      "triangles": 956,
+      "primitives": 2,
+      "materials": [
+        "jungle_gate_edge",
+        "jungle_gate_stone"
+      ]
+    },
+    "shrine_moon_crystal": {
+      "bounds": {
+        "min": [
+          -0.53531,
+          -0.3,
+          -0.36373
+        ],
+        "max": [
+          0.42373,
+          3.0,
+          0.55531
+        ]
+      },
+      "dimensions": [
+        0.95904,
+        3.3,
+        0.91904
+      ],
+      "horizontalRadius": 0.69857,
+      "triangles": 186,
+      "primitives": 1,
+      "materials": [
+        "lunar_glow"
+      ]
+    },
+    "shrine_mushroom": {
+      "bounds": {
+        "min": [
+          -1.0,
+          -0.25,
+          -1.12
+        ],
+        "max": [
+          1.4,
+          3.26,
+          1.28
+        ]
+      },
+      "dimensions": [
+        2.4,
+        3.51,
+        2.4
+      ],
+      "horizontalRadius": 1.41539,
+      "triangles": 460,
+      "primitives": 3,
+      "materials": [
+        "lunar_cap",
+        "lunar_glow",
+        "lunar_stem"
+      ]
     }
   },
   "textures": [],
@@ -314,12 +694,143 @@
       "maxRadius": 2.4,
       "minY": -0.4,
       "maxY": 3.7
+    },
+    "palm_gate_pillar": {
+      "maxRadius": 1.92,
+      "minY": -0.45,
+      "maxY": 6.12
+    },
+    "palm_gate_lintel": {
+      "maxRadius": 5.84,
+      "minY": -0.55,
+      "maxY": 0.55
+    },
+    "moon_gate_ring": {
+      "maxRadius": 4.32,
+      "minY": -4.29,
+      "maxY": 4.29
+    },
+    "moon_gate_orb": {
+      "maxRadius": 0.75,
+      "minY": -0.75,
+      "maxY": 0.75
+    },
+    "shrine_mushroom": {
+      "maxRadius": 1.8,
+      "minY": -0.25,
+      "maxY": 3.4
+    },
+    "shrine_moon_crystal": {
+      "maxRadius": 1.0,
+      "minY": -0.3,
+      "maxY": 3.05
+    },
+    "caldera_ridge_a": {
+      "maxRadius": 4.7,
+      "minY": -2.6,
+      "maxY": 11.25
+    },
+    "caldera_ridge_b": {
+      "maxRadius": 4.7,
+      "minY": -2.6,
+      "maxY": 11.25
+    },
+    "caldera_amber_crystal": {
+      "maxRadius": 1.0,
+      "minY": -0.3,
+      "maxY": 3.05
+    },
+    "ember_core": {
+      "maxRadius": 5.0,
+      "minY": -0.2,
+      "maxY": 0.8
+    },
+    "ember_core_rock": {
+      "maxRadius": 1.8,
+      "minY": -1.7,
+      "maxY": 1.7
+    }
+  },
+  "landmarkContracts": {
+    "palm_gate_pillar": {
+      "origin": "ground",
+      "capitalY": 5.12,
+      "bodyWidth": 2.1,
+      "capitalWidth": 2.7,
+      "measuredBodyWidth": 2.09078,
+      "measuredBodyDepth": 2.01081,
+      "measuredCapitalWidth": 2.51309,
+      "measuredCapitalDepth": 2.25474
+    },
+    "palm_gate_lintel": {
+      "origin": "beam centre",
+      "span": 11.5,
+      "maxAbsX": 5.75,
+      "maxAbsZ": 1.0
+    },
+    "moon_gate_ring": {
+      "origin": "ring centre",
+      "plane": "local XY",
+      "majorRadius": 3.9,
+      "apertureRadius": 3.48,
+      "innerRadius": 3.56,
+      "segments": 24,
+      "measuredApertureRadius": 3.553
+    },
+    "moon_gate_orb": {
+      "origin": "sphere centre",
+      "radius": 0.75
+    },
+    "shrine_mushroom": {
+      "origin": "ground",
+      "unitScale": "addMushroom",
+      "lowReachHeight": 1.0,
+      "lowReachRadius": 0.46
+    },
+    "shrine_moon_crystal": {
+      "origin": "ground",
+      "unitScale": "addCrystal",
+      "skirtDepth": -0.3,
+      "shards": 3
+    },
+    "caldera_ridge_a": {
+      "origin": "ground",
+      "nominalHeight": 10.0,
+      "footprint": [
+        3.8,
+        3.5
+      ],
+      "buriedFoot": -2.6
+    },
+    "caldera_ridge_b": {
+      "origin": "ground",
+      "nominalHeight": 10.0,
+      "footprint": [
+        3.8,
+        3.5
+      ],
+      "buriedFoot": -2.6
+    },
+    "caldera_amber_crystal": {
+      "origin": "ground",
+      "unitScale": "addCrystal",
+      "skirtDepth": -0.3,
+      "shards": 3
+    },
+    "ember_core": {
+      "origin": "core groundY",
+      "maxAbsX": 5.0,
+      "maxAbsZ": 4.0
+    },
+    "ember_core_rock": {
+      "origin": "pebble centre",
+      "radius": 1.8
     }
   },
   "trunkRadii": {
     "coast_palm_a": 1.3052,
     "coast_palm_b": 1.5324
   },
-  "totalTriangles": 10424,
-  "totalPrimitives": 20
+  "totalTriangles": 16912,
+  "totalPrimitives": 45
 }
