@@ -536,11 +536,11 @@ export function buildSettlements(palette) {
     const sail = new THREE.BufferGeometry(); sail.setAttribute('position', new THREE.Float32BufferAttribute([.06, 3.2, -.45, .06, 1.2, -.45, 1.20, 1.2, -.45], 3)); sail.computeVertexNormals();
     b.add(sail, [0, 0, 0], [1, 1, 1], [0, 0, 0], C.cream); sail.dispose();
     b.line([-1.1, .55, -.8], [1.1, .55, 1.05], .045, C.paleWood);
-    boat.add(b.mesh());
+    const original = b.mesh(); boat.add(original);
     const x = -17 - i * 9; let z = 117;
     while (heightAt(x, z) > -.25 && z < 155) z += .5;
     boat.position.set(x, 0, z + 2 + i); boat.rotation.y = -.5 + i * .8; group.add(boat);
-    boats.push({ group: boat, x, z: boat.position.z, yaw: boat.rotation.y, phase: i * 2.8 });
+    boats.push({ group: boat, original, x, z: boat.position.z, yaw: boat.rotation.y, phase: i * 2.8 });
   }
   stats.boats = boats.length;
 
@@ -588,7 +588,7 @@ export function buildSettlements(palette) {
     residents.animate(reducedMotion ? 0 : t);
   }
   group.userData.propSites = propSites; group.userData.buildingBounds = buildingBounds;
-  group.userData.farmFenceSites = farmFenceSites;
+  group.userData.farmFenceSites = farmFenceSites; group.userData.skiffs = boats;
   animate(0);
   return { group, animate, stats, setOldWatchKit(kit = null) {
     const interior = interiors.find(item => item.building.id === 'watch-barracks');
@@ -631,6 +631,14 @@ export function buildSettlements(palette) {
     cinderworksFallback.visible = !kit;
   }, setMoonwatchKit(kit = null) {
     moonwatchFallback.visible = !kit;
+  }, setIslandKit(kit = null) {
+    // The bobbing already moves each boat group, so an authored hull parented at
+    // local identity inherits it from the original it replaces.
+    boats.forEach((boat, index) => {
+      boat.original.visible = !kit;
+      for (const child of [...boat.group.children]) if (child !== boat.original) child.removeFromParent();
+      if (kit?.skiffs?.[index]) boat.group.add(kit.skiffs[index]);
+    });
   } };
 }
 

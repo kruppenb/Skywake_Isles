@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "generator": "tools/build-island.py",
+  "seed": 920417,
+  "blenderVersion": "5.2.1 LTS",
+  "coordinateSystem": "Y-up, meters, +Z front",
+  "sourceLicense": "Original Skywake Isles project assets; see CREDITS.md",
+  "file": "kit.glb",
+  "bytes": 906160,
+  "sha256": "47274b381cc1615aa2d9be77102503125ea76845d5ea92dd89a7f6e3ee7c7a8d",
+  "dependencies": [
+    {
+      "url": "/assets/old-watch/kit.glb",
+      "sha256": "3fce2c1f50178bf0a681fdec6aafba86b98140cc108ce6ae522b45e6370f152b",
+      "ownership": "Shared cache owns original material textures and reusable props"
+    }
+  ],
+  "materialBindings": {
+    "palm_trunk": {
+      "source": "pine_bark",
+      "color": [
+        2.7,
+        2.6,
+        2.6
+      ],
+      "normalScale": 0.8
+    },
+    "coast_frond": {
+      "source": "needle_foliage",
+      "color": [
+        3.2,
+        3.3,
+        2.0
+      ],
+      "normalScale": 0.5,
+      "doubleSided": true
+    },
+    "dead_frond": {
+      "source": "aged_timber",
+      "color": [
+        2.4,
+        1.9,
+        1.2
+      ],
+      "normalScale": 0.4,
+      "doubleSided": true
+    },
+    "coconut": {
+      "source": "ground_earth",
+      "color": [
+        1.6,
+        1.5,
+        0.9
+      ],
+      "normalScale": 0.6
+    },
+    "coast_stone": {
+      "source": "watch_stone",
+      "color": [
+        5.2,
+        4.2,
+        3.4
+      ],
+      "normalScale": 0.8
+    },
+    "skiff_plank": {
+      "source": "aged_timber",
+      "color": [
+        4.2,
+        3.9,
+        3.4
+      ],
+      "normalScale": 0.4
+    },
+    "skiff_teal": {
+      "source": "aged_timber",
+      "color": [
+        0.45,
+        3.4,
+        4.8
+      ],
+      "normalScale": 0.4
+    },
+    "skiff_coral": {
+      "source": "aged_timber",
+      "color": [
+        6.6,
+        2.2,
+        2.2
+      ],
+      "normalScale": 0.4
+    },
+    "skiff_canvas": {
+      "source": "ground_earth",
+      "color": [
+        8.5,
+        8.0,
+        6.8
+      ],
+      "normalScale": 0.18,
+      "doubleSided": true
+    },
+    "hemp_rope": {
+      "source": "needle_foliage",
+      "color": [
+        2.6,
+        1.7,
+        1.1
+      ]
+    },
+    "forged_iron": {
+      "source": "forged_iron"
+    }
+  },
+  "prefabs": {
+    "coast_palm_a": {
+      "bounds": {
+        "min": [
+          -3.77668,
+          -0.4,
+          -2.22154
+        ],
+        "max": [
+          3.49113,
+          8.30382,
+          4.33813
+        ]
+      },
+      "dimensions": [
+        7.26781,
+        8.70382,
+        6.55967
+      ],
+      "horizontalRadius": 4.39003,
+      "triangles": 2668,
+      "primitives": 4,
+      "materials": [
+        "coast_frond",
+        "coconut",
+        "dead_frond",
+        "palm_trunk"
+      ]
+    },
+    "coast_palm_b": {
+      "bounds": {
+        "min": [
+          -3.60097,
+          -0.4,
+          -2.00178
+        ],
+        "max": [
+          3.38654,
+          7.30033,
+          4.34983
+        ]
+      },
+      "dimensions": [
+        6.98752,
+        7.70033,
+        6.35161
+      ],
+      "horizontalRadius": 4.39341,
+      "triangles": 2072,
+      "primitives": 4,
+      "materials": [
+        "coast_frond",
+        "coconut",
+        "dead_frond",
+        "palm_trunk"
+      ]
+    },
+    "coast_rock_a": {
+      "bounds": {
+        "min": [
+          -2.3037,
+          -0.4,
+          -2.25952
+        ],
+        "max": [
+          2.33225,
+          4.94,
+          2.12525
+        ]
+      },
+      "dimensions": [
+        4.63595,
+        5.34,
+        4.38477
+      ],
+      "horizontalRadius": 2.38386,
+      "triangles": 656,
+      "primitives": 1,
+      "materials": [
+        "coast_stone"
+      ]
+    },
+    "coast_rock_b": {
+      "bounds": {
+        "min": [
+          -1.82831,
+          -0.4,
+          -1.26363
+        ],
+        "max": [
+          1.7602,
+          2.80948,
+          1.09586
+        ]
+      },
+      "dimensions": [
+        3.58851,
+        3.20948,
+        2.35949
+      ],
+      "horizontalRadius": 1.8308,
+      "triangles": 444,
+      "primitives": 1,
+      "materials": [
+        "coast_stone"
+      ]
+    },
+    "fishing_skiff_a": {
+      "bounds": {
+        "min": [
+          -0.95599,
+          -0.38368,
+          -2.25
+        ],
+        "max": [
+          0.95599,
+          3.61,
+          2.25
+        ]
+      },
+      "dimensions": [
+        1.91199,
+        3.99368,
+        4.5
+      ],
+      "horizontalRadius": 2.25058,
+      "triangles": 2292,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "hemp_rope",
+        "skiff_canvas",
+        "skiff_plank",
+        "skiff_teal"
+      ]
+    },
+    "fishing_skiff_b": {
+      "bounds": {
+        "min": [
+          -0.95599,
+          -0.38368,
+          -2.25
+        ],
+        "max": [
+          0.95599,
+          3.61,
+          2.25
+        ]
+      },
+      "dimensions": [
+        1.91199,
+        3.99368,
+        4.5
+      ],
+      "horizontalRadius": 2.25058,
+      "triangles": 2292,
+      "primitives": 5,
+      "materials": [
+        "forged_iron",
+        "hemp_rope",
+        "skiff_canvas",
+        "skiff_coral",
+        "skiff_plank"
+      ]
+    }
+  },
+  "textures": [],
+  "embeddedImageCount": 0,
+  "decodedTextureBytes": 0,
+  "buildingContracts": {},
+  "propEnvelopes": {
+    "coast_palm_a": {
+      "maxRadius": 4.6,
+      "minY": -0.4,
+      "maxY": 8.6,
+      "trunkRadius": 1.6
+    },
+    "coast_palm_b": {
+      "maxRadius": 4.6,
+      "minY": -0.4,
+      "maxY": 7.8,
+      "trunkRadius": 1.6
+    },
+    "coast_rock_a": {
+      "maxRadius": 2.5,
+      "minY": -0.4,
+      "maxY": 5.0
+    },
+    "coast_rock_b": {
+      "maxRadius": 2.0,
+      "minY": -0.4,
+      "maxY": 3.0
+    },
+    "fishing_skiff_a": {
+      "maxRadius": 2.4,
+      "minY": -0.4,
+      "maxY": 3.7
+    },
+    "fishing_skiff_b": {
+      "maxRadius": 2.4,
+      "minY": -0.4,
+      "maxY": 3.7
+    }
+  },
+  "trunkRadii": {
+    "coast_palm_a": 1.3052,
+    "coast_palm_b": 1.5324
+  },
+  "totalTriangles": 10424,
+  "totalPrimitives": 20
+}

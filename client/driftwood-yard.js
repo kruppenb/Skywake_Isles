@@ -238,11 +238,13 @@ export function buildDriftwoodYardKit(yard, shared, { propSites = [] } = {}) {
     }
     group.add(buildDriftwoodYardTerrain(materials.get('ground_earth'), sites), buildSunwakeStrandTerrain(materials.get('ground_earth')));
     // The pier follows the beach as one continuous ramp; every section tilts
-    // toward its neighbours so the deck stays joined down to the water.
+    // toward its neighbours so the deck stays joined down to the water. The
+    // seaward sections bottom out just clear of the swell rather than levelling
+    // a metre above it; the pilings already reach -4 m.
     const decks = [];
     for (let index = 0; index < SUNWAKE_PIER.sections; index++) {
       const z = SUNWAKE_PIER.firstZ + index * SUNWAKE_PIER.length;
-      decks.push({ z, y: Math.max(1.15, renderedHeightAt(SUNWAKE_PIER.x, z) + .14) });
+      decks.push({ z, y: Math.max(.85, renderedHeightAt(SUNWAKE_PIER.x, z) + .14) });
     }
     const pier = decks.map((deck, index) => {
       const previous = decks[index - 1] ?? deck, next = decks[index + 1] ?? deck;

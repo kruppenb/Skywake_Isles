@@ -30,6 +30,8 @@ import { cinderworksWeight } from '../shared/cinderworks.js';
 import { createCinderworks } from './cinderworks.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { createMoonwatch } from './moonwatch.js';
+import { isCoastRegion } from '../shared/island.js';
+import { createIsland } from './island.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
 import { TERRAIN_GRID_STEP, TERRAIN_GRID_COUNT, TERRAIN_GRID_HALF } from './environment-geometry.js';
@@ -176,6 +178,7 @@ export function buildScenery(palette, random) {
   const tideglassDecoration = new GeoBatch(palette), tideglassHuts = new GeoBatch(palette), tideglassHutSites = [], saltwindDecoration = new GeoBatch(palette);
   const driftwoodDecoration = new GeoBatch(palette), sunwakeLanding = new GeoBatch(palette), palmheartDecoration = new GeoBatch(palette);
   const cinderworksDecoration = new GeoBatch(palette), moonwatchDecoration = new GeoBatch(palette);
+  const coastDecoration = new GeoBatch(palette), coastPalmSites = [], coastRockSites = [];
   for (const obstacle of OBSTACLES) {
     if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
@@ -183,7 +186,13 @@ export function buildScenery(palette, random) {
       const size = clamp((obstacle.height || 7) / 7, .7, 1.5);
       if (region === 'moon') addBroadTree(moonwatchWeight(x, z) > 0 ? moonwatchDecoration : land, x, y, z, size, true, random() * TAU);
       else if (region === 'jungle') addBroadTree(palmheartWeight(x, z) > 0 ? palmheartDecoration : land, x, y, z, size, false, random() * TAU);
-      else addPalm(land, x, y, z, size, random() * TAU);
+      else {
+        // The coast palms keep their draw order and geometry; only the batch
+        // changes, so the authored kit can stand on the recorded sites.
+        const yaw = random() * TAU;
+        addPalm(coastDecoration, x, y, z, size, yaw);
+        coastPalmSites.push({ id: obstacle.id, x, z, size, yaw, radius: obstacle.radius, height: obstacle.height });
+      }
     } else if (obstacle.type === 'hut') {
       const yaw = random() * .5, tideglass = obstacle.id === 'prop-16' || obstacle.id === 'prop-17';
       // Keep the original yaw draw and geometry generation in their RNG order.
@@ -192,9 +201,11 @@ export function buildScenery(palette, random) {
     }
     else {
       const radius = obstacle.radius || 1.6, h = obstacle.height || 2;
-      const rocks = cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : land;
-      rocks.add('pebble', [x, y + h * .42, z], [radius, h * .65, radius * .9], [.1, random() * TAU, .15], region === 'volcano' ? '#7f6860' : '#8fa79a');
+      const rocks = cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : isCoastRegion(region) ? coastDecoration : land;
+      const yaw = random() * TAU;
+      rocks.add('pebble', [x, y + h * .42, z], [radius, h * .65, radius * .9], [.1, yaw, .15], region === 'volcano' ? '#7f6860' : '#8fa79a');
       rocks.add('pebble', [x + radius * .35, y + h * .72, z], [radius * .56, h * .37, radius * .65], [.1, .4, -.1], region === 'volcano' ? '#b98468' : '#b9bc9b');
+      if (rocks === coastDecoration) coastRockSites.push({ id: obstacle.id, x, z, radius, height: h, yaw });
     }
   }
   // Decorative trees stay clear of the routes. Collidable silhouettes above
@@ -213,7 +224,13 @@ export function buildScenery(palette, random) {
       if (i % 3 === 0) addCrystal(decoration, x, y, z, size, a, '#f0b168');
       else decoration.add('pebble', [x, y + size * .8, z], [size * 1.3, size * 1.2, size], [.3, a, .1], i % 2 ? '#966e61' : '#bd8c6b');
     } else if (region === 'jungle' && i % 3 !== 0) addBroadTree(decoration, x, y, z, size, false, a);
-    else addPalm(decoration, x, y, z, size, a, region === 'jungle');
+    else {
+      // Only the coast palms move to the island kit; the jungle palms beyond
+      // the Palmheart weight belong to a later slice.
+      const palms = decoration === land && isCoastRegion(region) ? coastDecoration : decoration;
+      addPalm(palms, x, y, z, size, a, region === 'jungle');
+      if (palms === coastDecoration) coastPalmSites.push({ x, z, size, yaw: a });
+    }
   }
   for (let i = 0; i < 720; i++) {
     const x = (random() - .5) * 254, z = (random() - .5) * 254, y = heightAt(x, z);
@@ -315,9 +332,12 @@ export function buildScenery(palette, random) {
   const palmheartLegacyVegetation = palmheartDecoration.mesh(); palmheartLegacyVegetation.name = 'palmheart-wilds-original-vegetation'; group.add(palmheartLegacyVegetation);
   const cinderworksLegacyScenery = cinderworksDecoration.mesh(); cinderworksLegacyScenery.name = 'cinderworks-original-scenery'; group.add(cinderworksLegacyScenery);
   const moonwatchLegacyScenery = moonwatchDecoration.mesh(); moonwatchLegacyScenery.name = 'moonwatch-original-scenery'; group.add(moonwatchLegacyScenery);
+  const coastLegacyScenery = coastDecoration.mesh(); coastLegacyScenery.name = 'island-coast-original-scenery'; group.add(coastLegacyScenery);
   group.userData.tideglassHutSites = tideglassHutSites;
+  group.userData.coastPalmSites = coastPalmSites; group.userData.coastRockSites = coastRockSites;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
-    driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery,
+    coastLegacyScenery, coastPalmSites, coastRockSites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -381,6 +401,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const palmheartCamp = createPalmheartCamp({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.palmheartLegacyVegetation });
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
+  const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
@@ -903,6 +924,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     palmheartCamp.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     cinderworks.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     moonwatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+    island.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady(), palmheartReady: palmheartCamp.isReady(), cinderworksReady: cinderworks.isReady(), moonwatchReady: moonwatch.isReady() });
     updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
     for (const mote of motes) {
@@ -941,11 +963,11 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
     oldWatch.dispose(); airship.dispose();
-    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
+    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }

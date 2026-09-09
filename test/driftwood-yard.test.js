@@ -158,6 +158,7 @@ test('the yard installs atomically with two furnished cutaways, authored work si
     assert.ok(section.rotation.x >= 0, 'no section tilts back up the beach'); if (section.rotation.x > 0) tilted++;
   }
   assert.ok(tilted > 0, 'the pier follows the slope instead of stepping');
+  assert.ok(Math.abs(previousY - .85) < 1e-9, 'the seaward section bottoms out on the .85 m clamp, just clear of the swell: ' + previousY);
   for (const name of ['sunwake-banner-pole-0', 'sunwake-banner-pole-1', 'sunwake-banner-line', 'sunwake-landing-crates-0', 'sunwake-landing-crates-1']) assert.ok(live.scene.getObjectByName(name), name);
   const stats = live.yard.getStats();
   assert.equal(stats.buildings, 2); assert.equal(stats.workSites, 3); assert.equal(stats.pierSections, 5);

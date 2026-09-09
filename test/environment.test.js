@@ -10,7 +10,7 @@ import { oldWatchWeight, oldWatchRadialWeight } from '../shared/old-watch.js';
 import { heightAt, seededRandom, SEED } from '../shared/world.js';
 import { makePalette } from '../client/models.js';
 
-const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb', marketURL = '/assets/tideglass-market/kit.glb', harborURL = '/assets/saltwind-harbor/kit.glb', yardURL = '/assets/driftwood-yard/kit.glb', campURL = '/assets/palmheart-camp/kit.glb', forgeURL = '/assets/cinderworks/kit.glb', moonwatchURL = '/assets/moonwatch/kit.glb';
+const watchURL = '/assets/old-watch/kit.glb', farmURL = '/assets/windward-farm/kit.glb', marketURL = '/assets/tideglass-market/kit.glb', harborURL = '/assets/saltwind-harbor/kit.glb', yardURL = '/assets/driftwood-yard/kit.glb', campURL = '/assets/palmheart-camp/kit.glb', forgeURL = '/assets/cinderworks/kit.glb', moonwatchURL = '/assets/moonwatch/kit.glb', islandURL = '/assets/island/kit.glb';
 function fixture() {
   const counts = { geometry: 0, material: 0, texture: 0, image: 0 };
   const geometry = new THREE.BoxGeometry(), material = new THREE.MeshStandardMaterial();
@@ -154,7 +154,7 @@ test('terrain helper follows the actual grid, including off-diagonal barycentric
 });
 
 test('registered island payload and texture costs match the committed kit manifests', async () => {
-  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL, marketURL, harborURL, yardURL, campURL, forgeURL, moonwatchURL]);
+  assert.deepEqual(Object.keys(ENVIRONMENT_ASSET_REGISTRY), [watchURL, farmURL, marketURL, harborURL, yardURL, campURL, forgeURL, moonwatchURL, islandURL]);
   for (const [url, cost] of Object.entries(ENVIRONMENT_ASSET_REGISTRY)) {
     const manifest = JSON.parse(await readFile(new URL('../client' + url.replace('/kit.glb', '/manifest.json'), import.meta.url)));
     const bytes = await readFile(new URL('../client' + url, import.meta.url));

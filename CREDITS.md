@@ -16,6 +16,8 @@ The Cinderworks' basalt-and-iron forge with its rusted sheet roof, flue hood, ch
 
 Moonwatch Observatory and the Moonbloom Grove's silvered stave drum on its ashlar plinth, ribbed moon-glass dome with verdigris bronze ribs, hatch and finial, brass telescope on its pale tripod, inlaid ashlar star table, chart crate, moon-glass lantern post, armillary sphere, scholar's bench, curling silver trees, luminous moon mushrooms, moon crystals, moon boulder and moonbell clumps are original geometry from `tools/build-moonwatch.py`. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, bark, earth, iron and amber materials with recorded linear material tints and one emissive glass binding; it adds no texture images, no scene lights and no external art dependencies. Lio, the chests, the Moonbloom Shrine, its crystal ring, its gateway, the moon motes and the observatory's fallback geometry remain part of the original game.
 
+The island-wide coast kit's leaning coconut palms, surf-worn coastal rocks and clinker fishing skiffs are original geometry from `tools/build-island.py`. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, bark, earth, foliage and iron materials with recorded linear material tints; it adds no texture images, no scene lights and no external art dependencies. The original palm, rock and skiff geometry stays in the game as the kit's fallback, and every collider, chest, route and random draw is unchanged.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |
