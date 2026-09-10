@@ -706,6 +706,73 @@ Six fresh browser contexts at low quality with reduced motion cover success and 
 
 **Shipping verification.** Implementation `635aa6d` was pushed to canonical `main` as a fast-forward from `b51f627`, then deployed from a clean committed archive with `docker compose -p skywake-isles up -d --build --wait`. Docker reported healthy, `/health` returned `ok: true`, and **18/18** served files matched committed SHA-256 hashes (CRLF-normalized JS): `client/{island,world,palmheart-camp,moonwatch,cinderworks,environment-assets}.js`, `shared/{island,world,exploration}.js`, and all nine kit GLBs. The `skywake-isles_skywake-data` volume remains read-write at `/app/data`. Sixteen deployed high/low views repeated wilds edge, jungle rock, moon east, volcano north, caldera, Old Watch, ship approach and gliding moon using the fixture above; all were inspected, with 118 sites / 134 canopy meshes / 20 leases in every view and no page/console/network errors. The deployed six-case low/reduced-motion load check also passed with no unexpected errors, and the Moonwatch/Palmheart fallback screenshots were inspected. This final tracking update changes documentation only; slice 4 was not started.
 
+## Island ground cover (milestone 9, slice 4) QA — 2026-09-09
+
+**Implementation, browser QA and matching quiet-host timing complete; shipping pending.** Fable approved contract v3 after requiring separate runtime-only ground recipes and lazy root/lease/stat additions that preserve no-ground callers. Two sequential Opus packages implemented production integration and regressions. Lead review corrected full XYZ descriptor composition and used-root material-slot validation, then added a discriminating tilted/nonuniform descriptor regression; no existing assertion was weakened. The baseline evidence below is retained for comparison.
+
+**Exact retained inventory.** Independent seed-271828 replay, including the preceding 800 ocean draws, admits 385 of the 720 small-clump candidates: 84 retain their area routing, and **301** belong to this slice (Haven 34, beach 25, jungle 73, volcano 113, moon 56). All eleven admitted shore clumps belong to the island even when area weights are nonzero: original indices `[0,3,5,8,11,12,18,30,31,32,33]`, each retaining three height draws. The beacon loop has twenty candidates but only **four admitted stones**, indices `[2,6,17,18]`; do not add the sixteen never drawn. Total is **316 sites**, ending after 3,849 draws at next RNG `.017430383479222655`. The 245- and 720-loop area routing thresholds differ intentionally; preserve both, not a unified filter.
+
+**Reviewed palette and fitting.** Reuse shared `grass_clump` for Haven/beach, alternate shared fern/grass by original index in jungle, resident `cinder_clump` in volcano, and lunar bells at original moon bud indices with fern/grass elsewhere. Regional material clones start from original shared sources and retain the published area tints. Shore geometry borrows one seven-bell `moonbell_clump` per original clump, independently bound to pale coral/lilac shared stone by original index parity, without emission. Runtime-only recipes must not enter the manifest-bound island dictionary. The four beacon stones reuse coast rock B and its existing binding. No new source assets, texture images or scene lights are planned; the nine GLBs and manifests must remain byte-identical.
+
+Conservative radius/top nominals are fern `.58/.69`, grass `.37/.56`, cinder `.47/.26`, bell `.43/.49`. Small uniform scale is `min(size/radius, originalTop/top)`, where originalTop is `.63*size` for volcano and `.96*size` otherwise (include `.58*size+.12` buds when larger). Shore scale is `[.45/.43,max(originalHeights)/.49,.45/.43]`, preserving the tallest stalk rather than shrinking it to fit a uniform radius. Beacon scale is `[.55/2,.64/3,.55/2]`. Descriptors retain original analytical ground y; authored plants seat at `renderedHeightAt(x,z)+.015`, stones at rendered ground. Analytical-minus-rendered height reaches +.159m at volcanic candidate 306, +.101m at 163 and -.098m at 40: seating shallow roots analytically would expose a seam. Compose the full source-child transform.
+
+**Baseline app and coastline.** Baseline Docker source matched `ebabda4` (implementation `635aa6d`) in all eighteen checked served module/GLB hashes. Full `npm.cmd test` passed **293/293**, no failures/skips. Actual join/Set sail/glide/landing and keyboard walking opened chest-1, then traversed `(0,76) → (0,62) → (18,62) → (24,45) → (24,25)` with five connected clients and 56 active enemies, no teleports or enemy removal, no console/request failures. Low graphics, map and reduced motion worked. This baseline is one browser player plus four observer sockets, not a five-player combat voyage or rescue check.
+
+The coastline, foam and finale-facing lighthouse remain unchanged by decision, not omission. Three high/low offshore cameras `(0,72,235) → (0,3,25)`, `(-186,48,135) → (-25,3,20)`, `(186,48,135) → (25,3,20)` show continuous coastline, readable landing/pier and an intact canopy/shrine/lighthouse skyline. No extra shoreline mesh or terrain density is justified.
+
+**Repeatable review setup.** Chrome headless/WebGL2, 1920×1080, DPR1, real `createWorld` and app import map; wait for all nine controllers ready. Five-player `Game` snapshot at voyage elapsed45, no enemies in the render fixture, full HP and ground player at `heightAt(x,z)`. Stills park peers at `(2i,3.9,94)`, i=1..4. Warm120 updates at1/60, view time12. Yaw to target is `atan2(-(tx-x),-(tz-z))`. Inspect every view at high and low quality.
+
+| Timing view | Player X,Z | Target or yaw | Pitch |
+| --- | --- | --- | ---: |
+| Haven | 24,25 | 30,12 | -.15 |
+| Beach | -56,82 | -64,77 | -.17 |
+| Jungle | -94,54 | -100,44 | -.16 |
+| Moon | 99,74 | 89,65 | -.15 |
+| Volcano | 43,-107 | 36,-92 | -.15 |
+| Strand | 0,92 | yaw0 | .04 |
+| Old Watch | -64,-76 | yaw.60 | .03 |
+
+Close comparisons target small clumps at `(-7.8,-24.8)`, `(43.1,72.7)`, `(-55.6,40.2)`, `(87.7,-70.4)`, `(115.8,7.7)`; shore clumps at `(62.429,95.943)`, `(-2.736,118.124)`, `(-90.181,-78.06)`, `(72.812,85.98)`; volcanic slope306 at `(66.8,-94.9)` and beacon stones from `(12,18)` and `(-12,22)`. A close jungle third-person camera collides with a retained tree, so supplement it with an explicit inspect camera rather than calling it unobstructed. Ship, coast/Haven aerial and glider settings remain the slice-2 camera settings above.
+
+For matching timing, move the four peers to `(x-3+1.5i,heightAt(peerX,peerZ),z-3)`, increment round, warm as above, then run300 RAF updates at1/60 and time `12+i/60`, discarding the first60. Baseline means were17.62–17.81ms and p95 18.2–18.6ms with workers/tests/Blender and unrelated GPU workloads absent. Final sampling must use the same quiet conditions; do not stop user applications. These fixtures and any final comparison do not close slices1–2's separate historical timing follow-ups or establish weaker-device/worst-combat performance.
+
+### Final ground-cover implementation and browser evidence
+
+The runtime stages **316 sites into 172 ground-detail meshes and two permanent beacon-stone meshes**, using 16m cells. Exact counts are Haven34, beach25, jungle73, volcano113, moon56, shore11 and beacon4. The plan's earlier total315 was an arithmetic error, not a placement change. Independent replay matches every descriptor and the original next draw; the existing whole-scenery golden remains **141,650 triangles**, attribute-multiset SHA-256 `e736a67408d0084a776ac3764d157715b251f4f7be410279181fefa9c562080c`. All nine GLBs/manifests, generators, asset registry, gameplay layout, terrain, lighting and earlier kit contracts are unchanged. This runtime-only slice needs no asset regeneration.
+
+Raw shipping GLB vertices prove every fitted radius/top and the nonuniform shore fit: the bells reach 99.6% of the tallest original stem without exceeding its footprint. Full-density ground source-instance cost is **120,432 triangles** (53 ferns ×1,008 +120 grass ×376 +113 cinder ×120 +26 bells ×252 +4 stones ×444), not the much smaller synthetic-fixture estimate. Plants receive but do not cast shadows; the stones retain both. Nine foliage aliases use the shared ground-height wind hook; cinder and stones are rigid. Ground detail alone uses strict105m high/65m low visibility and `max(1,floor(fullCount × density))`, with .65 far-high/.42 low density **per cell**, not a global percentage. Canopy, shrine landmarks and beacon stones remain permanent.
+
+Lead inspected **60 final high/low views** (26 walking/aerial/glider,24 close,4 supplemental detail,6 offshore) against the matching baseline. Small spheres are now regional grass/fern/scoria; the pale coral/lilac shore bells preserve height without dominating the coast. One jungle third-person close view is still tree-obstructed, so the explicit overhead detail camera supplies the useful comparison. Footprints, slope seating, area transitions, clear paths, shrine skyline and the original lighthouse remain readable. No tint adjustment was needed. The nine loaded URLs still consume **27,248,188 unique GLB bytes, 272,966 source triangles, 9,786,696 decoded texture bytes,10 images/textures and20 global leases**; island retains five of those leases.
+
+Six fresh browser contexts passed: ready and deliberate blocking of island, shared Old Watch, Palmheart, Moonwatch or Cinderworks. All four island fallback parents and both original skiffs restore together; unrelated loaded areas stay authored. The only console/request failures are the specifically aborted URL (`net::ERR_FAILED`); no page errors or unexpected HTTP failures occurred. Unit regressions additionally cover missing/empty ground roots, unexpected slots, malformed transforms, scene/settlement installation failure, late delivery, repeated disposal, lazy focused leases, unchanged no-ground stats, independent material ownership and borrowed-resource survival under another consumer.
+
+Ordinary UI QA on the isolated server joined, sailed with five connected clients and 56 live enemies, glided from `(-2,41.86,94)`, landed at `(-2,3.288,94)`, opened chest 1 and walked `(0,88) → (0,76) → (0,62) → (18,62) → (24,45) → (24,25)`. Low graphics, map and reduced motion worked (wind value 0). Actual enemy attacks reduced HP 100→0 near `(-15.843,28.119)`; the normal eight-second rescue returned the player to `(2,97)` at 65 HP, and keyboard movement resumed toward `(7,97)`. Glider, downed, rescue and recovered-walk screenshots were inspected. No teleport, forced damage, enemy removal or server-state mutation was used. The four peers were observers, not an active combat crew: this is not a completed five-player voyage or a worst-case combat benchmark. Doors/cutaways were not re-entered in this ground-only pass; their existing regressions remain unchanged.
+
+Lead verification: baseline **293/293**, first integrated **300/300**, final **301/301** full-suite tests passed with zero failures/skips (final222,823ms). The sequential Opus test package passed42/42 targeted island/environment tests, including eight new ground regressions; the lead inspected those assertions and independently ran the final full suite. Syntax checks on all four changed JavaScript paths and `git diff --check` passed. The synthetic tilted descriptor test rejects yaw-only, swapped pitch/roll, uniform-scale and missing-child compositions rather than relying only on the upright shipping sites.
+
+### Matching quiet-host ground-cover timing
+
+Final timing ran after the final full suite and both workers completed, with no test runner, Blender or other QA render active; the GTX 1080 Ti reported 1% utilization immediately beforehand. The user's unrelated applications were left alone. The same seven five-player static fixtures above used 300 RAF frames per quality, discarding the first 60; peers were placed near the local player. Baseline is `ebabda4`, final is the slice-4 production/test tree. No unexpected console, page or request errors occurred.
+
+| View | Quality | Calls before → after | Renderer triangles before → after | Mean ms before → after | p95 ms before → after |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Haven | high | 371 → 413 | 407,166 → 381,662 | 17.67 → 17.71 | 18.2 → 18.5 |
+| Haven | low | 345 → 366 | 369,206 → 334,166 | 17.68 → 17.72 | 18.4 → 18.5 |
+| Beach | high | 227 → 249 | 802,025 → 775,925 | 17.69 → 17.80 | 18.5 → 18.6 |
+| Beach | low | 202 → 218 | 668,553 → 633,909 | 17.70 → 17.60 | 18.4 → 18.3 |
+| Jungle | high | 258 → 275 | 911,191 → 879,067 | 17.65 → 17.70 | 18.3 → 18.4 |
+| Jungle | low | 254 → 261 | 783,989 → 743,433 | 17.69 → 17.82 | 18.5 → 18.5 |
+| Moon | high | 971 → 1013 | 1,443,803 → 1,421,719 | 17.81 → 17.64 | 18.6 → 18.4 |
+| Moon | low | 953 → 970 | 1,356,263 → 1,320,119 | 17.69 → 17.79 | 18.4 → 18.6 |
+| Volcano | high | 979 → 1014 | 1,399,261 → 1,368,697 | 17.73 → 17.54 | 18.6 → 18.2 |
+| Volcano | low | 949 → 964 | 1,331,583 → 1,290,563 | 17.70 → 17.77 | 18.3 → 18.4 |
+| Strand | high | 833 → 855 | 1,210,551 → 1,177,155 | 17.64 → 17.54 | 18.5 → 18.3 |
+| Strand | low | 800 → 807 | 1,068,779 → 1,027,599 | 17.62 → 17.54 | 18.3 → 18.3 |
+| Old Watch | high | 155 → 156 | 581,890 → 536,534 | 17.65 → 17.66 | 18.4 → 18.6 |
+| Old Watch | low | 154 → 155 | 411,842 → 366,246 | 17.67 → 17.50 | 18.3 → 18.2 |
+
+The measured mean changes are -0.19 to +0.13 ms and p95 changes -0.4 to +0.3 ms, consistent with this host's scheduling spread rather than a demonstrated frame-time regression. The 16 m cell policy is retained. Calls increase by 1–42, but renderer triangles fall by 22,084–45,596 in every view: the higher full-density source-instance cost is offset here by cell visibility/thinning and non-shadow-casting foliage, unlike the original merged shadow-casting ground batch. This is not a claim that the new geometry is free or that weaker devices will hold this frame rate. The fixture has five rendered players but no enemies and is not a worst-case combat benchmark. These slice-4 measurements do not close the historical slice-1/2 quiet-host timing follow-ups.
+
 ## Extending the next area
 
 1. Pick a small playable composition and specific reference characteristics: stone color, timber age, roof shape, vegetation and light. Establish collider and doorway envelopes before authoring.

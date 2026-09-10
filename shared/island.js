@@ -201,3 +201,102 @@ export const ISLAND_CANOPY_COUNTS = Object.freeze({
   volcanoRocks: 6, volcanoPebbles: 34, volcanoCrystals: 11,
 });
 export const ISLAND_CANOPY_TOTAL = Object.values(ISLAND_CANOPY_COUNTS).reduce((sum, count) => sum + count, 0);
+
+// ---------------------------------------------------------------------------
+// The ground cover: the small walkable plants, the shore flower clumps and the
+// beacon's perimeter stones the procedural batch was still drawing between the
+// finished areas. Nothing here is a second RNG stream or a gameplay layout -
+// every mapping below is pure arithmetic over the region, the original loop
+// index and the size the original draw already chose.
+
+// Conservative silhouettes of the four borrowed clump roots, rounded up from the
+// shipped GLB vertices (fern .57076/.68270, grass .36994/.55495,
+// cinder .46869/.25188, moonbell .42671/.48813): the widest horizontal reach and
+// the top above the root's own origin, at unit scale. Aliases that borrow the
+// same root share one frozen nominal, so a fern is fitted identically wherever
+// it grows, and the beacon stone divides by the coast boulder's own card.
+const FERN_CLUMP = Object.freeze({ radius: .58, height: .69 });
+const GRASS_CLUMP = Object.freeze({ radius: .37, height: .56 });
+const CINDER_CLUMP = Object.freeze({ radius: .47, height: .26 });
+const MOONBELL_CLUMP = Object.freeze({ radius: .43, height: .49 });
+export const ISLAND_GROUND_NOMINALS = Object.freeze({
+  haven_grass: GRASS_CLUMP, beach_grass: GRASS_CLUMP,
+  jungle_fern: FERN_CLUMP, jungle_grass: GRASS_CLUMP,
+  moon_fern: FERN_CLUMP, moon_grass: GRASS_CLUMP, moon_bell: MOONBELL_CLUMP,
+  volcano_cinder: CINDER_CLUMP,
+  shore_coral: MOONBELL_CLUMP, shore_lilac: MOONBELL_CLUMP,
+  beacon_stone: COAST_ROCK_NOMINALS.coast_rock_b,
+});
+// The original small plants, read off the draws they replace: a volcanic
+// dodecahedron was scaled [s, .45 s, .65 s] about a centre .18 s above the
+// ground, every other clump was a sphere scaled [s, .66 s, .85 s] about .30 s,
+// and a bud cluster on every fourth index reached .58 s + .12. Horizontal reach
+// is s in both cases, so a uniform fit to min(reach, top) always stays inside
+// the original footprint and never overshoots its silhouette.
+export const GROUND_PEBBLE_TOP = .63, GROUND_CLUMP_TOP = .96, GROUND_BUD_BASE = .58, GROUND_BUD_RISE = .12;
+// One bell cluster stands where three stalks did. The original spray reached
+// about .9 m downwind of the anchor, so a .45 m clump radius keeps the whole
+// replacement inside the footprint it inherits rather than widening the shore.
+export const SHORE_FLOWER_REACH = .45;
+// The beacon's admitted perimeter cylinders: a .55 m radius and a .64 m top over
+// the ground they stand on. The authored boulder keeps that envelope with a
+// buried footing, so the finale arena's silhouette is unchanged.
+export const BEACON_STONE_ENVELOPE = Object.freeze({ radius: .55, height: .64 });
+
+const GROUND_PLANT_IDS = Object.freeze({
+  havenPlants: 'ground-haven-plant-', beachPlants: 'ground-beach-plant-', junglePlants: 'ground-jungle-plant-',
+  volcanoPlants: 'ground-volcano-plant-', moonPlants: 'ground-moon-plant-',
+});
+const groundFit = (prefab, size, top) => {
+  const nominal = ISLAND_GROUND_NOMINALS[prefab];
+  return uniform(Math.min(size / nominal.radius, top / nominal.height));
+};
+// One decorative draw of the original 720-plant loop. The species follows the
+// region and the very same index arithmetic the loop already branches on: the
+// jungle alternates fern and grass on the original parity, the grove opens a
+// lunar bell wherever the original drew its bud cluster, and the volcanic slope
+// keeps scorched cinder with no green introduced.
+export function groundPlantDressing(region, index, size) {
+  const dressing = (kind, prefab, top) => ({ id: GROUND_PLANT_IDS[kind] + index, kind, prefab, scale: groundFit(prefab, size, top) });
+  if (region === 'volcano') return dressing('volcanoPlants', 'volcano_cinder', GROUND_PEBBLE_TOP * size);
+  // The bud cluster on every fourth index is the tallest part of the original
+  // silhouette at small sizes, so the fit has to clear it too.
+  const top = index % 4 === 0 ? Math.max(GROUND_CLUMP_TOP * size, GROUND_BUD_BASE * size + GROUND_BUD_RISE) : GROUND_CLUMP_TOP * size;
+  if (region === 'moon') return dressing('moonPlants', index % 4 === 0 ? 'moon_bell' : index % 2 === 0 ? 'moon_fern' : 'moon_grass', top);
+  if (region === 'jungle') return dressing('junglePlants', index % 2 === 0 ? 'jungle_fern' : 'jungle_grass', top);
+  if (region === 'beach') return dressing('beachPlants', 'beach_grass', top);
+  return dressing('havenPlants', 'haven_grass', top);
+}
+// One admitted clump of the original 35-candidate shore loop. The alias follows
+// the stalk colour the loop already picked on its own index parity - odd drew the
+// coral stems, even the lilac ones - and the fit is deliberately non-uniform: the
+// clump keeps its inherited footprint while the bells rise to the tallest of the
+// three original stems.
+export function shoreFlowerDressing(index, heights) {
+  const prefab = index % 2 ? 'shore_coral' : 'shore_lilac', nominal = ISLAND_GROUND_NOMINALS[prefab];
+  const spread = SHORE_FLOWER_REACH / nominal.radius;
+  return { id: 'ground-shore-flower-' + index, kind: 'shoreFlowers', prefab,
+    scale: [spread, Math.max(...heights) / nominal.height, spread] };
+}
+// One admitted stone of the beacon's twenty-candidate perimeter ring. The whole
+// dressing is the envelope over the boulder's own nominal, so nothing here reads
+// the terrain or the candidate ring's geometry.
+export function beaconStoneDressing(index) {
+  const nominal = ISLAND_GROUND_NOMINALS.beacon_stone;
+  const spread = BEACON_STONE_ENVELOPE.radius / nominal.radius;
+  return { id: 'ground-beacon-stone-' + index, kind: 'beaconStones', prefab: 'beacon_stone',
+    scale: [spread, BEACON_STONE_ENVELOPE.height / nominal.height, spread] };
+}
+
+// Every original ground draw the authored kit takes over, by kind. The runtime
+// counts what it actually installed and the tests compare it against this card.
+// Confirmed against the shipped seed: of the 385 admitted small plants, 84 stay
+// with the area batches that already dress them and 301 are the island's; the
+// shore loop admits eleven clumps, all of which the original always drew into
+// the island batch; and four of the beacon's twenty candidate stones pass both
+// the route and the south-face filters. The remaining sixteen were never drawn.
+export const ISLAND_GROUND_COUNTS = Object.freeze({
+  havenPlants: 34, beachPlants: 25, junglePlants: 73, volcanoPlants: 113, moonPlants: 56,
+  shoreFlowers: 11, beaconStones: 4,
+});
+export const ISLAND_GROUND_TOTAL = Object.values(ISLAND_GROUND_COUNTS).reduce((sum, count) => sum + count, 0);

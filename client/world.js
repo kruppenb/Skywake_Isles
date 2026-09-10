@@ -30,7 +30,8 @@ import { cinderworksWeight } from '../shared/cinderworks.js';
 import { createCinderworks } from './cinderworks.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { createMoonwatch } from './moonwatch.js';
-import { isCoastRegion, isCanopyRegion, ISLAND_LANDMARK_NOMINALS, canopyTreeDressing, canopyRockDressing, canopyPlantDressing } from '../shared/island.js';
+import { isCoastRegion, isCanopyRegion, ISLAND_LANDMARK_NOMINALS, canopyTreeDressing, canopyRockDressing, canopyPlantDressing,
+  groundPlantDressing, shoreFlowerDressing, beaconStoneDressing } from '../shared/island.js';
 import { createIsland } from './island.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
@@ -190,6 +191,13 @@ export function buildScenery(palette, random) {
   const canopyDecoration = new GeoBatch(palette), canopySites = [];
   const canopySite = (dressing, region, x, y, z, rotation, extra) => canopySites.push({ id: dressing.id, kind: dressing.kind,
     region, prefab: dressing.prefab, x, y, z, rotation, scale: dressing.scale, ...extra });
+  // The island's own ground cover: the small walkable plants no finished area
+  // claimed, the shore flower clumps and the beacon's perimeter stones. Each one
+  // is recorded as it is drawn, so the authored clump stands on the original x,
+  // z and yaw and the original analytical ground travels with the descriptor.
+  const groundDecoration = new GeoBatch(palette), groundSites = [];
+  const groundSite = (dressing, region, x, y, z, yaw, extra) => groundSites.push({ id: dressing.id, kind: dressing.kind,
+    region, prefab: dressing.prefab, x, y, z, rotation: [0, yaw, 0], scale: dressing.scale, ...extra });
   for (const obstacle of OBSTACLES) {
     if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
@@ -278,14 +286,24 @@ export function buildScenery(palette, random) {
     // Only small ground plants are replaced here. The coastal palm canopy above
     // keeps its original geometry, density, positions and RNG consumption.
     const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : palmheartWeight(x, z) > 0 ? palmheartDecoration : cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : tideglassWeight(x, z) > .08 ? tideglassDecoration : saltwindHarborWeight(x, z) > .08 ? saltwindDecoration : driftwoodWeight(x, z) > .08 ? driftwoodDecoration : land;
-    if (region === 'volcano') decoration.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, random() * TAU, 0], '#bb9876');
-    else {
+    // A small plant becomes the island's only once every finished area has passed
+    // on it, which is decided after the original rejection and both RNG draws. The
+    // clump and its bud cluster move into one batch, so a site is never half
+    // replaced; the yaw is only lifted into a name, never moved or redrawn.
+    const wild = decoration === land, target = wild ? groundDecoration : decoration;
+    if (region === 'volcano') {
+      const yaw = random() * TAU;
+      target.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, yaw, 0], '#bb9876');
+      if (wild) groundSite(groundPlantDressing(region, i, s), region, x, y, z, yaw, { index: i, size: s, buds: false });
+    } else {
       const color = region === 'moon' ? '#a599c8' : i % 3 === 0 ? '#91b773' : '#579868';
-      decoration.add('sphere', [x, y + .30 * s, z], [s, .66 * s, s * .85], [0, random() * TAU, 0], color);
+      const yaw = random() * TAU;
+      target.add('sphere', [x, y + .30 * s, z], [s, .66 * s, s * .85], [0, yaw, 0], color);
       if (i % 4 === 0) for (let j = 0; j < 3; j++) {
         const ox = Math.sin(j * 2.4) * .25, oz = Math.cos(j * 2.4) * .25;
-        decoration.add('sphere', [x + ox, y + .58 * s, z + oz], [.13, .12, .13], [0, 0, 0], region === 'moon' ? '#b8f2e8' : '#ffe1a5');
+        target.add('sphere', [x + ox, y + .58 * s, z + oz], [.13, .12, .13], [0, 0, 0], region === 'moon' ? '#b8f2e8' : '#ffe1a5');
       }
+      if (wild) groundSite(groundPlantDressing(region, i, s), region, x, y, z, yaw, { index: i, size: s, buds: i % 4 === 0 });
     }
   }
   // The caldera is a crescent behind the shrine; its south face stays open.
@@ -359,9 +377,16 @@ export function buildScenery(palette, random) {
     x: palm.x, y: heightAt(palm.x, palm.z - 11) + 6.35, z: palm.z - 11, rotation: [0, 0, -.035], scale: [1, 1, 1] });
   // Keep the lighthouse behind the open interaction dais and finale arena.
   addLighthouse(land, BEACON.x, heightAt(BEACON.x, BEACON.z - 24), BEACON.z - 24);
+  // Twenty candidates, both original filters, and only the four cylinders they
+  // admit are dressed. The lighthouse above and the interaction dais inside the
+  // ring are untouched: the stones are the ring's own perimeter, nothing else.
   for (let i = 0; i < 20; i++) {
     const a = i / 20 * TAU, x = BEACON.x + Math.sin(a) * 12, z = BEACON.z + Math.cos(a) * 12;
-    if (routeDistance(x, z) > 4.8 && z > BEACON.z - 4) land.add('cylinder', [x, heightAt(x, z) + .32, z], [.55, .64, .55], [0, 0, 0], '#ced0ad');
+    if (routeDistance(x, z) > 4.8 && z > BEACON.z - 4) {
+      const y = heightAt(x, z);
+      groundDecoration.add('cylinder', [x, y + .32, z], [.55, .64, .55], [0, 0, 0], '#ced0ad');
+      groundSite(beaconStoneDressing(i), regionAt(x, z)?.id, x, y, z, 0, { index: i });
+    }
   }
   // The landing dock, its pennant line and the crates are the strand's own
   // fallback; the authored kit hides this batch and keeps their geometry.
@@ -384,14 +409,20 @@ export function buildScenery(palette, random) {
     sunwakeLanding.add('box', [x, y + .6 * s, z], [1.4 * s, 1.2 * s, 1.3 * s], [0, .2, 0], '#a97b4b');
     for (const dy of [.12, 1.03]) sunwakeLanding.add('box', [x, y + dy * s, z], [1.46 * s, .12 * s, 1.36 * s], [0, .2, 0], '#dab174');
   }
+  // The shore flower clumps. Every admitted clump was always drawn into the
+  // island's own batch, so all eleven move together - one descriptor per clump,
+  // never one per stem - and all three original stem heights travel with it.
   for (let i = 0; i < 35; i++) {
     const a = random() * TAU, r = 112 + random() * 10, x = Math.sin(a) * r, z = Math.cos(a) * r, y = heightAt(x, z);
     if (y < .2 || y > 3 || reserved(x, z, 1)) continue;
+    const heights = [];
     for (let k = 0; k < 3; k++) {
       const h = .4 + random() * .9;
-      land.line([x + k * .23, y, z], [x + k * .32, y + h, z + .05], .13, i % 2 ? '#efa593' : '#ccb2cb', .6);
-      land.line([x + k * .28, y + h * .55, z], [x + k * .28 + .28, y + h * .9, z + .18], .08, '#eab6b0', .5);
+      heights.push(h);
+      groundDecoration.line([x + k * .23, y, z], [x + k * .32, y + h, z + .05], .13, i % 2 ? '#efa593' : '#ccb2cb', .6);
+      groundDecoration.line([x + k * .28, y + h * .55, z], [x + k * .28 + .28, y + h * .9, z + .18], .08, '#eab6b0', .5);
     }
+    groundSite(shoreFlowerDressing(i, heights), regionAt(x, z)?.id, x, y, z, 0, { index: i, heights });
   }
   group.add(land.mesh());
   const legacyVegetation = oldWatchDecoration.mesh(); legacyVegetation.name = 'old-watch-original-vegetation'; group.add(legacyVegetation);
@@ -408,6 +439,9 @@ export function buildScenery(palette, random) {
   // One mesh holds every wild canopy solid, so the authored kit hides and
   // restores the jungle, the grove and the volcanic slope together.
   const canopyFallback = canopyDecoration.mesh(); canopyFallback.name = 'island-canopy-original-scenery'; group.add(canopyFallback);
+  // One mesh holds every ground draw - clumps, buds, shore stalks and the four
+  // perimeter stones - so the authored kit hides and restores them together.
+  const groundFallback = groundDecoration.mesh(); groundFallback.name = 'island-ground-original-scenery'; group.add(groundFallback);
   // The shrines' solid and glow draws are one fallback: the luminous batch holds
   // nothing but shrine items, so it moves here whole instead of being split or
   // duplicated, and both meshes are hidden and restored together.
@@ -419,10 +453,11 @@ export function buildScenery(palette, random) {
   group.userData.coastPalmSites = coastPalmSites; group.userData.coastRockSites = coastRockSites;
   group.userData.landmarkSites = landmarkSites;
   group.userData.canopySites = canopySites; group.userData.canopyFallback = canopyFallback;
+  group.userData.groundSites = groundSites; group.userData.groundFallback = groundFallback;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
     driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery,
     coastLegacyScenery, coastPalmSites, coastRockSites, landmarkFallback, landmarkLegacyScenery, landmarkLegacyGlow, landmarkSites,
-    canopyFallback, canopySites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    canopyFallback, canopySites, groundFallback, groundSites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -487,8 +522,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
   const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, landmarkFallback: scenery.landmarkFallback,
-    canopyFallback: scenery.canopyFallback, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites,
-    landmarkSites: scenery.landmarkSites, canopySites: scenery.canopySites });
+    canopyFallback: scenery.canopyFallback, groundFallback: scenery.groundFallback, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites,
+    landmarkSites: scenery.landmarkSites, canopySites: scenery.canopySites, groundSites: scenery.groundSites });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();

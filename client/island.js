@@ -93,6 +93,71 @@ export const ISLAND_CANOPY_PREFABS = Object.freeze(Object.keys(ISLAND_CANOPY_SOU
 // crystal kinds keep a rigid silhouette.
 const CANOPY_LEAF_MATERIALS = new Set(['broad_leaf', 'palm_frond', 'lavender_leaf']);
 
+// ---------------------------------------------------------------------------
+// The ground cover. Small foliage is near-player detail, so it batches on tight
+// 16 m cells and reuses the existing thinning policy; the beacon's perimeter
+// stones share those cells but are static skyline and never thinned.
+const GROUND_CELL = 16;
+// The ground hook starts at the soil, not above three metres like the canopy's:
+// a blade bends from its own base. Same island wind uniform, its own cache key.
+const GROUND_WIND = { key: 'island-ground-wind-v1',
+  hook: 'transformed.x += sin(islandWind + instanceMatrix[3].x * .47 + instanceMatrix[3].z * .31) * pow(max(position.y, 0.0), 2.0) * .035;' };
+// Grass, ferns, lunar bells and both shore clumps move. Scorched cinder and the
+// beacon stones are rigid, and only the stones are exempt from the detail policy.
+const GROUND_RIGID = new Set(['volcano_cinder', 'beacon_stone']);
+const GROUND_STATIC = new Set(['beacon_stone']);
+// Runtime-only ground recipes, kept apart from the manifest-bound
+// ISLAND_MATERIAL_BINDINGS so the shipped dictionary stays as authored. The
+// shared foliage source is warm green (83/108/54 sRGB), so Tideglass grass only
+// cools it while the grove's lilac needs blue far above red; the shore stone is
+// dark and mottled (linear mean .117/.122/.100 under vertex colours near .8), so
+// both bell tints lift hard toward pale coral and lilac.
+export const ISLAND_GROUND_BINDINGS = Object.freeze({
+  haven_grass:  Object.freeze({ source: 'needle_foliage', color: [1.12, 1.18, .82] }),
+  beach_grass:  Object.freeze({ source: 'needle_foliage', color: [1.70, 1.55, 1.00] }),
+  jungle_fern:  Object.freeze({ source: 'needle_foliage', color: [.90, 1.15, .80] }),
+  jungle_grass: Object.freeze({ source: 'needle_foliage', color: [.85, 1.30, .70] }),
+  moon_fern:    Object.freeze({ source: 'needle_foliage', color: [3.00, 1.40, 7.00] }),
+  moon_grass:   Object.freeze({ source: 'needle_foliage', color: [3.20, 1.60, 7.50] }),
+  shore_coral:  Object.freeze({ source: 'watch_stone', color: [7.00, 3.60, 3.40], normalScale: .40, doubleSided: true }),
+  shore_lilac:  Object.freeze({ source: 'watch_stone', color: [5.60, 4.60, 8.00], normalScale: .40, doubleSided: true }),
+});
+const GROUND_BINDINGS = Object.freeze({ ...CANOPY_BINDINGS, ground: ISLAND_GROUND_BINDINGS });
+// Every ground alias names its geometry and its palette entry explicitly, so
+// nothing is inferred from the geometry's kit: `kit`/`source` locate the root,
+// `slot` is the single material slot that root is authored with, and
+// `palette`/`binding` name the dictionary entry it is dressed in. `bound` marks
+// the one alias that installs the island's own already-bound clone - the beacon
+// stones are surf boulders in surf limestone, so rebinding them would only tint
+// an already-tinted clone a second time.
+export const ISLAND_GROUND_SOURCES = Object.freeze({
+  haven_grass:    Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'haven_grass' }),
+  beach_grass:    Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'beach_grass' }),
+  jungle_fern:    Object.freeze({ kit: 'shared',  source: 'fern_clump',     slot: 'needle_foliage', palette: 'ground',  binding: 'jungle_fern' }),
+  jungle_grass:   Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'jungle_grass' }),
+  moon_fern:      Object.freeze({ kit: 'shared',  source: 'fern_clump',     slot: 'needle_foliage', palette: 'ground',  binding: 'moon_fern' }),
+  moon_grass:     Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'moon_grass' }),
+  moon_bell:      Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'moon',    binding: 'moonbell' }),
+  volcano_cinder: Object.freeze({ kit: 'volcano', source: 'cinder_clump',   slot: 'scoria',         palette: 'volcano', binding: 'scoria' }),
+  shore_coral:    Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'ground',  binding: 'shore_coral' }),
+  shore_lilac:    Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'ground',  binding: 'shore_lilac' }),
+  // The bound clone carries its slot's own name, so the stone validates the same
+  // way every borrowed root does.
+  beacon_stone:   Object.freeze({ kit: 'island',  source: 'coast_rock_b',   slot: 'coast_stone',    palette: 'island',  binding: 'coast_stone', bound: true }),
+});
+export const ISLAND_GROUND_PREFABS = Object.freeze(Object.keys(ISLAND_GROUND_SOURCES));
+// The resident kits a staged ground build actually needs, in the canopy's own
+// order. Derived from the aliases the descriptors name and nothing else, so a
+// haven-only or coast-only build downloads no observatory or forge payload.
+export function islandGroundKits(groundSites = []) {
+  const wanted = new Set();
+  for (const site of groundSites) {
+    const source = ISLAND_GROUND_SOURCES[site.prefab];
+    if (source && ISLAND_CANOPY_KIT_URLS[source.kit]) wanted.add(source.kit);
+  }
+  return Object.keys(ISLAND_CANOPY_KIT_URLS).filter(key => wanted.has(key));
+}
+
 function prefabRoots(scene, names) {
   return Object.fromEntries(names.map(name => {
     const root = scene.getObjectByName(name); let meshes = 0;
@@ -123,15 +188,17 @@ function bindMaterial(source, binding, name) {
   if (binding.emissiveIntensity != null) material.emissiveIntensity = binding.emissiveIntensity;
   return material;
 }
-// The one island wind uniform, hooked onto a leaf material. Reduced motion parks
-// the uniform, so every swaying slot stops together.
-function sway(material, wind) {
+// The one island wind uniform, hooked onto a leaf or ground material. The motion
+// differs - a crown leans above three metres, a blade bends from the soil - so
+// each hook keeps its own stable program cache key on the same uniform. Reduced
+// motion parks that uniform, so every swaying slot stops together.
+function sway(material, wind, motion = CANOPY_WIND) {
   material.side = THREE.DoubleSide;
   material.onBeforeCompile = shader => {
     shader.uniforms.islandWind = wind;
-    shader.vertexShader = 'uniform float islandWind;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n' + CANOPY_WIND.hook + '\n#endif');
+    shader.vertexShader = 'uniform float islandWind;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n' + motion.hook + '\n#endif');
   };
-  material.customProgramCacheKey = () => CANOPY_WIND.key;
+  material.customProgramCacheKey = () => motion.key;
 }
 function place(prefab, x, y, z, yaw = 0) {
   const root = prefab.clone(true); root.position.set(x, y, z); root.rotation.y = yaw;
@@ -305,7 +372,104 @@ function canopyBatches(prefab, name, sites, parent, cell) {
   return result;
 }
 
-export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [], landmarkSites = [], canopySites = [], canopyKits = {} } = {}) {
+// A malformed descriptor fails the whole build: a NaN would silently swallow a
+// batch's bounding sphere, and a zero or negative scale would collapse a clump
+// instead of planting it.
+function groundTransform(site) {
+  const { rotation, scale } = site;
+  const complete = Array.isArray(rotation) && rotation.length === 3 && Array.isArray(scale) && scale.length === 3
+    && [site.x, site.y, site.z, ...rotation, ...scale].every(Number.isFinite) && scale.every(value => value > 0);
+  if (!complete) throw new Error('Island ground site is malformed: ' + site.id);
+}
+// Clones of the borrowed clump roots the staged descriptors name - and only
+// those, so a build with no lunar bells never resolves the observatory's root.
+// Geometry and textures are borrowed from the kit that authored them; the kit
+// owns nothing but its own material clones and instance objects.
+function groundPrefabs(sites, kits, shared, islandBound, materials, library, wind) {
+  const used = new Map();
+  for (const site of sites) {
+    const source = ISLAND_GROUND_SOURCES[site.prefab];
+    if (!source) throw new Error('Island ground prefab is missing: ' + site.prefab);
+    groundTransform(site); used.set(site.prefab, source);
+  }
+  const bindings = new Map(), bound = new Map();
+  // Keyed by alias: four aliases share the shared grass blade and three the
+  // grove's bell, each with its own independent tint.
+  const bind = name => {
+    if (bindings.has(name)) return bindings.get(name);
+    const { palette, binding: slot } = ISLAND_GROUND_SOURCES[name];
+    const binding = GROUND_BINDINGS[palette]?.[slot];
+    if (!binding || !materials.has(binding.source)) throw new Error('Island ground material binding is missing: ' + slot);
+    const material = bindMaterial(materials.get(binding.source), binding, slot);
+    if (!GROUND_RIGID.has(name)) sway(material, wind, GROUND_WIND);
+    library.material.push(material); bindings.set(name, material); return material;
+  };
+  for (const [name, source] of used) {
+    if (!source.bound && source.kit !== 'shared' && !kits[source.kit]?.scene?.traverse) throw new Error('Island ground kit is missing: ' + source.kit);
+    const root = source.bound ? islandBound[source.source]
+      : source.kit === 'shared' ? shared.scene.getObjectByName(source.source)
+      : kits[source.kit].scene.getObjectByName(source.source);
+    // Every drawable primitive of a used root has to be the one slot the alias
+    // declares. A root that lost, renamed or grew a slot fails the build here
+    // rather than being repainted in a recipe that was never written for it.
+    let meshes = 0;
+    root?.traverse(object => {
+      if (!object.isMesh || !object.geometry?.attributes.position?.count || !object.material) return;
+      meshes++;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (material.name !== source.slot) throw new Error('Island ground source slot is unexpected: ' + name + ' carries ' + material.name + ' instead of ' + source.slot);
+      }
+    });
+    if (!meshes) throw new Error('Island ground kit is missing or empty: ' + name);
+    // The beacon stones install the island's own bound surf boulder: that clone
+    // already carries coast_stone, so rebinding would tint it twice.
+    if (source.bound) { bound.set(name, root); continue; }
+    const copy = root.clone(true); copy.name = name;
+    const material = bind(name);
+    copy.traverse(object => { if (object.isMesh) object.material = Array.isArray(object.material) ? object.material.map(() => material) : material; });
+    library.add(copy); bound.set(name, copy);
+  }
+  return bound;
+}
+// One InstancedMesh per alias per source primitive per 16 m cell. The captured
+// transform is taken whole - all three rotations and a possibly non-uniform
+// scale - with the source child's own matrix composed into it. Only the seat is
+// resampled: a shallow plant has to sit on the rendered triangle it stands on,
+// because the analytical and rendered ground differ by up to .16 m on the
+// alternating slope triangles.
+function groundBatches(prefab, name, sites, parent, { lift = .015, castShadow = false, detail = true } = {}) {
+  if (!sites.length) return [];
+  const cells = new Map(), result = [], transform = new THREE.Object3D(), matrix = new THREE.Matrix4();
+  for (const site of sites) {
+    const key = Math.floor(site.x / GROUND_CELL) + ':' + Math.floor(site.z / GROUND_CELL);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(site);
+  }
+  const template = prefab.clone(true); template.updateMatrixWorld(true);
+  template.traverse(source => {
+    if (!source.isMesh) return;
+    for (const [key, cellSites] of cells) {
+      // The bound clone is shared across every cell: the ground hook already
+      // lives on it, so a copy would only add a resource to dispose.
+      const mesh = new THREE.InstancedMesh(source.geometry, source.material, cellSites.length);
+      mesh.name = 'island-ground-' + name + '-' + key;
+      cellSites.forEach((site, index) => {
+        transform.position.set(site.x, renderedHeightAt(site.x, site.z) + lift, site.z);
+        transform.rotation.set(site.rotation[0], site.rotation[1], site.rotation[2]);
+        transform.scale.set(site.scale[0], site.scale[1], site.scale[2]); transform.updateMatrix();
+        matrix.multiplyMatrices(transform.matrix, source.matrixWorld); mesh.setMatrixAt(index, matrix);
+      });
+      mesh.castShadow = castShadow; mesh.receiveShadow = true; mesh.computeBoundingSphere();
+      mesh.userData.fullCount = cellSites.length; mesh.userData.groundPrefab = name;
+      if (detail) mesh.userData.detailKind = 'ground';
+      const [cx, cz] = key.split(':').map(Number); mesh.userData.cellCenter = { x: (cx + .5) * GROUND_CELL, z: (cz + .5) * GROUND_CELL };
+      parent.add(mesh); result.push(mesh);
+    }
+  });
+  return result;
+}
+
+export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [], landmarkSites = [], canopySites = [], canopyKits = {}, groundSites = [] } = {}) {
   const prefabs = prefabRoots(kit.scene, ISLAND_PREFABS);
   const materials = sourceMaterials(shared.scene), slots = sourceMaterials(kit.scene);
   for (const name of slots.keys()) {
@@ -386,48 +550,77 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
         if (sites?.length) wildCanopy.push(...canopyBatches(canopyBound.get(name), name, sites, group, ISLAND_CANOPY_SOURCES[name].cell));
       }
     }
-    return { group, wind, detail: [], canopy, wildCanopy, skiffs: authored, landmarkMeshes, ownedRoots: [group, boundLibrary, ...authored],
+    // The ground cover: small plants, shore flower clumps and the beacon's
+    // perimeter stones. A build with no ground sites stages nothing here and
+    // reports exactly the stat keys, roots and leases it always did.
+    const groundDetail = [], groundStones = [], groundCounts = {};
+    if (groundSites.length) {
+      const groundBound = groundPrefabs(groundSites, canopyKits, shared, bound, materials, boundLibrary, wind);
+      const byGroundPrefab = new Map();
+      for (const site of groundSites) {
+        if (!byGroundPrefab.has(site.prefab)) byGroundPrefab.set(site.prefab, []);
+        byGroundPrefab.get(site.prefab).push(site);
+        groundCounts[site.kind] = (groundCounts[site.kind] ?? 0) + 1;
+      }
+      for (const name of ISLAND_GROUND_PREFABS) {
+        const sites = byGroundPrefab.get(name);
+        if (!sites?.length) continue;
+        // The stones are skyline inside the finale arena: they seat on the ground
+        // itself, cast a shadow and are never thinned or distance-hidden.
+        const skyline = GROUND_STATIC.has(name);
+        (skyline ? groundStones : groundDetail).push(...groundBatches(groundBound.get(name), name, sites, group,
+          skyline ? { lift: 0, castShadow: true, detail: false } : {}));
+      }
+    }
+    return { group, wind, detail: groundDetail, canopy, wildCanopy, skiffs: authored, landmarkMeshes, ownedRoots: [group, boundLibrary, ...authored],
       counts: { prefabs: ISLAND_PREFABS.length, palms: palmSites.length, collidablePalms: palmSites.filter(site => site.id).length,
         rocks: rocks.length, skiffs: authored.length, canopyMeshes: canopy.length, cellSize: PALM_CELL,
         landmarks: landmarkSites.length, landmarkMeshes: landmarkMeshes.length, landmarkCounts, landmarkCellSize: LANDMARK_CELL,
         ...(canopySites.length ? { canopyPlacements: canopySites.length, canopyCounts, wildCanopyMeshes: wildCanopy.length,
-          canopyCellSize: CANOPY_CELL, rockDetailCellSize: ROCK_DETAIL_CELL } : {}) } };
+          canopyCellSize: CANOPY_CELL, rockDetailCellSize: ROCK_DETAIL_CELL } : {}),
+        ...(groundSites.length ? { groundPlacements: groundSites.length, groundCounts, groundDetailMeshes: groundDetail.length,
+          groundStoneMeshes: groundStones.length, groundCellSize: GROUND_CELL } : {}) } };
   } catch (error) { disposeOwnedResources([group, boundLibrary], borrowed); throw error; }
 }
 
 export function createIsland({ scene, settlements, assets = null, legacyScenery = null, landmarkFallback = null, canopyFallback = null,
-  palmSites = [], rockSites = [], landmarkSites = [], canopySites = [], load } = {}) {
+  groundFallback = null, palmSites = [], rockSites = [], landmarkSites = [], canopySites = [], groundSites = [], load } = {}) {
   const cache = assets ?? createEnvironmentAssets(load ? { load } : {}), ownsCache = !assets;
-  // The canopy borrows Palmheart's, Moonwatch's and the Cinderworks' kits from
-  // the same environment cache the settlements themselves lease, so the island
-  // downloads no new payload. A build with no canopy sites - a focused coast or
-  // shrine controller - still leases exactly the shared library and the island
-  // kit, in that order.
-  const canopyKeys = canopySites.length ? Object.keys(ISLAND_CANOPY_KIT_URLS) : [];
+  // The canopy and the ground cover borrow Palmheart's, Moonwatch's and the
+  // Cinderworks' kits from the same environment cache the settlements themselves
+  // lease, so the island downloads no new payload. Each resident kit is leased
+  // once however many slices want it, and only when a staged descriptor names it:
+  // a build with neither canopy nor resident-backed ground sites still leases
+  // exactly the shared library and the island kit, in that order.
+  const groundKeys = new Set(islandGroundKits(groundSites));
+  const canopyKeys = canopySites.length ? Object.keys(ISLAND_CANOPY_KIT_URLS)
+    : Object.keys(ISLAND_CANOPY_KIT_URLS).filter(key => groundKeys.has(key));
   const leases = [cache.acquire(SHARED_URL), cache.acquire(ISLAND_URL), ...canopyKeys.map(key => cache.acquire(ISLAND_CANOPY_KIT_URLS[key]))];
   let disposed = false, kit = null, sources = [], status = 'loading', error = null;
   const release = () => { for (const lease of leases) lease.release(); if (ownsCache) cache.dispose(); };
-  // All three original batches - the coast strand, the shrine solid/glow pair
-  // and the wild canopy - come back together, whatever failed.
+  // All four original batches - the coast strand, the shrine solid/glow pair, the
+  // wild canopy and the ground cover - come back together, whatever failed.
   const restoreFallback = () => {
     try { settlements.setIslandKit(null); }
     catch (failure) { error = [error, 'Fallback restore: ' + String(failure?.message ?? failure)].filter(Boolean).join('; '); }
     if (legacyScenery) legacyScenery.visible = true;
     if (landmarkFallback) landmarkFallback.visible = true;
     if (canopyFallback) canopyFallback.visible = true;
+    if (groundFallback) groundFallback.visible = true;
   };
   const ready = Promise.all(leases.map(lease => lease.ready)).then(([shared, island, ...residents]) => {
     if (disposed) return false;
     const canopyKits = Object.fromEntries(canopyKeys.map((key, index) => [key, residents[index]]));
     sources = [island.scene, shared.scene, ...residents.map(asset => asset?.scene).filter(Boolean)];
-    kit = buildIslandKit(island, shared, { palmSites, rockSites, landmarkSites, canopySites, canopyKits, skiffs: settlements.group.userData.skiffs ?? [] });
+    kit = buildIslandKit(island, shared, { palmSites, rockSites, landmarkSites, canopySites, canopyKits, groundSites, skiffs: settlements.group.userData.skiffs ?? [] });
     // Nothing is hidden until every coast palm, surf rock, skiff, shrine
-    // landmark and canopy batch is installed and the settlement has taken the
-    // kit: a kit that fails anywhere leaves all three originals standing.
+    // landmark, canopy batch and ground clump is installed and the settlement has
+    // taken the kit: a kit that fails anywhere leaves all four originals standing.
     scene.add(kit.group); settlements.setIslandKit(kit);
     if (legacyScenery) legacyScenery.visible = false;
     if (landmarkFallback) landmarkFallback.visible = false;
     if (canopyFallback) canopyFallback.visible = false;
+    if (groundFallback) groundFallback.visible = false;
     status = 'ready'; return true;
   }).catch(failure => {
     error = String(failure?.message ?? failure);
@@ -440,7 +633,11 @@ export function createIsland({ scene, settlements, assets = null, legacyScenery 
   return { ready, isReady: () => status === 'ready', animate(time, { player = null, lowQuality = false, reducedMotion = false } = {}) {
     if (!kit || disposed) return;
     kit.wind.value = reducedMotion ? 0 : time * .8;
-    // No ground cover in this slice; the thinning loop stays for later ones.
+    // Small foliage is the only distance-thinned batch: a cell draws while the
+    // player is within 105 m of its centre (65 m at low quality), and its
+    // per-cell count falls to 65 % beyond 65 m and 42 % at low quality. The
+    // palms, shrines, wild canopy and beacon stones carry the island's silhouette
+    // and never enter this loop.
     for (const mesh of kit.detail) {
       const { cellCenter: cell, fullCount } = mesh.userData;
       const distance = player ? Math.hypot(player.x - cell.x, player.z - cell.z) : Infinity;
