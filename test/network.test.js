@@ -68,7 +68,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     const url = `ws://127.0.0.1:${server.port}`;
     const health = await request(server.port, '/health');
     assert.equal(health.status, 200); assert.equal(JSON.parse(health.body).game, 'Skywake Isles');
-    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/vendor/three.module.js', '/vendor/three.core.js', '/vendor/addons/loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js']) {
+    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/shared/shrines.js', '/vendor/three.module.js', '/vendor/three.core.js', '/vendor/addons/loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js']) {
       const response = await request(server.port, route); assert.equal(response.status, 200, route); assert.equal(response.headers['cache-control'], 'no-cache');
     }
     const kit = await request(server.port, '/assets/old-watch/kit.glb');
@@ -91,15 +91,15 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     assert.ok(crew.every(b => b.state.enemies.length === 56));
     assert.ok(crew.every(b => b.player.rarity === 'common' && Object.keys(b.player.inventory).length === 2));
 
-    let destination = SPAWN, formationRadius = 1.3, autoDrop = true, combat = false, tick = 0;
+    let destination = SPAWN, formationRadius = 1.3, autoDrop = true, combat = false, tick = 0, recalling = null;
     const details = () => JSON.stringify(crew.map(b => ({ id: b.id, p: b.player && { x: +b.player.x.toFixed(1), z: +b.player.z.toFixed(1), mode: b.player.mode, hp: b.player.hp, down: b.player.knockedUntil }, errors: b.errors.slice(-2) })));
     // Bots observe public snapshots and issue the same controls used by the UI.
-    // There is no teleport command, authority-state movement edit, or accelerated clock.
+    // There are no debug teleports, authority-state movement edits, or accelerated clocks.
     controller = setInterval(() => {
       tick++;
       for (let i = 0; i < crew.length; i++) {
         const b = crew[i], p = b.player, state = b.state;
-        if (!p || !state || b.closed || state.phase === 'lobby' || state.phase === 'victory') continue;
+        if (!p || !state || b.closed || b === recalling || state.phase === 'lobby' || state.phase === 'victory') continue;
         const angle = i / 5 * Math.PI * 2;
         const goal = { x: destination.x + Math.cos(angle) * formationRadius, z: destination.z + Math.sin(angle) * formationRadius };
         const dx = goal.x - p.x, dz = goal.z - p.z, d = Math.hypot(dx, dz);
@@ -192,11 +192,24 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
       crew[1].action('interact', shrine.id);
       await until(() => crew[1].state.shrines.find(s => s.id === shrine.id).status === 'active', 3000, `activate ${shrine.id}`);
       assert.equal(crew[1].state.shrines.find(s => s.id === shrine.id).remaining, 11);
-      await until(() => crew.every(b => b.state.shrines.find(s => s.id === shrine.id).status === 'cleared'), 22000, `defeat ${shrine.id} guards and charge for five seconds`, details);
-      t.diagnostic(`${shrine.name} cleared through aimed weapon fire and standing near the shrine.`);
+      await until(() => crew.every(b => b.state.shrines.find(s => s.id === shrine.id).status === 'cleared'), 22000, `defeat ${shrine.id} guards and capture automatically`, details);
+      t.diagnostic(`${shrine.name} captured automatically after aimed weapon fire cleared its defenders.`);
     }
     assert.ok(crew.every(b => b.state.shards === 3));
     assert.ok(crew.every(b => b.events.some(e => e.kind === 'shot' && e.hitId)));
+    await until(() => !crew[0].player.knockedUntil && crew[0].player.grounded &&
+      Math.hypot(crew[0].player.x - SHRINES.at(-1).x, crew[0].player.z - SHRINES.at(-1).z) < 3.2, 10000, 'living pirate reaches captured shrine', details);
+    recalling = crew[0]; recalling.input();
+    const carriedWeapon = recalling.player.weapon, carriedRarity = recalling.player.rarity;
+    recalling.action('interact', SHRINES.at(-1).id);
+    await until(() => crew.every(b => b.state.players.find(p => p.id === recalling.id)?.mode === 'aboard'), 4000, 'shrine return synchronized to five clients', details);
+    assert.equal(recalling.player.shipReturned, true);
+    assert.equal(recalling.player.weapon, carriedWeapon); assert.equal(recalling.player.rarity, carriedRarity);
+    assert.ok(crew.every(b => b.events.some(e => e.kind === 'airship-return' && e.playerId === recalling.id && e.id === SHRINES.at(-1).id)));
+    recalling.input({ jump: true });
+    await until(() => recalling.player.mode === 'gliding', 4000, 'returned pirate chooses to glide back down', details);
+    recalling = null;
+    t.diagnostic('Captured shrine returned a pirate to the boat on all five clients, then they jumped back into the adventure.');
     destination = BEACON;
     await until(() => gathered(BEACON), 22000, 'return to lighthouse', details);
     crew[1].action('interact', BEACON.id);

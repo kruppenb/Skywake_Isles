@@ -47,7 +47,7 @@ test('the last explicit leave resets the voyage on the next tick and preserves a
   locate(p, CHESTS[0]); game.action(p.id, 'interact', CHESTS[0].id);
   locate(p, SHRINES[0]); game.action(p.id, 'interact', SHRINES[0].id);
   for (const enemy of [...game.enemies.values()].filter(e => e._shrine === SHRINES[0].id)) game.damageEnemy(enemy, enemy.hp, p.id);
-  ticks(game, 5.1); game.action(p.id, 'ping');
+  game.action(p.id, 'ping');
   assert.equal(game.shards, 1); assert.equal(game.pings.length, 1);
   assert.notDeepEqual(game.checkpoint, SPAWN);
   const round = game.round, stats = { ...game.stats };
@@ -195,9 +195,10 @@ test('three finite shrine quests unlock scaled boss, victory results, and clean 
       if (p.hp < 65) game.action(p.id, 'heal');
     }
     assert.ok(steps < 1200, `guards defeated at ${point.id}`);
-    locate(p, point); ticks(game, 5.1);
     assert.equal(game.shrines.find(s => s.id === point.id).status, 'cleared');
-    assert.equal(game.action(p.id, 'interact', point.id).ok, false);
+    locate(p, point);
+    assert.equal(game.action(p.id, 'interact', point.id).ok, true);
+    assert.equal(p.mode, 'aboard');
   }
   assert.equal(game.shards, 3); assert.equal(game.pearls, 102);
   locate(p, BEACON); game.action(p.id, 'interact', BEACON.id);

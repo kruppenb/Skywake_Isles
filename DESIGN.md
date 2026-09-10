@@ -151,7 +151,8 @@ Enemy: {id,type:'crab'|'spitter'|'tidebreaker'|'tempest',x,y,z,yaw,hp,maxHp,
 tempest is the boss; tidebreaker is the optional-defense mini boss. Base
 stats per type live in shared/enemies.js. Enemy y is feet position.
 Shrine dynamic fields: {id,status:'dormant'|'active'|'cleared',charge,
- remaining}; charge 0–1, remaining number of living shrine guards.
+ remaining}; charge is retained for snapshot compatibility (0 until capture,
+then 1), remaining is the number of living shrine guards; there is no hold timer.
 Chest: {id,opened}; static positions from shared constants.
 Ping: {id,playerId,x,z,expiresAt}.
 Events always {kind,...}; common kinds:
@@ -174,9 +175,13 @@ World/client tolerate extra fields and unknown events.
 Loop: host presses Set sail (launch) in lobby, all online crew begin aboard,
 phase voyage elapsed reset to zero. The client shows Space to jump and auto
 glide; server auto-drops remaining crew. Three shrine quests any order:
-E within 4m starts a shrine, spawning 3–5 whimsical crabs scaled gently with
-crew size. Defeat guards then stand within 9m for 5 seconds to charge it.
-Cleared shrine grants shared shard and checkpoint; nearby crew healed.
+E within 4m starts a shrine, spawning 3–11 guards scaled with the crew size.
+Defeating its last living guard captures it immediately, with no proximity or
+charging requirement. Cleared shrine grants shared shard, 25 pearls and checkpoint;
+nearby living crew are healed. E within 4m (full 3D range, grounded, living,
+line of sight) of a captured shrine returns the pirate to the boat during voyage
+or finale, preserving equipment and using the existing airship-return event.
+The shared shrine-return eligibility drives both the prompt and cyan model cue.
 No respawning shrine guards or endless alarm. A few optional roaming crabs
 stay away from the initial beach. Optional defenses (shared/side-events.js):
 E at the cyan supplies of the market, farm or yard starts a once-per-voyage,
@@ -285,8 +290,9 @@ for lead diagnostics; no cheats or server debug APIs.
 UI gives immediate loading state and actionable WebGL/connection failure.
 Welcome/lobby/sail/drop/land/shrine/finale/victory/replay are distinct states.
 Initial objective: Jump from the ship; land at Sunwake Strand. Then Find the
-three compass shards. Active shrine: Defeat the crabs, then stand by the
-shrine. Three shards: Return to the lighthouse. Finale: Free the compass.
+three compass shards. Active shrine: Defeat the defenders; capture is automatic.
+Captured shrine nearby: E — Return to boat, with cyan inlays and a return glyph.
+Three shards: Return to the lighthouse. Finale: Free the compass.
 Minimap draws colored terrain regions, crew, live shrine state, lighthouse,
 chests optionally; expanding M gives readable named destinations. Show
 nearest objective distance and compass edge indicators so kids don't get lost.

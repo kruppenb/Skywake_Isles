@@ -972,43 +972,352 @@ export function buildCrab(palette, type = 'crab', size = 1) {
   } };
 }
 
-export function buildChest(palette) {
-  const group = new THREE.Group(), base = new GeoBatch(palette), lb = new GeoBatch(palette);
-  base.add('box', [0, .39, 0], [1.42, .78, .98], [0, 0, 0], '#96603b');
-  base.add('box', [0, .77, 0], [1.46, .10, 1.01], [0, 0, 0], '#e9b84f');
-  for (const x of [-.48, .48]) {
-    base.add('box', [x, .40, -.50], [.10, .8, .06], [0, 0, 0], '#ffd270');
-    base.add('box', [x, .40, .50], [.10, .8, .06], [0, 0, 0], '#e4b653');
+// Chests and shrines are hero props: a pirate walks right up to them, so they
+// are cut from chamfered slabs, swept arcs and flat facets instead of the
+// scenery primitives. Every template below is shared by all instances and is
+// only ever copied into a batch, never handed to a mesh, so disposing a model
+// never takes one of them with it.
+const CHAMFERED = new Map();
+function chamferBox(chamfer = .12) {
+  let geometry = CHAMFERED.get(chamfer);
+  if (!geometry) {
+    const half = .5 - chamfer, shape = new THREE.Shape();
+    shape.moveTo(-half, -half); shape.lineTo(half, -half); shape.lineTo(half, half); shape.lineTo(-half, half); shape.closePath();
+    geometry = new THREE.ExtrudeGeometry(shape, { depth: 1 - 2 * chamfer, bevelEnabled: true, bevelSize: chamfer, bevelThickness: chamfer, bevelSegments: 1, steps: 1 });
+    geometry.translate(0, 0, chamfer - .5);
+    CHAMFERED.set(chamfer, geometry);
   }
-  base.add('box', [0, .51, -.54], [.25, .29, .09], [0, 0, 0], '#fadd77');
-  base.add('box', [0, .50, -.59], [.055, .105, .03], [0, 0, 0], '#785834');
-  base.add('sphere', [0, .75, 0], [.55, .13, .36], [0, 0, 0], '#ffd16c');
-  const lid = new THREE.Group(); lid.position.set(0, .77, .49);
-  lb.add('sphere', [0, 0, -.49], [.75, .34, .51], [0, 0, 0], '#bb8346');
-  for (const x of [-.48, .48]) lb.add('sphere', [x, .01, -.49], [.07, .355, .525], [0, 0, 0], '#f4c35d');
-  lid.add(lb.mesh()); group.add(base.mesh(), lid);
-  return { group, animate(time, opened) { lid.rotation.x = THREE.MathUtils.lerp(lid.rotation.x, opened ? 1.65 : 0, .14); } };
+  return geometry;
+}
+const STUD = new THREE.OctahedronGeometry(1, 0);
+const COIN = new THREE.CylinderGeometry(1, 1, 1, 8);
+const DRUM = new THREE.CylinderGeometry(1, 1, 1, 12);
+const TAPERED_DRUM = new THREE.CylinderGeometry(.76, 1, 1, 12);
+
+// One elliptical sweep drives the chest lid's staves, its iron straps and the
+// shrine's support arms. Each step reports the mid point of a chord, its
+// length, the roll that lines a box up with the tangent, and the outward normal
+// so a strap can be seated proud of the boards it holds down.
+function arcSegments(count, radiusZ, radiusY, from = 0, to = Math.PI) {
+  const steps = [];
+  for (let i = 0; i < count; i++) {
+    const a = from + (to - from) * i / count, b = from + (to - from) * (i + 1) / count;
+    const ay = Math.sin(a) * radiusY, az = -Math.cos(a) * radiusZ;
+    const by = Math.sin(b) * radiusY, bz = -Math.cos(b) * radiusZ;
+    const dy = by - ay, dz = bz - az, length = Math.hypot(dy, dz) || 1e-6;
+    steps.push({ y: (ay + by) / 2, z: (az + bz) / 2, length, angle: Math.atan2(-dy / length, dz / length),
+      normalY: dz / length, normalZ: -dy / length });
+  }
+  return steps;
 }
 
-export function buildShrine(palette, color) {
-  const group = new THREE.Group(), b = new GeoBatch(palette);
-  b.add('cylinder', [0, .14, 0], [2.3, .28, 2.3], [0, 0, 0], '#abbda3');
-  b.add('cylinder', [0, .37, 0], [1.8, .22, 1.8], [0, 0, 0], '#d4d2af');
-  for (const side of [-1, 1]) {
-    b.add('cylinder', [side * 1.32, 1.25, 0], [.30, 1.7, .30], [0, 0, 0], '#849d97');
-    b.add('cone', [side * 1.32, 2.3, 0], [.48, .54, .48], [0, 0, 0], '#e6c57d');
+// The lid's end boards: a half ellipse with a chamfered rim, standing in the
+// z/y plane so its thickness runs along x.
+function archPlate(radiusZ, radiusY, thickness, segments = 14) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-radiusZ, 0);
+  for (let i = 1; i <= segments; i++) {
+    const a = Math.PI - i * Math.PI / segments;
+    shape.lineTo(Math.cos(a) * radiusZ, Math.sin(a) * radiusY);
   }
-  b.add('cylinder', [0, .80, 0], [.62, .9, .62], [0, 0, 0], '#688f94');
-  b.add('cylinder', [0, 1.3, 0], [.88, .14, .88], [0, 0, 0], '#e6c06b');
-  group.add(b.mesh());
-  const gemBatch = new GeoBatch(palette, palette.glow);
-  gemBatch.add('pebble', [0, 0, 0], [.42, .72, .30], [0, 0, 0], color);
-  gemBatch.add('ring', [0, 0, 0], [.85, .85, .85], [.2, 0, 0], '#ffe298');
-  const gem = gemBatch.mesh({ shadow: false }); gem.position.y = 2.65; group.add(gem);
-  return { group, gem, animate(time, state) {
-    gem.position.y = 2.65 + Math.sin(time * 1.7) * .18; gem.rotation.y = time * .42;
-    gem.scale.setScalar(state?.status === 'cleared' ? .65 : 1);
-  } };
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: true, bevelSize: .012, bevelThickness: .012, bevelSegments: 1, steps: 1, curveSegments: 4 });
+  geometry.translate(0, 0, -thickness / 2); geometry.rotateY(Math.PI / 2); return geometry;
+}
+
+// A cut crystal: staggered rings of flat facets. The shell is left unindexed so
+// every facet keeps its own normal and the light breaks across the cut instead
+// of sliding over a smooth ball.
+function facetShell(rings, segments = 9, twist = .34) {
+  const positions = [];
+  const at = (k, i) => {
+    const [y, radius] = rings[k], a = (i + k * twist) / segments * Math.PI * 2;
+    return [Math.sin(a) * radius, y, Math.cos(a) * radius];
+  };
+  for (let k = 0; k < rings.length - 1; k++) for (let i = 0; i < segments; i++) {
+    const a0 = at(k, i), a1 = at(k, i + 1), b0 = at(k + 1, i), b1 = at(k + 1, i + 1);
+    if (rings[k][1] > 1e-6) positions.push(...a0, ...a1, ...b1);
+    if (rings[k + 1][1] > 1e-6) positions.push(...a0, ...b1, ...b0);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals(); return geometry;
+}
+
+// Deterministic hoard scatter: every client spills the same coins in the same
+// chest, and a test can rely on the layout.
+function scatter(seed) { let value = seed >>> 0; return () => (value = (value * 1664525 + 1013904223) >>> 0) / 4294967296; }
+// Frame rate independent approach without importing a clock: the same easing at
+// 30, 60 or 144 Hz, and an instant snap when motion is turned down.
+function approach(current, target, dt, rate, snap) {
+  if (snap) return target;
+  const step = Number.isFinite(dt) && dt > 0 ? 1 - Math.exp(-Math.min(dt, .25) * rate) : 1 - Math.exp(-rate / 60);
+  return current + (target - current) * step;
+}
+
+const CHEST_SEAM = .645, CHEST_OPEN = 1.78;
+
+export function buildChest(palette) {
+  const oak = '#8f5a35', oakLit = '#a97243', oakDark = '#6f452a', lining = '#59371f', liningLit = '#7b4f2e';
+  const brass = '#e9b855', brassLit = '#ffd270', brassDark = '#b98a37', iron = '#4a3a30';
+  const group = new THREE.Group(), shell = new GeoBatch(palette), hoardBatch = new GeoBatch(palette), lidBatch = new GeoBatch(palette);
+  const glintMaterial = palette.glow.clone();
+  glintMaterial.name = 'chest-hoard-glint'; glintMaterial.transparent = true; glintMaterial.depthWrite = false; glintMaterial.opacity = .3;
+  const glintBatch = new GeoBatch(palette, glintMaterial);
+  // The hollow the lid uncovers. Nothing structural reaches inside it.
+  const cavity = new THREE.Box3(new THREE.Vector3(-.6375, .20, -.3775), new THREE.Vector3(.6375, CHEST_SEAM, .3775));
+
+  shell.add(chamferBox(.14), [0, .025, 0], [1.50, .05, 1.00], [0, 0, 0], iron);
+  shell.add(chamferBox(.14), [0, .085, 0], [1.46, .09, .96], [0, 0, 0], oakDark);
+  // Front and back are five upright staves; the ends are three stacked boards.
+  // Real seams, so the toon ramp draws the planking instead of implying it.
+  for (const sz of [-1, 1]) [-.60, -.30, 0, .30, .60].forEach((x, i) => {
+    shell.add(chamferBox(.16), [x, .385, sz * .465], [.285, .53, .07], [0, 0, 0], i % 2 ? oak : oakLit);
+  });
+  for (const sx of [-1, 1]) [.20, .385, .57].forEach((y, i) => {
+    shell.add(chamferBox(.16), [sx * .715, y, 0], [.07, .155, .93], [0, 0, 0], i % 2 ? oakLit : oak);
+  });
+  // The liner: a darker second skin that only reads once the lid swings clear.
+  shell.add(chamferBox(.1), [0, .175, 0], [1.30, .05, .80], [0, 0, 0], lining);
+  for (let i = 0; i < 5; i++) shell.add(chamferBox(.14), [-.52 + i * .26, .19, 0], [.235, .03, .76], [0, 0, 0], i % 2 ? liningLit : lining);
+  for (const sz of [-1, 1]) shell.add(chamferBox(.1), [0, .42, sz * .395], [1.28, .45, .035], [0, 0, 0], lining);
+  for (const sx of [-1, 1]) shell.add(chamferBox(.1), [sx * .655, .42, 0], [.035, .45, .78], [0, 0, 0], liningLit);
+  // Brass mouth frame, the lip the lid closes onto.
+  for (const sz of [-1, 1]) shell.add(chamferBox(.2), [0, .615, sz * .45], [1.48, .055, .11], [0, 0, 0], brassDark);
+  for (const sx of [-1, 1]) shell.add(chamferBox(.2), [sx * .70, .615, 0], [.11, .055, .90], [0, 0, 0], brassDark);
+  // Two hammered straps per face, riveted, plus the corner caps and feet.
+  for (const sx of [-.47, .47]) for (const sz of [-1, 1]) {
+    shell.add(chamferBox(.22), [sx, .38, sz * .513], [.13, .55, .045], [0, 0, 0], sz < 0 ? brass : brassDark);
+    for (const y of [.19, .38, .57]) shell.add(STUD, [sx, y, sz * .5375], [.038, .038, .022], [0, 0, 0], brassLit);
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    shell.add(chamferBox(.2), [sx * .753, .38, sz * .42], [.04, .55, .18], [0, 0, 0], brassDark);
+    shell.add(chamferBox(.2), [sx * .645, .38, sz * .513], [.20, .55, .045], [0, 0, 0], brass);
+    shell.add(chamferBox(.2), [sx * .655, .075, sz * .43], [.24, .11, .20], [0, 0, 0], iron);
+    for (const y of [.19, .57]) shell.add(STUD, [sx * .70, y, sz * .5375], [.042, .042, .022], [0, 0, 0], brassLit);
+  }
+  // Shield shaped lock with a real keyhole cut, and a drop ring at each end.
+  shell.add(chamferBox(.22), [0, .50, -.508], [.30, .28, .04], [0, 0, 0], brass);
+  shell.add(chamferBox(.3), [0, .335, -.505], [.19, .11, .036], [0, 0, 0], brassLit);
+  shell.add(chamferBox(.3), [0, .615, -.505], [.19, .07, .036], [0, 0, 0], brassLit);
+  shell.add('cylinder', [0, .525, -.535], [.048, .022, .048], [Math.PI / 2, 0, 0], '#2b211a');
+  shell.add(chamferBox(.3), [0, .465, -.535], [.032, .08, .022], [0, 0, 0], '#2b211a');
+  for (const sx of [-1, 1]) {
+    shell.add(chamferBox(.24), [sx * .748, .40, 0], [.05, .24, .32], [0, 0, 0], brassDark);
+    shell.add('ring', [sx * .756, .335, 0], [.15, .15, .12], [0, Math.PI / 2, 0], brass);
+    for (const sz of [-1, 1]) shell.add(STUD, [sx * .758, .475, sz * .105], [.028, .046, .046], [0, 0, 0], brassLit);
+  }
+
+  // Segmented barrel lid. The pivot sits on the back top edge so the boards
+  // rotate about the hinge line itself: the mouth is never swept through.
+  const lid = new THREE.Group(); lid.name = 'chest-lid'; lid.position.set(0, CHEST_SEAM, .50);
+  const staves = arcSegments(9, .50, .415);
+  staves.forEach((s, i) => {
+    lidBatch.add(chamferBox(.13), [0, s.y - s.normalY * .0375, -.50 + s.z - s.normalZ * .0375],
+      [1.42, .075, s.length - .014], [s.angle, 0, 0], i % 2 ? oak : oakLit);
+  });
+  for (const s of arcSegments(4, .50, .415, .38, Math.PI - .38)) {
+    lidBatch.add(chamferBox(.16), [0, s.y - s.normalY * .105, -.50 + s.z - s.normalZ * .105], [1.30, .04, s.length - .03], [s.angle, 0, 0], lining);
+  }
+  const board = archPlate(.50, .415, .055), boss = archPlate(.33, .27, .03);
+  for (const sx of [-1, 1]) {
+    lidBatch.add(board, [sx * .715, 0, -.50], [1, 1, 1], [0, 0, 0], oakDark);
+    lidBatch.add(boss, [sx * .752, .015, -.50], [1, 1, 1], [0, 0, 0], brassDark);
+  }
+  board.dispose(); boss.dispose();
+  for (const sx of [-.47, .47]) for (const s of arcSegments(10, .50, .415, .10, Math.PI - .10)) {
+    lidBatch.add(chamferBox(.22), [sx, s.y + s.normalY * .0225, -.50 + s.z + s.normalZ * .0225], [.13, .045, s.length], [s.angle, 0, 0], brass);
+  }
+  for (const sx of [-.47, .47]) for (const t of [.42, Math.PI / 2, Math.PI - .42]) {
+    const [s] = arcSegments(1, .50, .415, t - .02, t + .02);
+    lidBatch.add(STUD, [sx, s.y + s.normalY * .044, -.50 + s.z + s.normalZ * .044], [.038, .032, .038], [s.angle, 0, 0], brassLit);
+  }
+  lidBatch.add(chamferBox(.26), [0, -.09, -1.018], [.17, .25, .04], [0, 0, 0], brass);
+  lidBatch.add(STUD, [0, -.17, -1.044], [.042, .042, .022], [0, 0, 0], brassLit);
+  lidBatch.add(chamferBox(.24), [0, .012, -.998], [.24, .07, .07], [0, 0, 0], brassDark);
+
+  // The hoard itself: mounded coin, loose struck coins and cut stones, all of
+  // it seated below the seam so it is only ever seen through an open lid.
+  const random = scatter(0x5c1e77);
+  for (const [mx, mz, radius] of [[-.30, -.04, .26], [.06, .05, .30], [.36, -.02, .22]])
+    hoardBatch.add('pebble', [mx, .305, mz], [radius, .10, radius * .7], [0, random() * 3, 0], '#c9902a');
+  for (let i = 0; i < 18; i++) {
+    const x = -.50 + random() * 1.00, z = -.28 + random() * .56, y = .252 + random() * .085;
+    hoardBatch.add(COIN, [x, y, z], [.072, .016, .072], [(random() - .5) * .55, random() * 3, (random() - .5) * .55], i % 3 ? '#f6c343' : '#ffe08a');
+  }
+  const gemColors = ['#ff7f9d', '#7de3a8', '#8ec9ff', '#ffd76a', '#c79bff'];
+  for (let i = 0; i < 7; i++) {
+    const x = -.44 + random() * .88, z = -.22 + random() * .44, y = .335 + random() * .07;
+    const spin = random() * 3, tone = gemColors[i % gemColors.length];
+    hoardBatch.add(STUD, [x, y, z], [.07, .105, .07], [.18, spin, 0], tone);
+    glintBatch.add(STUD, [x, y, z], [.042, .066, .042], [.18, spin, 0], tone);
+  }
+  for (let i = 0; i < 5; i++) glintBatch.add(COIN, [-.42 + i * .21, .335, -.16 + random() * .32], [.055, .01, .055], [0, random() * 3, 0], '#ffeeb0');
+
+  const shellMesh = shell.mesh(), hoard = hoardBatch.mesh(), glints = glintBatch.mesh({ shadow: false }), lidMesh = lidBatch.mesh();
+  shellMesh.name = 'chest-shell'; hoard.name = 'chest-hoard'; glints.name = 'chest-hoard-glint';
+  lid.add(lidMesh); group.add(shellMesh, hoard, glints, lid);
+  const readout = { lidAngle: 0, openness: 0, glow: glintMaterial.opacity };
+  // animate(time, opened, options) — options may also be a bare reduced motion
+  // flag. { reducedMotion, dt, nearby } are all optional; the legacy two
+  // argument call still eases at exactly the old 60 Hz rate.
+  return { group, lid, shell: shellMesh, hoard, glints, glintMaterial, cavity, seam: CHEST_SEAM, openAngle: CHEST_OPEN, readout,
+    animate(time, opened, options = {}) {
+      const settings = typeof options === 'boolean' ? { reducedMotion: options } : (options || {});
+      const { reducedMotion = false, dt = 1 / 60, nearby = false } = settings;
+      lid.rotation.x = approach(lid.rotation.x, opened ? CHEST_OPEN : 0, dt, 9, reducedMotion);
+      const openness = THREE.MathUtils.clamp(lid.rotation.x / CHEST_OPEN, 0, 1), motion = reducedMotion ? 0 : time;
+      glintMaterial.opacity = THREE.MathUtils.clamp(.26 + openness * .62 + (nearby ? .06 : 0) + Math.sin(motion * 2.3) * .035 * openness, 0, 1);
+      readout.lidAngle = lid.rotation.x; readout.openness = openness; readout.glow = glintMaterial.opacity;
+      return readout;
+    } };
+}
+
+const SHRINE_GEM_HEIGHT = 2.65, SHRINE_RETURN_HEIGHT = 4.15;
+const SHRINE_CYAN = '#7ef0ff', SHRINE_WARM = '#ffdca0';
+
+export function buildShrine(palette, color = '#f8d778') {
+  const pale = '#d6d3b0', moss = '#a3b79f', mossDark = '#8aa197', slate = '#6f8a86', shade = '#b9c3a8';
+  const brass = '#e6c57d', brassLit = '#ffe3a6', brassDark = '#b9903f';
+  const group = new THREE.Group(), stone = new GeoBatch(palette), brassBatch = new GeoBatch(palette);
+  const gemMaterial = palette.glow.clone(), runeMaterial = palette.glow.clone(), returnMaterial = palette.glow.clone();
+  gemMaterial.name = 'shrine-crystal'; gemMaterial.transparent = true; gemMaterial.depthWrite = false; gemMaterial.opacity = .86; gemMaterial.side = THREE.DoubleSide;
+  runeMaterial.name = 'shrine-runes'; runeMaterial.transparent = true; runeMaterial.depthWrite = false; runeMaterial.opacity = .18; runeMaterial.color.set(SHRINE_WARM);
+  returnMaterial.name = 'shrine-return-glyph'; returnMaterial.transparent = true; returnMaterial.depthWrite = false; returnMaterial.opacity = 0; returnMaterial.color.set(SHRINE_CYAN);
+  const gemBatch = new GeoBatch(palette, gemMaterial), runeBatch = new GeoBatch(palette, runeMaterial), returnBatch = new GeoBatch(palette, returnMaterial);
+  // Everything on the drums is placed by station: an angle around the shrine,
+  // a radius, and a sideways offset along that facet's tangent.
+  const station = (batch, geometry, angle, radius, offset, y, scale, color2, rotation = 0) => {
+    const sin = Math.sin(angle), cos = Math.cos(angle);
+    batch.add(geometry, [sin * radius + cos * offset, y, cos * radius - sin * offset], scale, [rotation, angle, 0], color2);
+  };
+
+  // Three cut tiers. The middle drum is a recessed core wearing twelve framed
+  // panels, so the ornament is a real hollow in the stone, not a painted line.
+  stone.add(DRUM, [0, .09, 0], [2.14, .18, 2.14], [0, 0, 0], mossDark);
+  for (let i = 0; i < 12; i++) station(stone, chamferBox(.16), i / 12 * Math.PI * 2, 2.16, 0, .095, [.92, .19, .16], i % 2 ? moss : '#98ac95');
+  stone.add(DRUM, [0, .205, 0], [2.02, .07, 2.02], [0, 0, 0], slate);
+  stone.add(DRUM, [0, .32, 0], [1.74, .21, 1.74], [0, 0, 0], slate);
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    station(stone, 'box', a, 1.755, 0, .32, [.80, .17, .07], '#5f7b78');
+    for (const sx of [-1, 1]) station(stone, 'box', a, 1.83, sx * .335, .32, [.13, .19, .10], shade);
+    for (const [sy, tone] of [[1, pale], [-1, mossDark]]) station(stone, 'box', a, 1.83, 0, .32 + sy * .085, [.80, .05, .10], tone);
+    // Inset glyph, seated on the floor of its own recess.
+    station(runeBatch, 'box', a, 1.80, 0, .335, [.045, .085, .02], '#ffffff');
+    station(runeBatch, 'box', a, 1.80, 0, .295, [.10, .022, .02], '#ffffff');
+    station(runeBatch, 'box', a, 1.80, i % 2 ? .06 : -.06, .365, [.055, .022, .02], '#e8fbff');
+  }
+  stone.add(DRUM, [0, .445, 0], [1.62, .06, 1.62], [0, 0, 0], slate);
+  stone.add(DRUM, [0, .53, 0], [1.50, .14, 1.50], [0, 0, 0], pale);
+  // Mosaic inlay across the top tread, with a carved compass rose at its heart.
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    station(stone, 'box', a, 1.16, 0, .607, [.46, .03, .40], i % 2 ? shade : '#c7bf9a');
+    station(runeBatch, 'box', a, 1.16, 0, .615, [.05, .022, .19], '#ffffff');
+  }
+  stone.add(DRUM, [0, .615, 0], [.94, .03, .94], [0, 0, 0], shade);
+  for (let i = 0; i < 4; i++) station(runeBatch, 'box', i / 4 * Math.PI * 2 + Math.PI / 4, .62, 0, .625, [.05, .022, .62], '#ffffff');
+
+  // Fluted column, carved collar and a brass table under the crystal.
+  stone.add(DRUM, [0, .68, 0], [.88, .12, .88], [0, 0, 0], pale);
+  stone.add(DRUM, [0, .76, 0], [.72, .07, .72], [0, 0, 0], slate);
+  stone.add(TAPERED_DRUM, [0, 1.14, 0], [.50, .78, .50], [0, 0, 0], shade);
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2;
+    stone.add('cylinder', [Math.sin(a) * .46, 1.14, Math.cos(a) * .46], [.075, .74, .075], [0, 0, 0], i % 2 ? pale : mossDark);
+  }
+  stone.add(DRUM, [0, 1.56, 0], [.66, .09, .66], [0, 0, 0], slate);
+  stone.add(DRUM, [0, 1.65, 0], [.86, .10, .86], [0, 0, 0], brass);
+  for (let i = 0; i < 16; i++) station(runeBatch, 'box', i / 16 * Math.PI * 2, .90, 0, 1.65, [.05, .05, .03], '#ffffff');
+
+  // Sculpted supports: a fluted post on each of the original pillar sites, and
+  // a brass arm that bows out and sweeps up to cradle the astrolabe.
+  for (const sx of [-1, 1]) {
+    stone.add(DRUM, [sx * 1.32, .655, 0], [.44, .11, .44], [0, 0, 0], pale);
+    stone.add(TAPERED_DRUM, [sx * 1.32, 1.00, 0], [.30, .70, .30], [0, 0, 0], mossDark);
+    for (const sz of [-1, 1]) stone.add('cylinder', [sx * 1.32, 1.00, sz * .24], [.06, .66, .06], [0, 0, 0], shade);
+    stone.add(DRUM, [sx * 1.32, 1.375, 0], [.38, .08, .38], [0, 0, 0], pale);
+    stone.add('cone', [sx * 1.32, 1.52, 0], [.28, .30, .28], [0, 0, 0], brass);
+    const arm = u => [sx * (1.32 + .20 * Math.sin(u * Math.PI) - .36 * u), 1.55 + 1.10 * u ** .85];
+    for (let i = 0; i < 7; i++) {
+      const [x0, y0] = arm(i / 7), [x1, y1] = arm((i + 1) / 7);
+      const dx = x1 - x0, dy = y1 - y0, length = Math.hypot(dx, dy);
+      stone.add(chamferBox(.2), [(x0 + x1) / 2, (y0 + y1) / 2, 0], [.12, length + .02, .19],
+        [0, 0, Math.atan2(-dx / length, dy / length)], i % 2 ? brass : brassDark);
+    }
+    const [tipX, tipY] = arm(1);
+    stone.add(STUD, [tipX, tipY, 0], [.11, .13, .11], [0, .4, 0], brassLit);
+  }
+
+  // Brass astrolabe: three rings on different planes, an inclined axis and
+  // graduated ticks. It is its own mesh so it can turn against the crystal.
+  const orrery = new THREE.Group(); orrery.name = 'shrine-astrolabe'; orrery.position.y = SHRINE_GEM_HEIGHT;
+  brassBatch.add('ring', [0, 0, 0], [.98, .98, .5], [Math.PI / 2, 0, 0], brass);
+  brassBatch.add('ring', [0, 0, 0], [.88, .88, .5], [0, 0, .26], brassDark);
+  brassBatch.add('ring', [0, 0, 0], [.78, .78, .45], [0, Math.PI / 2, .42], brassLit);
+  // The inclined axis stops short of the crystal at both poles rather than
+  // spearing it, so the stone reads as suspended between the bearings.
+  const axis = new THREE.Vector3(.20, 1, .13).normalize();
+  for (const sy of [-1, 1]) {
+    const inner = axis.clone().multiplyScalar(sy * .80), outer = axis.clone().multiplyScalar(sy * 1.02);
+    brassBatch.line([inner.x, inner.y, inner.z], [outer.x, outer.y, outer.z], .028, brass);
+    brassBatch.add(STUD, [outer.x, outer.y, outer.z], [.075, .095, .075], [0, .4, 0], brassLit);
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    brassBatch.add('box', [Math.sin(a) * .98, 0, Math.cos(a) * .98], [.035, i % 3 ? .07 : .12, .035], [0, a, 0], i % 3 ? brassDark : brassLit);
+  }
+  const orreryMesh = brassBatch.mesh(); orreryMesh.name = 'shrine-astrolabe-brass'; orrery.add(orreryMesh);
+
+  // The crystal: a cut shell with a brighter core burning inside it.
+  const crystal = facetShell([[-1, 0], [-.62, .46], [-.12, .64], [.38, .42], [.78, .18], [1, 0]], 9, .38);
+  gemBatch.add(crystal, [0, 0, 0], [.62, .72, .62], [0, 0, 0], color);
+  gemBatch.add(crystal, [0, .02, 0], [.34, .46, .34], [0, .35, 0], '#ffffff');
+  crystal.dispose();
+  const gem = gemBatch.mesh({ shadow: false }); gem.name = 'shrine-crystal'; gem.position.y = SHRINE_GEM_HEIGHT;
+
+  // The cyan way home: a ring, a rising arrow and a hull, in the same glyph
+  // language as the airship lift so it reads as "back to the boat".
+  returnBatch.add('ring', [0, -.44, 0], [.52, .52, .3], [Math.PI / 2, 0, 0], '#ffffff');
+  returnBatch.add('cylinder', [0, -.04, 0], [.115, .62, .115], [0, 0, 0], '#dffcff');
+  returnBatch.add('cone', [0, .48, 0], [.38, .46, .38], [0, 0, 0], '#ffffff');
+  returnBatch.add(chamferBox(.28), [0, -.62, 0], [.62, .12, .26], [0, 0, 0], '#dffcff');
+  returnBatch.add(chamferBox(.3), [0, -.53, 0], [.30, .08, .16], [0, 0, 0], '#ffffff');
+  const returnMarker = returnBatch.mesh({ shadow: false });
+  returnMarker.name = 'shrine-return-to-boat-marker'; returnMarker.position.y = SHRINE_RETURN_HEIGHT; returnMarker.visible = false;
+
+  const stoneMesh = stone.mesh(), runes = runeBatch.mesh({ shadow: false });
+  stoneMesh.name = 'shrine-stone'; runes.name = 'shrine-runes';
+  group.add(stoneMesh, runes, orrery, gem, returnMarker);
+  let proximity = 0;
+  const readout = { proximity: 0, cleared: false, active: false, returnVisible: false, runeGlow: runeMaterial.opacity };
+  // animate(time, state, options) with options { nearby, reducedMotion, dt,
+  // returnEnabled }. returnEnabled: false keeps the crystal alive but drops
+  // every trace of the way-home glyph, which is what the central beacon wants.
+  return { group, gem, gemMaterial, runes, runeMaterial, returnMarker, returnMaterial, orrery, stone: stoneMesh,
+    gemHeight: SHRINE_GEM_HEIGHT, returnHeight: SHRINE_RETURN_HEIGHT, readout,
+    animate(time, state, options = {}) {
+      const { nearby = false, reducedMotion = false, dt = 1 / 60, returnEnabled = true } = options || {};
+      const status = state?.status, cleared = status === 'cleared', active = status === 'active';
+      proximity = THREE.MathUtils.clamp(approach(proximity, nearby ? 1 : 0, dt, 5, reducedMotion), 0, 1);
+      const motion = reducedMotion ? 0 : time, guiding = cleared && returnEnabled !== false;
+      gem.position.y = SHRINE_GEM_HEIGHT + Math.sin(motion * 1.7) * .18;
+      gem.rotation.y = motion * .42;
+      gem.scale.setScalar(cleared ? .82 : 1);
+      orrery.rotation.y = -motion * .23; orrery.rotation.z = Math.sin(motion * .5) * .05;
+      gemMaterial.opacity = THREE.MathUtils.clamp(.64 + proximity * .3 + (active ? .06 : 0) + Math.sin(motion * 1.1) * .04, 0, 1);
+      runeMaterial.color.set(guiding ? SHRINE_CYAN : SHRINE_WARM);
+      runeMaterial.opacity = THREE.MathUtils.clamp((cleared ? .30 : active ? .34 : .16) + proximity * .52 + Math.sin(motion * 1.3) * .035, 0, 1);
+      returnMarker.visible = guiding;
+      returnMaterial.opacity = guiding ? THREE.MathUtils.clamp(.24 + proximity * .66, 0, 1) : 0;
+      returnMarker.position.y = SHRINE_RETURN_HEIGHT + proximity * .26 + Math.sin(motion * 1.6) * .14;
+      returnMarker.scale.setScalar(.74 + proximity * .32);
+      returnMarker.rotation.y = motion * .5;
+      readout.proximity = proximity; readout.cleared = cleared; readout.active = active;
+      readout.returnVisible = guiding; readout.runeGlow = runeMaterial.opacity;
+      return readout;
+    } };
 }
 
 export function addLighthouse(batch, x, y, z) {

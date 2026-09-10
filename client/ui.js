@@ -6,6 +6,7 @@ import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-
 import { FINALE_STAGES } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
 import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_RANGE } from '../shared/airship.js';
+import { canReturnAtShrine } from '../shared/shrines.js';
 import { createLootReveal } from './loot-reveal.js';
 
 const $ = (id) => document.getElementById(id);
@@ -111,6 +112,8 @@ export function findInteractable(state, player) {
     const dynamic = state.shrines.find((entry) => entry.id === shrine.id);
     if (dynamic?.status === 'dormant' && distance(player, shrine) <= 4 && reachable(shrine)) {
       options.push({ ...shrine, kind: 'shrine', label: `Awaken ${shrine.name}`, distance: distance(player, shrine) });
+    } else if (canReturnAtShrine(state, player, shrine)) {
+      options.push({ ...shrine, kind: 'airship-return', label: 'Return to boat', color: '#a5f5f0', distance: distance(player, shrine) });
     }
   }
   if (state.phase === 'voyage' && state.shards >= 3 && distance(player, BEACON) <= 4 && reachable(BEACON)) {
@@ -729,8 +732,8 @@ export function createUI(callbacks = {}) {
         const nearby = SHRINES.find((shrine) => distance(player, shrine) <= 28 && state.shrines.find((entry) => entry.id === shrine.id)?.status === 'active');
         if (nearby) {
           activeShrine = state.shrines.find((entry) => entry.id === nearby.id);
-          title = activeShrine.remaining > 0 ? 'Clear the shrine’s crabs' : 'Stand in the shrine’s glow';
-          detail = activeShrine.remaining > 0 ? `${activeShrine.remaining} crab${activeShrine.remaining === 1 ? '' : 's'} left. Your crew can help!` : 'Stay close together to restore this compass shard.';
+          title = 'Defeat the shrine’s defenders';
+          detail = 'The shrine captures automatically when its last defender falls.';
         }
       }
       text(refs['quest-region'], player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
@@ -739,9 +742,8 @@ export function createUI(callbacks = {}) {
       [...refs['shard-slots'].children].forEach((slot, index) => slot.classList.toggle('collected', index < state.shards));
       show(refs['shrine-progress'], !!activeShrine);
       if (activeShrine) {
-        text(refs['shrine-label'], activeShrine.remaining > 0 ? 'Guardians remaining' : 'Restoring the compass…');
-        text(refs['shrine-percent'], activeShrine.remaining > 0 ? activeShrine.remaining : `${Math.round(activeShrine.charge * 100)}%`);
-        refs['shrine-meter'].value = activeShrine.charge;
+        text(refs['shrine-label'], 'Defenders remaining');
+        text(refs['shrine-remaining'], activeShrine.remaining);
       }
       if (sideEvent) {
         const active = sideEvent.status === 'active';

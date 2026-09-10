@@ -7,6 +7,7 @@ import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { cameraTravel, scopeCameraPose } from './camera.js';
 import { SHIP_GUNS } from '../shared/airship.js';
+import { canReturnAtShrine } from '../shared/shrines.js';
 import { createAirshipPresentation, gunCameraPose, updateDeckCannons } from './airship.js';
 import { SCOPE_FOV } from './weapon-presentation.js';
 import { buildSettlements } from './settlement.js';
@@ -858,7 +859,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     }
     for (const [id, model] of enemies) if (!seen.has(id)) { disposeObject(model.group, preserve); disposeObject(model.hpGroup, preserve); enemies.delete(id); }
   }
-  function updateObjectives(state, time) {
+  function updateObjectives(state, time, dt) {
     const reducedMotion = reducedMotionPreference.matches, objectiveTime = reducedMotion ? 0 : time;
     const seenDrops = new Set();
     for (const drop of state?.drops || []) {
@@ -887,13 +888,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     for (const [id, model] of dropModels) if (!seenDrops.has(id)) { disposeObject(model.group, preserve); dropModels.delete(id); }
     for (const chest of state?.chests || []) { const model = chestModels.get(chest.id); if (model) model.opened = !!chest.opened; }
     for (const model of chestModels.values()) {
-      model.animate(time, model.opened); model.beam.visible = !model.opened;
-      model.beam.userData.star.position.y = 1.9 + Math.sin(time * 2.0) * .15; model.beam.userData.star.rotation.y = time;
+      model.animate(time, model.opened, { reducedMotion, dt }); model.beam.visible = !model.opened;
+      model.beam.userData.star.position.y = 1.9 + Math.sin(objectiveTime * 2.0) * .15; model.beam.userData.star.rotation.y = objectiveTime;
     }
     for (const shrine of SHRINES) {
       const model = shrineModels.get(shrine.id), status = state?.shrines?.find(s => s.id === shrine.id);
       const active = status?.status === 'active', cleared = status?.status === 'cleared';
-      model.animate(objectiveTime, status); model.beam.visible = !cleared;
+      model.animate(time, status, { nearby: !!state && canReturnAtShrine(state, latestLocal, shrine), reducedMotion, dt }); model.beam.visible = !cleared;
       updateObjectiveMarker(model.availableRing, { visible: !active && !cleared, time, reducedMotion });
       updateObjectiveMarker(model.activeRing, { visible: active, active: true, time, reducedMotion });
       model.beam.userData.star.visible = false;
@@ -909,7 +910,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       updateObjectiveMarker(model.activeRing, { visible: voyage && active, active: true, time, reducedMotion });
     }
     const shards = Array.isArray(state?.shards) ? state.shards.length : (state?.shards || 0), unlocked = shards >= 3;
-    beaconModel.animate(objectiveTime, null); beaconModel.gem.rotation.y = -objectiveTime * .3;
+    beaconModel.animate(time, null, { returnEnabled: false, reducedMotion, dt }); beaconModel.gem.rotation.y = -objectiveTime * .3;
     beaconBeam.visible = unlocked || !state || state.phase === 'lobby'; beaconBeam.userData.star.visible = false;
     updateObjectiveMarker(beaconHalo, { active: unlocked, muted: !unlocked, time, reducedMotion });
     lantern.scale.setScalar(state?.phase === 'victory' ? 1.6 : 1 + Math.sin(time * 1.3) * .07);
@@ -1048,7 +1049,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     moonwatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     island.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady(), palmheartReady: palmheartCamp.isReady(), cinderworksReady: cinderworks.isReady(), moonwatchReady: moonwatch.isReady() });
-    updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time);
+    updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time, dt);
     for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
       mote.mesh.position.set(mote.center.x + Math.sin(a) * mote.radius, mote.center.y + (mote.ember ? (mote.rise + time * .7) % 7 : Math.sin(time * .5 + mote.phase) * 1.1 + mote.rise * .4), mote.center.z + Math.cos(a) * mote.radius);

@@ -1,5 +1,6 @@
 import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt, shipAt } from '../shared/world.js';
 import { SHIP_GUNS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_DAMAGE, GUN_RANGE, gunAim, gunOperator, gunMuzzle } from '../shared/airship.js';
+import { canReturnAtShrine, SHRINE_RETURN_RANGE } from '../shared/shrines.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
@@ -401,11 +402,11 @@ export class Game {
     return good();
   }
 
-  returnToAirship(p, point) {
+  returnToAirship(p, point, range = RETURN_RANGE) {
     if (!p.online || p.hp <= 0 || p.knockedUntil || p.mode !== 'ground' || !p.grounded ||
       (this.phase !== 'voyage' && this.phase !== 'finale') ||
-      Math.hypot(p.x - point.x, p.y - heightAt(point.x, point.z), p.z - point.z) > RETURN_RANGE || !canReach(p, point)) {
-      return bad('Stand on the airship lift with a clear path to its center.', 'TOO_FAR');
+      Math.hypot(p.x - point.x, p.y - heightAt(point.x, point.z), p.z - point.z) > range || !canReach(p, point)) {
+      return bad('Stand near the return point with a clear path to its center.', 'TOO_FAR');
     }
     this.releaseGun(p);
     Object.assign(p, { mode: 'aboard', shipReturned: true, deckX: 0, deckZ: 0, yaw: 0, pitch: 0.1,
@@ -592,6 +593,7 @@ export class Game {
     if (e.type === 'tempest') for (const minion of [...this.enemies.values()]) if (minion._bossMinion) this.enemies.delete(minion.id);
     // Settle here as well as on tick, so killing the last enemy of the last
     // stage wins in the same call.
+    if (e._shrine) this.settleShrine(this.shrines.find(shrine => shrine.id === e._shrine));
     if (e._finale) this.settleFinale();
   }
 
@@ -628,7 +630,11 @@ export class Game {
     // Retained weapons must not mask nearby E interactions. Explicit drop
     // targets remain supported for clients that still send pickup actions.
     if (target) for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
-    for (const shrine of this.shrines) if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point: SHRINES.find(s => s.id === shrine.id) });
+    for (const shrine of this.shrines) {
+      const point = SHRINES.find(s => s.id === shrine.id);
+      if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point });
+      else if (canReturnAtShrine(this, p, point)) options.push({ id: shrine.id, kind: 'airship-return', range: SHRINE_RETURN_RANGE, point });
+    }
     if (this.phase === 'voyage' && p.hp > 0 && p.grounded && !this.sideEvents.some(event => event.status === 'active')) {
       for (const event of this.sideEvents) if (event.status === 'available') {
         const point = SIDE_EVENTS.find(definition => definition.id === event.id);
@@ -642,7 +648,7 @@ export class Game {
     const option = reachable[0];
     if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
-    if (option.kind === 'airship-return') return this.returnToAirship(p, option.point);
+    if (option.kind === 'airship-return') return this.returnToAirship(p, option.point, option.range);
     if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
     if (option.kind === 'loot') return this.pickupWeapon(p, option.data);
     if (option.kind === 'chest') this.openChest(p, option.data, option.point);
@@ -899,21 +905,20 @@ export class Game {
     for (const e of [...this.enemies.values()]) this.tickEnemy(e, dt);
     this.tickFinale();
     this.tickSideEvents();
-    for (const shrine of this.shrines) {
-      if (shrine.status !== 'active') continue;
-      shrine.remaining = [...this.enemies.values()].filter(e => e._shrine === shrine.id).length;
-      if (shrine.remaining) continue;
-      const point = SHRINES.find(s => s.id === shrine.id);
-      const crew = [...this.players.values()].filter(p => p.online && !p.knockedUntil && p.mode === 'ground' && distance(p, point) <= 9);
-      if (!crew.length) continue;
-      shrine.charge = Math.min(1, shrine.charge + dt / 5);
-      if (shrine.charge < 1 - 1e-8) continue;
-      shrine.charge = 1; shrine.status = 'cleared'; this.shards++; this.pearls += 25; this.checkpoint = { x: point.x, z: point.z };
-      for (const p of crew) p.hp = p.maxHp;
-      this.emit({ kind: 'shrine', id: shrine.id, status: 'cleared' });
-      this.emit({ kind: 'notice', message: this.shards === 3 ? 'All compass shards found! Return to Tideglass Lighthouse.' : `${point.name} restored! A new rescue checkpoint is ready.` });
-    }
+    for (const shrine of this.shrines) this.settleShrine(shrine);
     this.pings = this.pings.filter(p => p.expiresAt > this.elapsed);
+  }
+
+  settleShrine(shrine) {
+    if (shrine?.status !== 'active' || !['voyage', 'finale'].includes(this.phase)) return;
+    shrine.remaining = [...this.enemies.values()].filter(e => e._shrine === shrine.id && e.hp > 0).length;
+    if (shrine.remaining) return;
+    const point = SHRINES.find(s => s.id === shrine.id);
+    shrine.charge = 1; shrine.status = 'cleared'; this.shards++; this.pearls += 25; this.checkpoint = { x: point.x, z: point.z };
+    // Nearby healing remains a bonus, never a condition for capturing the shard.
+    for (const p of this.players.values()) if (p.online && p.hp > 0 && !p.knockedUntil && p.mode === 'ground' && distance(p, point) <= 9) p.hp = p.maxHp;
+    this.emit({ kind: 'shrine', id: shrine.id, status: 'cleared' });
+    this.emit({ kind: 'notice', message: this.shards === 3 ? 'All compass shards found! Return to Tideglass Lighthouse. Captured shrines can take you back to the boat (E).' : `${point.name} restored! Rescue checkpoint ready. Approach the shrine and press E to return to the boat.` });
   }
 
   tickEnemy(e, dt) {
