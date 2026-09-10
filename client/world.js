@@ -30,7 +30,7 @@ import { cinderworksWeight } from '../shared/cinderworks.js';
 import { createCinderworks } from './cinderworks.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { createMoonwatch } from './moonwatch.js';
-import { isCoastRegion, ISLAND_LANDMARK_NOMINALS } from '../shared/island.js';
+import { isCoastRegion, isCanopyRegion, ISLAND_LANDMARK_NOMINALS, canopyTreeDressing, canopyRockDressing, canopyPlantDressing } from '../shared/island.js';
 import { createIsland } from './island.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
@@ -183,14 +183,30 @@ export function buildScenery(palette, random) {
   // are recorded as the authored kit installs them. The glow draws stay in the
   // luminous batch above - all of them are shrine items already.
   const landmarkDecoration = new GeoBatch(palette), landmarkSites = [];
+  // The wild jungle, moon and volcanic scenery between the finished areas. Every
+  // draw that moves here is recorded as it is generated, so the authored kit
+  // stands on the exact transform the original silhouette used and never
+  // resamples the terrain or repeats a random decision.
+  const canopyDecoration = new GeoBatch(palette), canopySites = [];
+  const canopySite = (dressing, region, x, y, z, rotation, extra) => canopySites.push({ id: dressing.id, kind: dressing.kind,
+    region, prefab: dressing.prefab, x, y, z, rotation, scale: dressing.scale, ...extra });
   for (const obstacle of OBSTACLES) {
     if (obstacle.type === 'landmark' || obstacle.type === 'building' || obstacle.pilot === 'old-watch') continue;
     const { x, z } = obstacle, y = heightAt(x, z), region = regionAt(x, z)?.id;
     if (obstacle.type === 'tree') {
       const size = clamp((obstacle.height || 7) / 7, .7, 1.5);
-      if (region === 'moon') addBroadTree(moonwatchWeight(x, z) > 0 ? moonwatchDecoration : land, x, y, z, size, true, random() * TAU);
-      else if (region === 'jungle') addBroadTree(palmheartWeight(x, z) > 0 ? palmheartDecoration : land, x, y, z, size, false, random() * TAU);
-      else {
+      // The observatory and the camp keep the collidable trees inside their own
+      // weight; the wild ones beyond it move to the canopy batch with their
+      // recorded radius, height and drawn yaw.
+      if (region === 'moon') {
+        const wild = moonwatchWeight(x, z) <= 0, yaw = random() * TAU;
+        addBroadTree(wild ? canopyDecoration : moonwatchDecoration, x, y, z, size, true, yaw);
+        if (wild) canopySite(canopyTreeDressing(obstacle, region), region, x, y, z, [0, yaw, 0], { collidable: true, radius: obstacle.radius, height: obstacle.height });
+      } else if (region === 'jungle') {
+        const wild = palmheartWeight(x, z) <= 0, yaw = random() * TAU;
+        addBroadTree(wild ? canopyDecoration : palmheartDecoration, x, y, z, size, false, yaw);
+        if (wild) canopySite(canopyTreeDressing(obstacle, region), region, x, y, z, [0, yaw, 0], { collidable: true, radius: obstacle.radius, height: obstacle.height });
+      } else {
         // The coast palms keep their draw order and geometry; only the batch
         // changes, so the authored kit can stand on the recorded sites.
         const yaw = random() * TAU;
@@ -205,11 +221,18 @@ export function buildScenery(palette, random) {
     }
     else {
       const radius = obstacle.radius || 1.6, h = obstacle.height || 2;
-      const rocks = cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : isCoastRegion(region) ? coastDecoration : land;
+      const forge = cinderworksWeight(x, z) > 0, observatory = moonwatchWeight(x, z) > 0;
+      // The wild jungle and volcanic colliders are the canopy's; every other
+      // rock keeps the batch it already had.
+      const wild = !forge && !observatory && isCanopyRegion(region);
+      const rocks = forge ? cinderworksDecoration : observatory ? moonwatchDecoration : isCoastRegion(region) ? coastDecoration : wild ? canopyDecoration : land;
       const yaw = random() * TAU;
       rocks.add('pebble', [x, y + h * .42, z], [radius, h * .65, radius * .9], [.1, yaw, .15], region === 'volcano' ? '#7f6860' : '#8fa79a');
       rocks.add('pebble', [x + radius * .35, y + h * .72, z], [radius * .56, h * .37, radius * .65], [.1, .4, -.1], region === 'volcano' ? '#b98468' : '#b9bc9b');
       if (rocks === coastDecoration) coastRockSites.push({ id: obstacle.id, x, z, radius, height: h, yaw });
+      // The authored column stands upright on the recorded ground: only the
+      // drawn yaw carries over, so the rock body stays inside its collider.
+      else if (wild) canopySite(canopyRockDressing(obstacle, region), region, x, y, z, [0, yaw, 0], { collidable: true, radius, height: h });
     }
   }
   // Decorative trees stay clear of the routes. Collidable silhouettes above
@@ -221,19 +244,31 @@ export function buildScenery(palette, random) {
     const region = regionAt(x, z)?.id, size = .58 + random() * .40;
     // Route completed-area detail after all original rejection/RNG decisions.
     const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : palmheartWeight(x, z) > 0 ? palmheartDecoration : cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : land;
+    // A plant joins the canopy only when every finished area has passed on it,
+    // which is decided after the original rejection and both RNG draws above.
+    const wild = decoration === land && isCanopyRegion(region), target = wild ? canopyDecoration : decoration;
     if (region === 'moon') {
-      if (i % 3 === 0) addBroadTree(decoration, x, y, z, size, true, a);
-      else addMushroom(decoration, x, y, z, size * (i % 4 === 0 ? 1.55 : 1), a);
+      const plant = i % 3 === 0 ? size : size * (i % 4 === 0 ? 1.55 : 1);
+      if (i % 3 === 0) addBroadTree(target, x, y, z, plant, true, a);
+      else addMushroom(target, x, y, z, plant, a);
+      if (wild) canopySite(canopyPlantDressing(region, i, plant), region, x, y, z, [0, a, 0], { collidable: false, size: plant });
     } else if (region === 'volcano') {
-      if (i % 3 === 0) addCrystal(decoration, x, y, z, size, a, '#f0b168');
-      else decoration.add('pebble', [x, y + size * .8, z], [size * 1.3, size * 1.2, size], [.3, a, .1], i % 2 ? '#966e61' : '#bd8c6b');
-    } else if (region === 'jungle' && i % 3 !== 0) addBroadTree(decoration, x, y, z, size, false, a);
-    else {
-      // Only the coast palms move to the island kit; the jungle palms beyond
-      // the Palmheart weight belong to a later slice.
-      const palms = decoration === land && isCoastRegion(region) ? coastDecoration : decoration;
+      if (i % 3 === 0) addCrystal(target, x, y, z, size, a, '#f0b168');
+      else target.add('pebble', [x, y + size * .8, z], [size * 1.3, size * 1.2, size], [.3, a, .1], i % 2 ? '#966e61' : '#bd8c6b');
+      // The lump's whole lean carries onto the boulder; the crystal cluster only
+      // ever turned on its yaw. Both root on the recorded ground, not on the
+      // original's floating centre.
+      if (wild) canopySite(canopyPlantDressing(region, i, size), region, x, y, z, i % 3 === 0 ? [0, a, 0] : [.3, a, .1], { collidable: false, size });
+    } else if (region === 'jungle' && i % 3 !== 0) {
+      addBroadTree(target, x, y, z, size, false, a);
+      if (wild) canopySite(canopyPlantDressing(region, i, size), region, x, y, z, [0, a, 0], { collidable: false, size });
+    } else {
+      // The coast palms belong to the strand kit; the jungle palms beyond the
+      // Palmheart weight are the canopy's.
+      const palms = decoration === land && isCoastRegion(region) ? coastDecoration : target;
       addPalm(palms, x, y, z, size, a, region === 'jungle');
       if (palms === coastDecoration) coastPalmSites.push({ x, z, size, yaw: a });
+      else if (wild) canopySite(canopyPlantDressing(region, i, size), region, x, y, z, [0, a, 0], { collidable: false, size });
     }
   }
   for (let i = 0; i < 720; i++) {
@@ -370,6 +405,9 @@ export function buildScenery(palette, random) {
   const cinderworksLegacyScenery = cinderworksDecoration.mesh(); cinderworksLegacyScenery.name = 'cinderworks-original-scenery'; group.add(cinderworksLegacyScenery);
   const moonwatchLegacyScenery = moonwatchDecoration.mesh(); moonwatchLegacyScenery.name = 'moonwatch-original-scenery'; group.add(moonwatchLegacyScenery);
   const coastLegacyScenery = coastDecoration.mesh(); coastLegacyScenery.name = 'island-coast-original-scenery'; group.add(coastLegacyScenery);
+  // One mesh holds every wild canopy solid, so the authored kit hides and
+  // restores the jungle, the grove and the volcanic slope together.
+  const canopyFallback = canopyDecoration.mesh(); canopyFallback.name = 'island-canopy-original-scenery'; group.add(canopyFallback);
   // The shrines' solid and glow draws are one fallback: the luminous batch holds
   // nothing but shrine items, so it moves here whole instead of being split or
   // duplicated, and both meshes are hidden and restored together.
@@ -380,10 +418,11 @@ export function buildScenery(palette, random) {
   group.userData.tideglassHutSites = tideglassHutSites;
   group.userData.coastPalmSites = coastPalmSites; group.userData.coastRockSites = coastRockSites;
   group.userData.landmarkSites = landmarkSites;
+  group.userData.canopySites = canopySites; group.userData.canopyFallback = canopyFallback;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
     driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery,
     coastLegacyScenery, coastPalmSites, coastRockSites, landmarkFallback, landmarkLegacyScenery, landmarkLegacyGlow, landmarkSites,
-    volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    canopyFallback, canopySites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -448,7 +487,8 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
   const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, landmarkFallback: scenery.landmarkFallback,
-    palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites, landmarkSites: scenery.landmarkSites });
+    canopyFallback: scenery.canopyFallback, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites,
+    landmarkSites: scenery.landmarkSites, canopySites: scenery.canopySites });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
