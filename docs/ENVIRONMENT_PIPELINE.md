@@ -564,6 +564,8 @@ Visual review history, kept so the next area does not repeat it: the first in-en
 
 ## Island coast (milestone 9, slice 1) QA — 2026-09-08
 
+**Current status:** the original shipping record below is retained as history. Its outstanding timing check was closed by the separate [2026-09-09 quiet-host follow-up](#historical-coast-quiet-host-timing--2026-09-09), not by interpreting its contaminated samples.
+
 Baseline `3710671` (environment `35c9a41`) was served from the local Docker deployment; the final source ran from the working tree on an isolated Node server (`PORT=3496`, separate `DATA_DIR`). Both were driven through the fixed-render fixture of the Tideglass section (Chrome/WebGL2, 1920 × 1080, device pixel ratio 1, five-player snapshot, 300 frames per view with the first 60 discarded), reproduced by an `.qa/island-capture.mjs`-style script; the instructions here are enough to recreate it. Yaw is `atan2(-(tx - x), -(tz - z))` so the third-person camera looks from the player at a target. The views double as the baselines for the later slices (the palm gate, moon gate, caldera and wilds edge are untouched by slice 1).
 
 | Walking / close view | Player X, Z | Looks toward |
@@ -602,6 +604,94 @@ The final column has no "after" figures on purpose: every final frame-time sampl
 Reviewed views: the strand inland, east and west, the harbor rock, the harbor skiffs, the pier end, the yard's east palms, the beach rock, the market and Haven palms, both Haven rocks, the east Haven palms, the Old Watch comparison, the ship approach, both aerials, the glider and the low-quality strand, all with a clean console and network log and the kit reporting `ready` with 38 palms, 4 rocks and 2 skiffs; the coast keeps its baseline and area skies (`aee2ee` at the strand, `aadeea` at the harbor, `a9dae3` at the market), because the kit adds no lighting profile. Browser failure checks (Playwright route abort, fresh contexts, on the working-tree server): blocking `/assets/island/kit.glb` left the eight area kits `ready`, put the island in `fallback` ("Failed to fetch") with `island-coast-original-scenery` visible, no authored group or rock, both original skiff meshes visible under their pivots and only the deliberately aborted request failing; blocking `/assets/old-watch/kit.glb` restored every area's fallback with the original coast scenery and skiffs visible and no kit URLs loaded; the unblocked run installed all nine kits with the coast batch hidden, the authored group and `island-coast-rock-prop-1` visible and `island-skiff-0` / `island-skiff-1` parented under the pivots with the originals hidden. A 404 for the island kit (the state of the working tree before the generator finished) took the same fallback path with the other eight kits ready. The coast layout, the 38 recorded palm sites and 4 rock sites, the RNG stream, atomic installation, per-primitive instance counts and every instance matrix's site, the rock dressings, the skiff hook, wind and reduced motion, shadow-casting never-hidden palm cells, missing prefabs and unbound slots, the failed, late and rollback-failing load paths, exact-once disposal, the shipping GLB's roots, envelopes, trunk reach, `COLOR_0` averages, budget, bindings and registry entry, and the pier's .85 m seaward clamp are covered by `test/island.test.js`, `test/environment.test.js` and `test/driftwood-yard.test.js`. Full `npm.cmd test` passed **245 tests**, 6 of them the new `test/island.test.js`; `git diff --check` passed.
 
 Visual review history, kept so the next slice does not repeat it: the tints were derived from the measured texture means before the first export, and ten of the eleven slots passed the in-engine review unchanged; the one revision was `coast_stone`, whose neutral 4.0/3.6/3.0 multiplier let the shared stone's moss mottling render the surf rocks grey-green, fixed tint-only at 5.2/4.2/3.4. The generator snaps the first trunk station straight below the second so the flared foot stays inside the -.40 m envelope, and the boulders deliberately under-fill their colliders (2.38 of 2.5 m and 1.83 of 2.0 m) so the non-uniform runtime scales on `prop-18` and `prop-19` do not clip the terrain. Known limitations: the frame-time comparison above; the 301 small ground plants outside the areas, the shoreline flowers, the shrine gateways, the canopy beyond Palmheart and Moonwatch and the caldera remain original scenery for the later slices; the harbor skiff view has no baseline pair; the populated view is the five-player fixture rather than a live crew.
+
+### Historical coast quiet-host timing — 2026-09-09
+
+**Follow-up complete.** The contaminated slice-1 runs above remain excluded, not retroactively passing. A separate Fable-approved v2 measurement contract reproduced the original coast comparison and the shipped coast-only comparison on a quiet host. No production code, tests, assets or gameplay changed in this follow-up; the lead wrote only temporary measurement helpers and this documentation.
+
+**Commit provenance.** Export each complete tree with `git archive <commit>` into a new temporary directory; do not mix an old client with today's server, shared data or assets. The tested revisions are:
+
+| Revision | Full commit | Role |
+| --- | --- | --- |
+| `3710671` | `37106718837709fd9a70d8e7fb027004fb5e49be` | Original pre-coast baseline; documentation-only successor of `35c9a41`, with identical runtime. |
+| `2b2fe80` | `2b2fe802f6810041c44cf3d0f68bc810c5c5162f` | Original pre-rebase coast implementation, directly based on `3710671`. |
+| `2656d45` | `2656d4520bcc0d68ef48ee1c15958a18e7b0b43a` | Concurrent airship implementation; direct parent of the shipped coast. |
+| `364e529` | `364e5291ab433c1aca19bcea5c56e9292e96ebdf` | Shipped/rebased coast; durable coast-only comparison is `2656d45 → 364e529`. |
+| `5ef1079` | `5ef1079e1fe77795eac9f569b239c89104ce29b2` | Shipped shrine landmarks; its parent `e8fc3c9` changes only documentation after `364e529`. |
+
+The original `2b2fe80` object was still available locally through historical/reflog objects, but is not reachable from a branch and may be pruned or absent in fresh clones. No tag or rewritten history was published to preserve it. The `2656d45 → 364e529` comparison is the reproducible replacement when that object is unavailable. **Do not attribute `3710671 → 364e529` entirely to the coast:** it includes the unrelated airship work. In both qualities, that intervening change contributes 52 calls / 42,608 triangles at the strand and 33 calls / 38,692 triangles at the harbor. The two coast-only pairs produce identical call/triangle deltas. The relevant game, world-layout, airship and player-model sources match within each coast/shrine pair.
+
+**Recreate the measurement, including the shrine table below.** All five archives used the same lockfile dependencies (Three.js 0.180.0, ws 8.21.3) and Node 22.13.0. For each archive import its own `createGameServer` from `server/index.js` and its own `Game` from `server/game.js`. Start only one archive server at a time on `127.0.0.1`, with a separate temporary `dataDir`; this run used ports 3481, 3485, 3482, 3483 and 3484 respectively. Use installed lockfile dependencies or a local dependency junction only after checking they match. Verify served `/`, `/world.js`, `/shared/world.js` and `/island.js` where present by SHA-256 against `git show <commit>:<path>` with CRLF-normalized text. This run passed every such check.
+
+Launch a fresh Playwright Chrome browser per archive block with `channel: 'chrome', headless: true`, viewport 1920×1080, device scale factor 1 and `reducedMotion: 'no-preference'`. A local synthetic HTML fixture supplies only the archive's import map and a full-viewport canvas, importing actual `createWorld` from `/world.js` and `heightAt` from `/shared/world.js`; every module and asset is served by that archive's unmodified application. Wait for all eight area controllers, plus island on the three coast/shrine builds, to report `ready`. Assert a visible document, hardware NVIDIA WebGL renderer, 1920×1080 drawing buffer and five ground players. High uses shadows; low disables them through `world.setQuality`.
+
+Create `new Game()`, add `qa` / `Lookout` / `#b19cff`, then `qa1..qa4` / `Crew 1..4` / `#55c9ba`; set phase `voyage`, elapsed 45, clear `game.enemies`, and take its snapshot without advancing game simulation. Set all players to ground mode, grounded, HP/maxHP 100, knocked/invulnerable-until 0 and yaw/pitch 0. Per view/quality, increment `state.round`, set the local player's X/Z/yaw/pitch below and `y = heightAt(x,z)`. For peer index `i=1..4`, use `(x-3+1.5i, heightAt(peerX,peerZ), z-3)`. This corrects the old helper's reuse of the local player's ground height for peers; final-frame historical counts still match exactly, with no unexplained residual. The post-airship snapshots retain **eight flying targets**, with **eight target models and two lifts** in renderer stats; pre-airship snapshots have none. These are static render fixtures with no ground enemies, not live or worst-case combat.
+
+| Timing view | Player X, Z | Yaw | Pitch |
+| --- | --- | --- | ---: |
+| strand | 0, 92 | 0 | .04 |
+| harbor | -22.9, 96.5 | -.36 | -.20 |
+| haven | -14, 19 | .85 | .03 |
+| old-watch | -64, -76 | .60 | .03 |
+| palm | -68, 26 | 0 | .04 |
+| moon | 76, 46 | `Math.atan2(-2,27)` | .04 |
+| caldera | 48, -48 | 0 | .06 |
+
+Warm with 120 `world.update(1/60, state, player, {yaw,pitch,time:12})` calls, then run 300 RAF update/render iterations at view time `12+i/60`. Retain exactly 240 samples, `i=60..299`, using the following three separate metrics; do not use `getStats().fps`, because fixed `dt` makes it misleading here:
+
+```js
+let previousStamp, previousNow;
+const raf = [], arrival = [], submission = [];
+for (let i = 0; i < 300; i++) {
+  const stamp = await new Promise(resolve => requestAnimationFrame(resolve));
+  const now = performance.now();
+  world.update(1 / 60, state, player, { yaw, pitch, time: 12 + i / 60 });
+  world.render();
+  if (i >= 60) {
+    raf.push(stamp - previousStamp);
+    arrival.push(now - previousNow);
+    submission.push(performance.now() - now);
+  }
+  previousStamp = stamp;
+  previousNow = now;
+}
+```
+
+**RAF** is cadence between supplied callback timestamps; **arrival** is cadence between actual callback-arrival `performance.now()` readings, matching the old slice-1 convention; **submission** is synchronous update/render CPU-and-driver submission duration, **not GPU completion or a GPU timer query**. For each array retain raw values, arithmetic mean, sorted p95 at index `floor(240*.95) = 228`, maximum and counts above 25/50ms. Record final-frame calls/triangles, controller readiness, camera position/quaternion/FOV/aspect, player positions, shadows, snapshot hash and airship population. Screenshots are taken after sampling, not during it.
+
+Pass 1 ran `3710671 → 2b2fe80 → 2656d45 → 364e529 → 5ef1079`; pass 2 reversed that order. Each block tests views in the order above, high then low. The first three revisions use the first four views; coast `364e529` and shrines `5ef1079` use all seven. Dispose the world and close that browser/server before the next block. Total: **104 samples / 24,960 retained intervals per metric**, with all **52 pass-1 screenshots inspected**. Paired camera and player fixtures match exactly; repeated renderer counts match across passes; every historical call-count target matches. Page/console warning/error, failed-request and HTTP-error lists are empty throughout, with all expected controllers ready.
+
+**Quiet-host acceptance was registered before sampling:** before/after every block, host CPU over a 1.8-second idle interval and `nvidia-smi` GPU utilization must each be below 15%; log the busiest processes. Old Watch at both qualities must retain 155/154 calls, arrival mean ≤19ms, p95 ≤22ms and zero intervals over 50ms. A failed control rejects the complete sequence, retained under its original run label; rerun both full passes under a new label rather than selecting better individual rows. **No block or sequence was rejected.** Neither tests, Blender, another QA render nor an unrelated GPU workload overlapped sampling; no user application was stopped. Idle CPU ranged **1.22–5.48%**, GPU **0–1%**. Host: Windows 11, Ryzen 5 3600 / 12 logical processors, GTX 1080 Ti / driver 582.66, Chrome **145.0.7632.6**, ANGLE D3D11 / WebGL2. Run interval: **2026-09-10 06:04:22–06:15:22 UTC** (2026-09-09 23:04–23:15 PDT).
+
+Each timing cell below spans **both passes**, rounded to two decimals, in `mean / p95` order; one value means both round alike. Ranges are not confidence intervals. Counts are exact final-frame whole-renderer totals, including shadows/other areas. The old contaminated runs and the earlier 16.67ms baseline are not mixed into these new pairs.
+
+#### Original pre-rebase coast comparison: `3710671 → 2b2fe80`
+
+| View / quality | Calls before → after | Renderer triangles before → after | RAF mean / p95 ms before → after | Arrival mean / p95 ms before → after | Submission mean / p95 ms before → after |
+| --- | ---: | ---: | --- | --- | --- |
+| strand / high | 604 → 647 | 935,831 → 998,867 | 17.43–17.66 / 18.10–18.30 → 17.43–17.63 / 18.10–18.20 | 17.43–17.66 / 18.10–18.30 → 17.43–17.63 / 18.10–18.20 | 7.29–7.30 / 7.90–8.10 → 7.56–7.96 / 8.30–9.00 |
+| strand / low | 571 → 614 | 794,059 → 857,095 | 17.50–17.61 / 18.20–18.30 → 17.47–17.68 / 18.10–18.30 | 17.50–17.61 / 18.20–18.30 → 17.46–17.68 / 18.10–18.30 | 5.62 / 6.30 → 5.76–6.02 / 6.30–6.60 |
+| harbor / high | 631 → 677 | 848,332 → 917,544 | 17.47–17.97 / 18.10–20.30 → 17.44–17.55 / 18.10–18.20 | 17.47–17.97 / 18.20–20.30 → 17.44–17.55 / 18.10–18.20 | 7.41–7.66 / 8.00–8.70 → 7.84–8.14 / 8.70–9.10 |
+| harbor / low | 603 → 649 | 707,096 → 776,308 | 17.46–17.53 / 18.20 → 17.49–17.59 / 18.10–18.20 | 17.46–17.53 / 18.10–18.20 → 17.49–17.59 / 18.10–18.30 | 5.70–5.80 / 6.20–6.30 → 5.96–6.17 / 6.40–6.80 |
+| haven / high | 404 → 421 | 1,360,448 → 1,366,072 | 17.53–17.62 / 18.20–18.40 → 17.45–17.63 / 18.10–18.30 | 17.53–17.62 / 18.20–18.40 → 17.45–17.63 / 18.10–18.30 | 6.11–6.14 / 7.10–7.20 → 6.29–6.52 / 7.00–7.50 |
+| haven / low | 354 → 371 | 843,026 → 848,650 | 17.58 / 18.10–18.20 → 17.48–17.92 / 18.20–18.60 | 17.57–17.58 / 18.20 → 17.48–17.92 / 18.10–18.60 | 3.83–3.91 / 4.80 → 3.97–4.13 / 4.60–5.00 |
+| old-watch / high | 155 → 155 | 651,500 → 627,956 | 17.53–17.64 / 18.10–18.20 → 17.54–17.66 / 18.20–18.40 | 17.53–17.64 / 18.10–18.20 → 17.54–17.66 / 18.10–18.40 | 3.21–3.33 / 3.70–3.80 → 3.43–3.47 / 4.00–4.10 |
+| old-watch / low | 154 → 154 | 481,452 → 457,908 | 17.52–17.60 / 18.10–18.20 → 17.52–17.68 / 18.10–18.30 | 17.52–17.60 / 18.10–18.30 → 17.52–17.68 / 18.10–18.40 | 2.08–2.15 / 2.40 → 2.11–2.23 / 2.40–2.50 |
+
+#### Durable coast-only comparison: `2656d45 → 364e529`
+
+| View / quality | Calls before → after | Renderer triangles before → after | RAF mean / p95 ms before → after | Arrival mean / p95 ms before → after | Submission mean / p95 ms before → after |
+| --- | ---: | ---: | --- | --- | --- |
+| strand / high | 656 → 699 | 978,439 → 1,041,475 | 17.49–17.68 / 18.10–18.20 → 17.45–17.46 / 18.10–18.20 | 17.49–17.68 / 18.10–18.20 → 17.45–17.46 / 18.20 | 7.85–7.93 / 8.70–9.10 → 8.34–8.46 / 9.20–9.40 |
+| strand / low | 623 → 666 | 836,667 → 899,703 | 17.55–17.62 / 18.20–18.30 → 17.44–17.45 / 18.10 | 17.55–17.62 / 18.20–18.30 → 17.44–17.45 / 18.10 | 6.03–6.14 / 6.60–7.20 → 6.29–6.38 / 6.90–7.10 |
+| harbor / high | 664 → 710 | 887,024 → 956,236 | 17.46–17.49 / 18.20 → 17.46–17.49 / 18.10–18.20 | 17.46–17.49 / 18.20 → 17.46–17.49 / 18.10–18.20 | 7.72–7.89 / 8.50–8.70 → 8.26–8.45 / 9.00–9.40 |
+| harbor / low | 636 → 682 | 745,788 → 815,000 | 17.47–17.53 / 18.10 → 17.44–17.46 / 18.10 | 17.47–17.53 / 18.10 → 17.44–17.46 / 18.10 | 5.87–6.00 / 6.40–6.50 → 6.25–6.41 / 6.80–7.10 |
+| haven / high | 404 → 421 | 1,360,448 → 1,366,072 | 17.42–17.48 / 18.10–18.20 → 17.42–17.44 / 18.10 | 17.42–17.48 / 18.10–18.20 → 17.42–17.44 / 18.10 | 6.13–6.29 / 6.70–7.40 → 6.51–6.63 / 7.40 |
+| haven / low | 354 → 371 | 843,026 → 848,650 | 17.44–17.59 / 18.10 → 17.45–17.47 / 18.10–18.20 | 17.44–17.59 / 18.10 → 17.45–17.47 / 18.20 | 3.84–3.88 / 4.60–4.70 → 4.14–4.17 / 4.80–5.00 |
+| old-watch / high | 155 → 155 | 651,500 → 627,956 | 17.42–17.54 / 18.10 → 17.41–17.55 / 18.10–18.20 | 17.42–17.54 / 18.10 → 17.41–17.55 / 18.10–18.20 | 3.38–3.52 / 3.80–4.10 → 3.65–3.70 / 4.20–4.30 |
+| old-watch / low | 154 → 154 | 481,452 → 457,908 | 17.46–17.47 / 18.10 → 17.41–17.55 / 18.10–18.20 | 17.46–17.47 / 18.10 → 17.41–17.55 / 18.10–18.20 | 2.17–2.23 / 2.50–2.60 → 2.23–2.31 / 2.60–2.70 |
+
+**Interpretation.** Across paired rows/passes, original-coast RAF mean deltas are **−0.43 to +0.34ms**, p95 **−2.10 to +0.40ms**; durable coast-only mean deltas are **−0.24 to +0.13ms**, p95 **−0.20 to +0.10ms**. Arrival deltas agree at this precision. The original baseline harbor-high p95 of **20.30ms** and coast-after Haven-low mean of **17.92ms** remain in the record; the controls passed, so neither was selectively discarded. No consistent same-host frame-cadence regression is demonstrated by these two-pass samples. They are not proof of equivalence or a weaker-device frame-rate guarantee. Added work is visible: synchronous submission mean increases **0.03–0.66ms** for original coast and **0.06–0.61ms** for durable coast-only, with up to **46 calls / 69,212 renderer triangles** added. Stable RAF cadence does not make this CPU/driver or unmeasured GPU cost free.
 
 ## Island shrine landmarks (milestone 9, slice 2) QA — 2026-09-09
 
@@ -652,7 +742,30 @@ Unchanged-kit views can lose triangles when the formerly merged fallback is cull
 
 Fresh-context browser load checks passed: aborting `/assets/island/kit.glb` restored both original coast and shrine fallback parents, including the two nonempty solid/glow meshes and original skiffs, while the other eight controllers stayed ready. Aborting `/assets/old-watch/kit.glb` restored every area's fallback. An unblocked context installed all nine kits, hid both island fallback parents and original skiffs, and retained the authored skiffs. Only deliberately aborted requests failed; there were no page errors. Deployment-specific health, served-source hashes and repeated browser checks are recorded in the rollout handoff after shipping.
 
-**Outstanding measurement, not a passing benchmark:** quiet-host frame times for slices 1 and 2 remain unmeasured because an unrelated game held CPU/GPU resources. Incidental `fps` fields in snapshots and earlier contaminated timings are excluded. On a quiet host, reproduce the fixed setup above with all tests/Blender/other GPU workloads absent; after warmup, run 300 `requestAnimationFrame` updates at `1/60`, view time `12+i/60`, discard the first 60 intervals, and report mean/p95 for the remaining 240 at both qualities. Recreate the matching committed baseline in a separate checkout/server for comparison. This procedure needs no untracked `.qa` helper. Do not stop the user's unrelated applications to obtain it.
+**Historical outstanding measurement (now closed below):** at slice-2 shipping, quiet-host frame times for slices 1 and 2 remained unmeasured because an unrelated game held CPU/GPU resources. Incidental `fps` fields in snapshots and earlier contaminated timings remain excluded. The later matching comparisons below and in [historical coast timing](#historical-coast-quiet-host-timing--2026-09-09) close that follow-up, not the old contaminated runs. Do not stop the user's unrelated applications to obtain measurements.
+
+### Historical shrine quiet-host timing — 2026-09-09
+
+**Follow-up complete.** Compare full archives **`364e529 → 5ef1079`**, before canopy and ground cover, using the exact seven-view high/low, five-player, forward/reverse method, metric definitions, hardware and preregistered host gates in [historical coast timing](#historical-coast-quiet-host-timing--2026-09-09). Both sides retain the same airship population: eight flying targets / eight target models / two lifts. All final-frame calls and triangles reproduce the slice-2 renderer table above despite correcting peer ground heights. Each metric cell is the range across both passes in `mean / p95` order, not a confidence interval.
+
+| View / quality | Calls before → after | Renderer triangles before → after | RAF mean / p95 ms before → after | Arrival mean / p95 ms before → after | Submission mean / p95 ms before → after |
+| --- | ---: | ---: | --- | --- | --- |
+| strand / high | 699 → 727 | 1,041,475 → 1,054,765 | 17.45–17.46 / 18.10–18.20 → 17.43–17.49 / 18.10–18.20 | 17.45–17.46 / 18.20 → 17.43–17.49 / 18.20 | 8.34–8.46 / 9.20–9.40 → 8.63–8.71 / 9.50–9.60 |
+| strand / low | 666 → 694 | 899,703 → 912,993 | 17.44–17.45 / 18.10 → 17.46–17.47 / 18.10 | 17.44–17.45 / 18.10 → 17.46–17.47 / 18.20 | 6.29–6.38 / 6.90–7.10 → 6.68–6.74 / 7.30 |
+| harbor / high | 710 → 738 | 956,236 → 969,136 | 17.46–17.49 / 18.10–18.20 → 17.45–17.48 / 18.10 | 17.46–17.49 / 18.10–18.20 → 17.45–17.48 / 18.10–18.20 | 8.26–8.45 / 9.00–9.40 → 8.73–8.79 / 9.60–9.90 |
+| harbor / low | 682 → 710 | 815,000 → 827,900 | 17.44–17.46 / 18.10 → 17.47–17.50 / 18.10 | 17.44–17.46 / 18.10 → 17.47–17.50 / 18.10–18.20 | 6.25–6.41 / 6.80–7.10 → 6.76–6.79 / 7.40–7.50 |
+| haven / high | 421 → 427 | 1,366,072 → 1,364,876 | 17.42–17.44 / 18.10 → 17.45–17.48 / 18.10 | 17.42–17.44 / 18.10 → 17.45–17.48 / 18.10–18.20 | 6.51–6.63 / 7.40 → 6.90–6.91 / 7.70–7.80 |
+| haven / low | 371 → 377 | 848,650 → 847,454 | 17.45–17.47 / 18.10–18.20 → 17.45–17.48 / 18.10 | 17.45–17.47 / 18.20 → 17.45–17.48 / 18.10–18.20 | 4.14–4.17 / 4.80–5.00 → 4.31–4.33 / 4.90–5.70 |
+| old-watch / high | 155 → 155 | 627,956 → 623,640 | 17.41–17.55 / 18.10–18.20 → 17.46–17.50 / 18.10 | 17.41–17.55 / 18.10–18.20 → 17.46–17.50 / 18.10 | 3.65–3.70 / 4.20–4.30 → 3.79–3.81 / 4.40 |
+| old-watch / low | 154 → 154 | 457,908 → 453,592 | 17.41–17.55 / 18.10–18.20 → 17.50–17.52 / 18.10 | 17.41–17.55 / 18.10–18.20 → 17.50–17.52 / 18.10 | 2.23–2.31 / 2.60–2.70 → 2.29–2.31 / 2.60 |
+| palm / high | 357 → 369 | 1,287,709 → 1,296,147 | 17.48 / 18.10–18.20 → 17.37–17.46 / 18.00–18.10 | 17.48 / 18.10–18.20 → 17.37–17.46 / 18.10 | 5.65–5.66 / 6.30–6.40 → 5.89–5.97 / 6.40–6.80 |
+| palm / low | 326 → 338 | 844,933 → 853,371 | 17.42–17.44 / 18.10 → 17.43–17.47 / 18.10 | 17.42–17.44 / 18.10 → 17.43–17.47 / 18.20 | 3.71–3.77 / 4.10–4.20 → 3.95–3.96 / 4.40 |
+| moon / high | 343 → 370 | 531,338 → 544,052 | 17.45–17.48 / 18.10 → 17.41–17.46 / 18.10 | 17.45–17.48 / 18.10–18.20 → 17.41–17.46 / 18.10–18.20 | 5.68–5.88 / 6.40–6.70 → 6.05–6.07 / 6.60–7.10 |
+| moon / low | 315 → 342 | 470,502 → 483,216 | 17.45–17.46 / 18.10 → 17.43–17.44 / 18.10 | 17.45–17.46 / 18.10 → 17.43–17.44 / 18.10 | 3.75–3.80 / 4.20 → 4.08–4.11 / 4.50–4.70 |
+| caldera / high | 136 → 152 | 281,054 → 289,844 | 17.42–17.55 / 18.10–18.20 → 17.41–17.43 / 18.10 | 17.42–17.55 / 18.10 → 17.41–17.43 / 18.10 | 4.35–4.37 / 4.90–5.10 → 4.63–4.68 / 5.20 |
+| caldera / low | 135 → 151 | 277,070 → 285,860 | 17.45–17.46 / 18.10–18.20 → 17.47–17.49 / 18.10 | 17.45–17.46 / 18.10 → 17.47–17.49 / 18.10 | 2.34 / 2.70 → 2.54–2.56 / 2.90 |
+
+Across paired rows/passes, RAF mean changes are **−0.14 to +0.12ms**, p95 **−0.10 to +0.10ms**; arrival changes agree at this precision. No consistent same-host frame-cadence regression is demonstrated. Synchronous submission mean changes **−0.01 to +0.54ms**, mostly increasing, and up to **28 calls / 13,290 renderer triangles** are added. These two-pass static snapshots do not measure GPU completion, weaker devices, a full live voyage or worst-case combat/effects. Passing the quiet-host controls is not a universal performance certification. The separate historical slice-1/2 comparisons are now complete; later slice-3/4 measurements below remain distinct evidence. No aesthetic reapproval or new zone is implied.
 
 ## Island canopy (milestone 9, slice 3) QA — 2026-09-09
 
@@ -773,7 +886,7 @@ Final timing ran after the final full suite and both workers completed, with no 
 
 The measured mean changes are -0.19 to +0.13 ms and p95 changes -0.4 to +0.3 ms, consistent with this host's scheduling spread rather than a demonstrated frame-time regression. The 16 m cell policy is retained. Calls increase by 1–42, but renderer triangles fall by 22,084–45,596 in every view: the higher full-density source-instance cost is offset here by cell visibility/thinning and non-shadow-casting foliage, unlike the original merged shadow-casting ground batch. This is not a claim that the new geometry is free or that weaker devices will hold this frame rate. The fixture has five rendered players but no enemies and is not a worst-case combat benchmark. These slice-4 measurements do not close the historical slice-1/2 quiet-host timing follow-ups.
 
-**Shipping verification.** Implementation `e7f95f7` was pushed to canonical `main` as a fast-forward from `ebabda4`, then deployed from a clean committed archive with `docker compose -p skywake-isles up -d --build --wait`. Docker reported healthy and `/health` returned `ok: true`. All **18/18** served files matched the committed SHA-256 hashes: `client/{world,island,environment-assets,environment-geometry,environment-lighting,settlement}.js`, `shared/{island,world,exploration}.js` (CRLF-normalized text), and all nine byte-identical kit GLBs. The `skywake-isles_skywake-data` volume remains read-write at `/app/data`; other projects' containers were untouched. Thirty deployed high/low views repeated the five regions, shore, beacon, strand, Old Watch, ship/aerial/glider approaches and supplemental jungle/shore close inspection. All were inspected, as were all six fresh-context low/reduced-motion ready and island/shared/Palmheart/Moonwatch/Cinderworks failure views. All checks passed; only deliberate URL aborts produced request errors, with no unexpected page/console/network errors. The final tracking update changes documentation only; all four implementation slices are shipped, with the historical slice-1/2 timing follow-ups still explicitly open and no additional zone started.
+**Shipping verification.** Implementation `e7f95f7` was pushed to canonical `main` as a fast-forward from `ebabda4`, then deployed from a clean committed archive with `docker compose -p skywake-isles up -d --build --wait`. Docker reported healthy and `/health` returned `ok: true`. All **18/18** served files matched the committed SHA-256 hashes: `client/{world,island,environment-assets,environment-geometry,environment-lighting,settlement}.js`, `shared/{island,world,exploration}.js` (CRLF-normalized text), and all nine byte-identical kit GLBs. The `skywake-isles_skywake-data` volume remains read-write at `/app/data`; other projects' containers were untouched. Thirty deployed high/low views repeated the five regions, shore, beacon, strand, Old Watch, ship/aerial/glider approaches and supplemental jungle/shore close inspection. All were inspected, as were all six fresh-context low/reduced-motion ready and island/shared/Palmheart/Moonwatch/Cinderworks failure views. All checks passed; only deliberate URL aborts produced request errors, with no unexpected page/console/network errors. The final tracking update changes documentation only; all four implementation slices were shipped at this point, with historical slice-1/2 timing follow-ups still open then and no additional zone started. Those separate checks were subsequently closed by the historical coast/shrine timing sections above.
 
 ## Extending the next area
 
