@@ -1,0 +1,103 @@
+/* Skywake Character Studio. Standalone inspection page; it deliberately shares
+   nothing with style.css so the game UI cannot be disturbed by preview work. */
+:root {
+  --ink: #123c51;
+  --navy: #0c3044;
+  --deep: #072130;
+  --panel: #0e3145;
+  --edge: #ffffff22;
+  --gold: #ffd16c;
+  --cream: #fff6dd;
+  --label: #a6dcee;
+  --body: #d9e9f1;
+  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { min-height: 100dvh; background: var(--deep); color: var(--cream); overflow-x: hidden; }
+button { font: inherit; cursor: pointer; }
+code, kbd { font-family: 'Consolas', 'SFMono-Regular', monospace; font-size: .92em; }
+kbd { padding: 1px 5px; border: 1px solid var(--edge); border-radius: 5px; background: #ffffff14; }
+[hidden] { display: none !important; }
+:is(button, canvas, a):focus-visible { outline: 3px solid #ffffff; outline-offset: 3px; }
+
+.studio { display: flex; flex-direction: column; min-height: 100dvh; }
+
+.studio-header { padding: 15px 18px 13px; background: linear-gradient(#0c3044, #0a2a3b); border-bottom: 1px solid var(--edge); }
+.studio-header h1 { margin: 0; font-size: 22px; letter-spacing: -.4px; color: var(--cream); }
+.prototype-banner {
+  display: inline-block; margin: 9px 0 0; padding: 7px 13px; border-radius: 9px;
+  background: var(--gold); color: var(--ink); font-weight: 800; font-size: 13px; letter-spacing: .2px;
+}
+.prototype-note { margin: 9px 0 0; max-width: 86ch; font-size: 13px; line-height: 1.55; color: var(--body); }
+.prototype-note code { color: var(--cream); }
+
+.studio-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 342px; gap: 14px; padding: 14px; }
+
+.stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.viewport {
+  position: relative; height: min(74vh, 780px); min-height: 320px;
+  border: 1px solid var(--edge); border-radius: 14px; overflow: hidden; background: #0a2a3b;
+}
+#studio-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#studio-canvas.is-dragging { cursor: grabbing; }
+.stage-hint { margin: 0; font-size: 12.5px; color: var(--body); }
+
+.status {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 10px;
+  align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 11px;
+  border: 1px solid var(--edge); background: #07202dde; font-size: 12.5px; line-height: 1.45; color: var(--cream);
+}
+/* Once loaded the panel moves out of the figure's way, top-left. */
+.status[data-state="ready"] {
+  top: 10px; right: auto; bottom: auto; left: 10px; max-width: calc(100% - 20px);
+  padding: 7px 11px; font-size: 12px; color: var(--body); background: #07202dc4;
+}
+.status[data-state="error"] { background: #58191ff2; border-color: #ffb3a4; color: #ffe8e2; }
+.retry {
+  padding: 7px 13px; border: 1px solid #ffffff66; border-radius: 9px;
+  background: var(--gold); color: var(--ink); font-weight: 800; font-size: 12.5px;
+}
+.retry:hover { background: #ffe09a; }
+
+.controls { min-width: 0; }
+.group { margin: 0 0 11px; padding: 11px 12px 12px; border: 1px solid var(--edge); border-radius: 13px; background: var(--panel); }
+.group:last-child { margin-bottom: 0; }
+.group h2 { margin: 0 0 9px; font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--label); }
+.button-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.button-row + .button-row { margin-top: 7px; }
+.button-row button {
+  padding: 9px 12px; border: 1px solid #ffffff30; border-radius: 10px;
+  background: #13415a; color: var(--cream); font-size: 13px; font-weight: 700; line-height: 1.1;
+}
+.button-row button:hover { background: #1b5271; }
+.button-row button[aria-pressed="true"] { background: var(--gold); border-color: #fff3d2; color: var(--ink); }
+.button-row button[disabled] { opacity: .45; cursor: not-allowed; }
+.swatch { display: inline-flex; align-items: center; gap: 7px; }
+.swatch i { width: 14px; height: 14px; border-radius: 4px; border: 1px solid #0000006b; }
+
+.hint { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: var(--body); }
+.hint code, .hint b { color: var(--cream); }
+.hint code { overflow-wrap: anywhere; }
+
+.report { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
+.report dt { color: var(--label); }
+.report dd { margin: 0; color: var(--cream); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.limits { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.55; color: var(--body); }
+.limits li + li { margin-top: 4px; }
+
+@media (max-width: 900px) {
+  .studio-body { grid-template-columns: minmax(0, 1fr); }
+  .viewport { height: 56vh; min-height: 250px; }
+  .studio-header h1 { font-size: 19px; }
+  .prototype-note { font-size: 12.5px; }
+  .button-row button { flex: 1 1 auto; min-width: 44%; }
+  .swatch { min-width: 46%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

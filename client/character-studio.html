@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c3044">
+  <meta name="description" content="Isolated viewer for the original Skywake pirate prototype. Not the live player model.">
+  <meta name="robots" content="noindex">
+  <title>Skywake Character Studio</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/character-studio.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/addons/"}}</script>
+</head>
+<body>
+  <div id="studio" class="studio" data-ready="false" data-error="false">
+    <header class="studio-header">
+      <h1>Skywake Character Studio</h1>
+      <p id="prototype-banner" class="prototype-banner" role="note">Original prototype &middot; not the live player model</p>
+      <p class="prototype-note">
+        A rough visual draft, shown for shape and surface review only. It is not accepted production quality and it is
+        not wired into gameplay: the live player is still the procedural model in <code>client/models.js</code>.
+        Known artefacts in this build include shoulder seam tabs, solid facial hair and coat-skirt penetration in a
+        deep crouch.
+      </p>
+    </header>
+
+    <main class="studio-body">
+      <section class="stage" aria-label="Character preview">
+        <div id="studio-viewport" class="viewport">
+          <canvas id="studio-canvas" tabindex="0" role="img"
+            aria-label="Prototype pirate turntable. Drag to rotate, or use the left and right arrow keys."></canvas>
+          <div id="studio-status" class="status" role="status" data-state="loading">
+            <span id="status-text">Loading the original prototype&hellip;</span>
+            <button id="hero-retry" class="retry" type="button" hidden>Try again</button>
+          </div>
+        </div>
+        <p class="stage-hint">
+          Drag the view to spin the turntable. With the view focused, <kbd>&larr;</kbd> and <kbd>&rarr;</kbd> rotate and
+          <kbd>Home</kbd> resets.
+        </p>
+      </section>
+
+      <aside class="controls" aria-label="Studio controls">
+        <section class="group" aria-labelledby="label-view">
+          <h2 id="label-view">View</h2>
+          <div class="button-row" id="mode-buttons" role="group" aria-labelledby="label-view">
+            <button id="mode-hero" type="button" data-mode="hero" aria-pressed="true">Prototype</button>
+            <button id="mode-current" type="button" data-mode="current" aria-pressed="false">Current player</button>
+            <button id="mode-side" type="button" data-mode="side" aria-pressed="false">Side by side</button>
+          </div>
+          <p class="hint">Side by side puts the prototype on <b>+X</b> and the current player on <b>&minus;X</b>, 1.9&nbsp;m apart.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-camera">
+          <h2 id="label-camera">Camera</h2>
+          <div class="button-row" id="camera-buttons" role="group" aria-labelledby="label-camera">
+            <button id="camera-front" type="button" data-camera="front" aria-pressed="false">Front</button>
+            <button id="camera-three-quarter" type="button" data-camera="threeQuarter" aria-pressed="true">Three-quarter</button>
+            <button id="camera-back" type="button" data-camera="back" aria-pressed="false">Back</button>
+            <button id="camera-face" type="button" data-camera="face" aria-pressed="false">Face</button>
+            <button id="camera-gameplay" type="button" data-camera="gameplay" aria-pressed="false">Gameplay distance</button>
+          </div>
+          <p class="hint">Gameplay distance reuses the gameplay rig numbers (FOV&nbsp;50, back&nbsp;7.45&nbsp;m,
+            height&nbsp;2.42&nbsp;m, shoulder&nbsp;1.48&nbsp;m, pitch&nbsp;&minus;0.15) as a scale approximation. It is not
+            the actual game world.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-lighting">
+          <h2 id="label-lighting">Lighting</h2>
+          <div class="button-row" id="lighting-buttons" role="group" aria-labelledby="label-lighting">
+            <button id="lighting-studio" type="button" data-lighting="studio" aria-pressed="true">Neutral studio</button>
+            <button id="lighting-island" type="button" data-lighting="island" aria-pressed="false">Island lighting</button>
+          </div>
+          <p class="hint">Island lighting copies the game's light values (ACES, exposure 1.18, hemisphere
+            #d9f6ff/#779e7a&nbsp;2.2, sun #fff0d0&nbsp;2.7 at &minus;70,&nbsp;140,&nbsp;80, sky #85d9ee) on a plain ground
+            disc &mdash; not the island itself.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-animation">
+          <h2 id="label-animation">Animation</h2>
+          <div class="button-row" id="clip-buttons" role="group" aria-labelledby="label-animation">
+            <button id="clip-idle" type="button" data-clip="idle" aria-pressed="true">Idle</button>
+            <button id="clip-walk" type="button" data-clip="walk" aria-pressed="false">Walk</button>
+            <button id="clip-rig-check" type="button" data-clip="rig_check" aria-pressed="false">Rig check</button>
+          </div>
+          <div class="button-row">
+            <button id="play-toggle" type="button" aria-pressed="false">Play</button>
+          </div>
+          <p class="hint">Clips drive the prototype only; the current player holds its neutral ground stance with the
+            flintlock drawn. Playback starts paused when the system asks for reduced motion.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-crew">
+          <h2 id="label-crew">Crew accent</h2>
+          <div class="button-row" id="crew-buttons" role="group" aria-labelledby="label-crew">
+            <button id="crew-authored" class="swatch" type="button" data-crew="#429f9a" aria-pressed="true"><i style="background:#429f9a"></i>Authored teal</button>
+            <button id="crew-sand" class="swatch" type="button" data-crew="#f4a261" aria-pressed="false"><i style="background:#f4a261"></i>Sand</button>
+            <button id="crew-tide" class="swatch" type="button" data-crew="#55c9ba" aria-pressed="false"><i style="background:#55c9ba"></i>Tide</button>
+            <button id="crew-lilac" class="swatch" type="button" data-crew="#b19cff" aria-pressed="false"><i style="background:#b19cff"></i>Lilac</button>
+            <button id="crew-rose" class="swatch" type="button" data-crew="#f58faf" aria-pressed="false"><i style="background:#f58faf"></i>Rose</button>
+            <button id="crew-gold" class="swatch" type="button" data-crew="#ffdb70" aria-pressed="false"><i style="background:#ffdb70"></i>Gold</button>
+          </div>
+          <p class="hint">Tints only the prototype's <code>crew_accent</code> material and rebuilds the current player in
+            the same colour. The five crew colours mirror the in-game list.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-surface">
+          <h2 id="label-surface">Surface</h2>
+          <div class="button-row" id="surface-buttons" role="group" aria-labelledby="label-surface">
+            <button id="surface-textured" type="button" data-surface="textured" aria-pressed="true">Textured</button>
+            <button id="surface-clay" type="button" data-surface="clay" aria-pressed="false">Clay</button>
+            <button id="surface-wireframe" type="button" data-surface="wireframe" aria-pressed="false">Wireframe</button>
+          </div>
+          <p class="hint">Clay and wireframe swap in shared preview materials; textured restores each mesh's own
+            material and maps.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-turntable">
+          <h2 id="label-turntable">Turntable</h2>
+          <div class="button-row" id="turntable-buttons" role="group" aria-labelledby="label-turntable">
+            <button id="rotate-left" type="button">&#8630; Rotate left</button>
+            <button id="rotate-right" type="button">Rotate right &#8631;</button>
+            <button id="view-reset" type="button">Reset view</button>
+          </div>
+        </section>
+
+        <section class="group" aria-labelledby="label-report">
+          <h2 id="label-report">Loaded asset</h2>
+          <dl class="report">
+            <dt>Triangles</dt><dd id="report-triangles">&mdash;</dd>
+            <dt>Mesh primitives</dt><dd id="report-primitives">&mdash;</dd>
+            <dt>Skinned meshes</dt><dd id="report-skinned">&mdash;</dd>
+            <dt>Materials</dt><dd id="report-materials">&mdash;</dd>
+            <dt>Deform joints</dt><dd id="report-joints">&mdash;</dd>
+            <dt>Clips</dt><dd id="report-clips">&mdash;</dd>
+            <dt>Height</dt><dd id="report-height">&mdash;</dd>
+            <dt>Bounds</dt><dd id="report-bounds">&mdash;</dd>
+            <dt>Current player</dt><dd id="report-baseline">&mdash;</dd>
+          </dl>
+          <p class="hint">Measured from the GLB loaded in this page over the normal asset route
+            (<code>/assets/player-character/hero.glb</code>); nothing is read from the manifest. Counts and bounds cover
+            the visible parts of each model. No frame-rate or performance claim is made here.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-limits">
+          <h2 id="label-limits">Honest limits</h2>
+          <ul class="limits">
+            <li>Rough visual prototype, not accepted production quality.</li>
+            <li>Known artefacts: shoulder seam tabs, solid facial hair, coat-skirt penetration in a deep crouch.</li>
+            <li>No gameplay integration: no weapons, no glider, no session, no player swap.</li>
+            <li>Walk is a rig proof, not final locomotion.</li>
+            <li>Bounds are measured in the rest pose, before a clip is applied.</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script type="module" src="/character-studio.js"></script>
+</body>
+</html>
