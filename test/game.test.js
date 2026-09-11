@@ -5,8 +5,27 @@ import os from 'node:os';
 import path from 'node:path';
 import { Game, sanitizeName } from '../server/game.js';
 import { createStatsStore } from '../server/storage.js';
-import { COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt } from '../shared/world.js';
+import { COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt, shipAt } from '../shared/world.js';
 import { FINALE_STAGES } from '../shared/finale.js';
+import { SHIP_GUNS, gunOperator } from '../shared/airship.js';
+import { damageSkyBoss, livingSkyBosses } from '../server/sky-finale.js';
+
+// The fourth stage is fought from a deck gun against flying bosses. A ground
+// playthrough cannot reach them, and the cannon path itself is WP-3's, so this
+// fixture boards the pirate through the normal action and then exercises the
+// lifecycle directly until the island is secured.
+function finishSkyStage(game, p) {
+  const gun = SHIP_GUNS[0], operator = gunOperator(gun), ship = shipAt(game.elapsed);
+  Object.assign(p, { mode: 'aboard', gunId: null, hp: p.maxHp, knockedUntil: 0, grounded: true, vy: 0,
+    deckX: operator.x, deckZ: operator.z, x: ship.x + operator.x, y: ship.y, z: ship.z + operator.z });
+  assert.equal(game.action(p.id, 'interact', gun.id).ok, true);
+  for (let step = 0; step < 4000 && game.phase === 'finale'; step++) {
+    game.tick(0.05);
+    for (const boss of livingSkyBosses(game)) damageSkyBoss(game, boss.id, boss.hp, p.id);
+    game.releaseSpawns(game.finale, Infinity);
+    for (const enemy of [...game.enemies.values()]) if (enemy._finale) game.damageEnemy(enemy, enemy.hp, p.id);
+  }
+}
 
 function setup(count = 1) {
   const events = [], game = new Game({ onEvent: event => events.push(event) });
@@ -205,7 +224,9 @@ test('three finite shrine quests unlock scaled boss, victory results, and clean 
   // The lighthouse is stormed stage by stage; the boss only arrives with its own.
   assert.equal(game.phase, 'finale'); assert.equal(game.finale.stage, 1); assert.equal(game.bossId, null);
   let ticksTaken = 0, bossMaxHp = 0;
-  while (game.phase === 'finale' && ticksTaken++ < 6000) {
+  // The ground stages are fought with the pirate's own gun; the loop stops when
+  // the Tempest hands the battle over to the skycrab siege above the deck.
+  while (game.phase === 'finale' && game.finale.stage < FINALE_STAGES.length && ticksTaken++ < 6000) {
     const enemy = [...game.enemies.values()].filter(e => e.hp > 0)
       .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
     if (enemy) { aim(game, p, enemy); game.action(p.id, 'fire'); }
@@ -214,6 +235,10 @@ test('three finite shrine quests unlock scaled boss, victory results, and clean 
     game.tick(0.05);
   }
   assert.equal(bossMaxHp, 650);
+  assert.equal(game.phase, 'finale', 'the Tempest never wins the voyage on its own');
+  assert.equal(game.finale.stage, FINALE_STAGES.length);
+  assert.equal(game.snapshot().finale.sky.status, 'boarding');
+  finishSkyStage(game, p);
   assert.equal(game.phase, 'victory'); assert.equal(game.stats.wins, 1); assert.equal(game.stats.voyages, 1);
   assert.equal(game.finale.stage, FINALE_STAGES.length); assert.equal(game.finale.remaining, 0);
   assert.ok(game.victory.kills >= 21); assert.ok(game.victory.pearls >= 162);

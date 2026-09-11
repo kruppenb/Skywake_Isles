@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { sampleReloadAnimation } from './reload-animation.js';
-import { SHIP_SCALE, SHIP_GUNS, gunAim, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH } from '../shared/airship.js';
+import { SHIP_SCALE, SHIP_GUNS, SHIP_JUMP_POINTS, SHIP_JUMP_APPROACHES, gunAim, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH } from '../shared/airship.js';
 
 // Original, compact geometry for Skywake Isles. A part is baked into a colored
 // batch whenever it does not need to articulate; the island is not a forest of
@@ -288,7 +288,29 @@ export function buildGalleon(palette) {
   const guns = new Map(SHIP_GUNS.map(gun => {
     const model = buildDeckCannon(palette, gun); group.add(model.group); return [gun.id, model];
   }));
-  return { group, base, sails, cabin, guns, animate(time) { pennant.rotation.y = -.3 + Math.sin(time * 2) * .18; } };
+  const gates = new Map(SHIP_JUMP_POINTS.map(point => {
+    const model = buildJumpGate(palette, point); group.add(model.group); return [point.id, model];
+  }));
+  // Outlined chevrons walk the authored approach lanes in already-enlarged deck
+  // coordinates, so the route past the fore-mast is painted on the planks.
+  const laneBatch = new GeoBatch(palette);
+  for (const lanes of Object.values(SHIP_JUMP_APPROACHES)) for (const lane of lanes) {
+    for (let i = 0; i < lane.length - 1; i++) {
+      const from = lane[i], to = lane[i + 1];
+      const span = Math.hypot(to.x - from.x, to.z - from.z), heading = Math.atan2(to.x - from.x, to.z - from.z);
+      for (let step = 0; step < Math.max(1, Math.round(span / 1.15)); step++) {
+        const t = (step + .5) / Math.max(1, Math.round(span / 1.15));
+        const x = from.x + (to.x - from.x) * t, z = from.z + (to.z - from.z) * t;
+        addDeckChevron(laneBatch, x, z, heading, .45, .5, .1, .22, '#24404f');
+        addDeckChevron(laneBatch, x, z, heading, .43, .47, .115, .12, '#f7c559');
+      }
+    }
+  }
+  const lanes = laneBatch.mesh(); lanes.name = 'jump-gate-approach-lanes'; group.add(lanes);
+  return { group, base, sails, cabin, guns, gates, animate(time, reducedMotion = false) {
+    pennant.rotation.y = -.3 + Math.sin(time * 2) * .18;
+    for (const gate of gates.values()) gate.animate(time, reducedMotion);
+  } };
 }
 
 export function buildDeckCannon(palette, gun) {
@@ -369,6 +391,91 @@ export function buildFlyingCrab(palette) {
   } };
 }
 
+// A giant storm-shell skycrab. It speaks the practice flying crab's visual
+// language — lofted shell, stalked eyes, cream wings — grown and darkened into a
+// squall silhouette, with a lit crest and belly core so a wind-up reads at cannon
+// range. The root stays exactly on the authoritative hit-sphere centre: only
+// sub-parts move, and nothing here touches a shared palette material.
+export function buildSkycrab(palette, descriptor = {}) {
+  const port = descriptor.side !== 'starboard';
+  const shell = port ? '#46508f' : '#2b6b74', plate = port ? '#6b76c4' : '#47969a';
+  const belly = port ? '#c9d3ff' : '#c2f0ea', limb = port ? '#3a4275' : '#235860';
+  const group = new THREE.Group(), body = new THREE.Group(), hull = new GeoBatch(palette);
+  const lit = new GeoBatch(palette, palette.glow), wings = [], claws = [];
+  group.name = descriptor.id || 'skycrab'; body.name = 'skycrab-body'; group.add(body);
+  // Every part is authored inside a unit envelope of about 1.35, which is the
+  // frozen radius/scale of both bosses. The silhouette therefore fills its hit
+  // sphere instead of hanging wingtips outside a shot's reach.
+  hull.add('sphere', [0, 0, 0], [.86, .5, .68], [0, 0, 0], shell);
+  hull.add('sphere', [0, .14, -.03], [.7, .42, .56], [0, 0, 0], plate);
+  hull.add('sphere', [0, -.25, -.11], [.58, .26, .48], [0, 0, 0], belly);
+  // A jagged storm crest replaces the practice crab's smooth back.
+  for (let i = 0; i < 5; i++) {
+    const x = (i - 2) * .26, height = .34 - Math.abs(i - 2) * .06;
+    lit.add('cone', [x, .38 + height / 2, -.06 + Math.abs(i - 2) * .05], [.09, height, .07], [0, 0, (i - 2) * .16], belly);
+  }
+  lit.add('sphere', [0, -.31, -.07], [.28, .11, .23], [0, 0, 0], belly);
+  for (const side of [-1, 1]) {
+    hull.line([side * .32, .12, -.4], [side * .38, .54, -.6], .06, limb);
+    hull.add('sphere', [side * .38, .56, -.62], [.15, .17, .15], [0, 0, 0], '#1d2c3c');
+    lit.add('sphere', [side * .4, .6, -.71], [.05, .06, .05], [0, 0, 0], belly);
+    for (let i = 0; i < 4; i++) {
+      hull.line([side * .58, -.2, -.14 + i * .23], [side * .86, -.55, .04 + i * .23], .05, limb);
+      hull.line([side * .86, -.55, .04 + i * .23], [side * 1.02, -.45, .16 + i * .23], .045, plate);
+    }
+    // Claws ride their own pivot so a telegraphed strike can raise them.
+    const claw = new THREE.Group(), arm = new GeoBatch(palette);
+    claw.name = side < 0 ? 'skycrab-left-claw' : 'skycrab-right-claw';
+    claw.position.set(side * .52, -.11, -.33);
+    arm.line([0, 0, 0], [side * .4, -.19, -.38], .1, plate);
+    arm.add('sphere', [side * .48, -.23, -.48], [.26, .19, .31], [0, side * -.32, 0], shell);
+    arm.add('sphere', [side * .6, -.13, -.58], [.19, .08, .22], [0, side * -.32, .3], plate);
+    claw.add(arm.mesh()); body.add(claw); claws.push({ claw, side });
+    const wing = new THREE.Group(), feathers = new GeoBatch(palette);
+    wing.name = side < 0 ? 'skycrab-left-wing' : 'skycrab-right-wing';
+    wing.position.set(side * .34, .28, .14);
+    for (let i = 0; i < 5; i++) {
+      feathers.add('sphere', [side * (.26 + i * .09), .01, -.32 + i * .24], [.4 - i * .035, .06, .2],
+        [0, side * (-.42 + i * .15), side * .09], i % 2 ? '#e8ddc0' : '#fff4dc');
+    }
+    feathers.line([0, 0, -.34], [side * .62, .02, -.46], .05, limb);
+    wing.add(feathers.mesh()); body.add(wing); wings.push({ wing, side });
+  }
+  body.add(hull.mesh(), lit.mesh({ shadow: false }));
+  // Fit the drawn silhouette inside the authoritative hit sphere, so every pixel
+  // a gunner can see sits on geometry the server's sphere test can register. The
+  // envelope is the descriptor's own frozen radius/scale; nothing here changes a
+  // hitbox to cover a mismatch, the drawing yields to it.
+  const envelope = descriptor.radius > 0 && descriptor.scale > 0 ? descriptor.radius / descriptor.scale : 1.35;
+  const probe = new THREE.Vector3();
+  let reach = 0;
+  body.updateMatrixWorld(true);
+  body.traverse(object => {
+    if (!object.isMesh) return;
+    const positions = object.geometry.attributes.position;
+    for (let i = 0; i < positions.count; i++) reach = Math.max(reach, probe.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld).length());
+  });
+  const fit = reach > 0 ? Math.min(1, envelope * .96 / reach) : 1;
+  body.scale.setScalar(fit);
+  let clawLift = 0;
+  return { group, body, wings, claws, fit,
+    animate(time, { reducedMotion = false, winding = false, down = false, downAge = 0 } = {}) {
+      const target = down ? 1.1 : winding ? 1 : 0;
+      clawLift += (target - clawLift) * (reducedMotion ? 1 : .12);
+      body.position.y = reducedMotion || down ? 0 : Math.sin(time * 1.3) * .05;
+      body.rotation.z = down ? Math.min(1.5, downAge * 1.9) : reducedMotion ? 0 : Math.sin(time * .9) * .05;
+      body.rotation.x = down ? Math.min(.7, downAge * .9) : winding ? .22 * clawLift : 0;
+      for (const { wing, side } of wings) {
+        const beat = down ? -.5 : reducedMotion ? .2 : .2 + Math.sin(time * (winding ? 6.4 : 3.1)) * (winding ? .5 : .34);
+        wing.rotation.z = side * beat;
+      }
+      for (const { claw, side } of claws) {
+        claw.rotation.x = -1.05 * clawLift;
+        claw.rotation.y = side * .3 * clawLift;
+      }
+    } };
+}
+
 export function buildAirshipLift(palette) {
   const group = new THREE.Group(), marker = new THREE.Group(), base = new GeoBatch(palette), icon = new GeoBatch(palette, palette.glow);
   const cyan = '#baf9f0', brass = '#e5b55f';
@@ -386,6 +493,84 @@ export function buildAirshipLift(palette) {
   marker.name = 'airship-lift-up-arrow'; marker.position.y = 3.6; marker.add(icon.mesh({ shadow: false }));
   group.add(base.mesh(), marker);
   return { group, marker, animate(time, reducedMotion = false) { marker.position.y = 3.6 + (reducedMotion ? 0 : Math.sin(time * 1.8) * .22); } };
+}
+
+// Block capitals keep the gate sign readable at any effects quality and without
+// a font atlas, so the word itself carries the meaning rather than a colour.
+const SIGN_GLYPHS = {
+  J: ['..X', '..X', '..X', 'X.X', '.X.'],
+  U: ['X.X', 'X.X', 'X.X', 'X.X', 'XXX'],
+  M: ['X...X', 'XX.XX', 'X.X.X', 'X...X', 'X...X'],
+  P: ['XX.', 'X.X', 'XX.', 'X..', 'X..'],
+};
+
+export function addSignWord(batch, word, origin, cell, color) {
+  const glyphs = [...word].map((letter) => SIGN_GLYPHS[letter]).filter(Boolean);
+  const cells = glyphs.reduce((total, rows) => total + rows[0].length, 0) + Math.max(0, glyphs.length - 1) * .6;
+  let cursor = -cells / 2;
+  for (const rows of glyphs) {
+    for (let row = 0; row < rows.length; row++) for (let column = 0; column < rows[row].length; column++) {
+      if (rows[row][column] !== 'X') continue;
+      batch.add('box', [origin[0] + (cursor + column + .5) * cell, origin[1] + (rows.length / 2 - row - .5) * cell, origin[2]],
+        [cell * .96, cell * .96, .05], [0, 0, 0], color);
+    }
+    cursor += rows[0].length + .6;
+  }
+  return cells * cell;
+}
+
+// A painted chevron: two flat bars meeting at a tip, so the direction reads from
+// shape alone with effects turned down or colour ignored. Reach and spread are
+// separate because a wide, shallow arrow fits the deck without overhanging it.
+export function addDeckChevron(batch, x, z, heading, reach, spread, y, thickness, color) {
+  const tipX = x + Math.sin(heading) * reach, tipZ = z + Math.cos(heading) * reach;
+  for (const side of [-1, 1]) {
+    const endX = x + Math.cos(heading) * spread * side, endZ = z - Math.sin(heading) * spread * side;
+    const dx = endX - tipX, dz = endZ - tipZ;
+    batch.add('box', [(tipX + endX) / 2, y, (tipZ + endZ) / 2],
+      [thickness, .05, Math.hypot(dx, dz)], [0, Math.atan2(dx, dz), 0], color);
+  }
+}
+
+// A jump gate is built in its own frame with the launch direction along -z, the
+// same convention the shared gun yaw uses. Everything is deck-local, so the
+// whole gate rides the ship exactly like a cannon station.
+export function buildJumpGate(palette, point) {
+  const group = new THREE.Group(), marker = new THREE.Group();
+  const solid = new GeoBatch(palette), glow = new GeoBatch(palette, palette.glow);
+  const gold = '#f7c559', dark = '#1d3d4d', cream = '#fff3d4', cyan = '#baf9f0';
+  group.name = point.id; group.userData.jumpPointId = point.id;
+  group.position.set(point.x, 0, point.z); group.rotation.y = point.yaw || 0;
+  // A dark pad makes the gold chevrons read against tan planks in every mode.
+  solid.add('box', [0, .07, .1], [3.0, .06, 2.7], [0, 0, 0], dark);
+  for (const z of [1.05, .25, -.55]) addDeckChevron(solid, 0, z, Math.PI, .5, .95, .115, .18, gold);
+  solid.add('box', [0, .19, -1.12], [2.76, .26, .22], [0, 0, 0], gold);
+  // A gate on the centreline stands directly behind the fore-mast from the
+  // opening spawn, and the mast hides roughly 0.8 m of any board at that range,
+  // which is enough to eat a letter out of a single centred sign. That gate
+  // carries its word twice, on side panels outside the occlusion band; a rail
+  // gate has nothing in front of it and keeps one wide board.
+  const split = Math.abs(point.x) < 1, postX = split ? 1.55 : 1.38;
+  // Each support stands behind its own board: at the shared z the post and lamp
+  // reached past the glyph plane at -.11 and cut through the word close up.
+  for (const side of [-1, 1]) {
+    solid.add('cylinder', [side * postX, 1.2, -.42], [.12, 2.4, .12], [0, 0, 0], dark);
+    solid.add('sphere', [side * postX, 2.48, -.42], [.19, .19, .19], [0, 0, 0], cream);
+  }
+  for (const [x, frame, board, cell] of split
+    ? [[-1.55, 1.56, 1.42, .086], [1.55, 1.56, 1.42, .086]] : [[0, 3.5, 3.2, .16]]) {
+    solid.add('box', [x, 2.3, -.24], [frame, cell * 7.75, .09], [0, 0, 0], gold);
+    solid.add('box', [x, 2.3, -.18], [board, cell * 6.25, .12], [0, 0, 0], dark);
+    addSignWord(solid, 'JUMP', [x, 2.3, -.11], cell, cream);
+  }
+  const sign = solid.mesh(); sign.name = 'jump-gate-sign';
+  glow.add('cylinder', [0, 0, .2], [.12, .9, .12], [Math.PI / 2, 0, 0], cyan);
+  glow.add('cone', [0, 0, -.52], [.52, .62, .52], [-Math.PI / 2, 0, 0], cyan);
+  marker.name = 'jump-gate-arrow'; marker.position.set(0, 3.15, -.5);
+  marker.add(glow.mesh({ shadow: false }));
+  group.add(sign, marker);
+  return { group, marker,
+    animate(time, reducedMotion = false) { marker.position.z = -.5 + (reducedMotion ? 0 : Math.sin(time * 1.7) * .2); } };
 }
 
 // Lofted, softly squared volumes give the characters jaws, shoulders and seams

@@ -360,6 +360,75 @@ rigging can still cross high-angle views.
 
 This is practice gunnery: flying targets respawn and award no pearls or kills;
 the existing final battle is unchanged. A future airship combat phase can use
-the shared stations and return route. Verification used this host and loopback
-clients; no additional physical LAN device was tested. QA screenshots, logs,
-temporary saves and browser helpers remain untracked.
+the shared stations and return route. (Superseded on 2026-09-11: the skycrab
+siege below now fights from these stations, and Space no longer leaves the
+deck.) Verification used this host and loopback clients; no additional physical
+LAN device was tested. QA screenshots, logs, temporary saves and browser helpers
+remain untracked.
+
+## Jump gates and the skycrab siege — 2026-09-11
+
+Two changes shipped together. The deck is now a durable state: the 28 s forced
+drop and the anywhere-on-deck Space departure are gone, and the only way off is
+an E press on one of two marked jump gates (bow launch ramp, starboard rail
+gate) that the server validates by deck-local range and a clear route before
+placing the pirate in open air beside the hull. The final battle gained a fourth
+stage, the skycrab siege: two giant skycrabs fly slow lanes beside the parked
+Skywake and lob telegraphed shells at the dais while three finite ground waves
+march the shrine roads. Only the deck cannons reach the skycrabs; nothing on the
+island is destructible and no timer runs; the island completes through a single
+guarded completeIsland() → beginIslandDeparture() stub → win() route.
+
+Tests. The baseline at 45613a8 passed 321 tests in 217.5 s. The integrated
+change, frozen as a git-archive export plus the working-tree changes, passed 383
+tests in 275.3 s with no failures or skips, and `git diff --check` is clean.
+After rebasing onto the player-character commits (52e2bd5) the committed tree
+passed 403 tests in 275.6 s, the new player-character suite included.
+New suites: sky-finale-contract (lane reachability from real seats, bounded
+rosters, pocket exemption, completion guard, frozen schema), sky-finale (Tempest
+hands over instead of winning, boarding latch and countdown, bombardments that
+hurt only eligible ground crew and die with their boss, one wave at a time with
+retry-on-block and no display-cursor bypass, forged/broken stage refusal,
+victory teardown, both completion orders, same-tick last kill, revive row with
+offline reservations, restart/abandon cleanup), sky-cannon (the gunner's own
+clamped ray hits, a barrel pointed away misses, once-only credit and shell
+cancellation, practice restored after replay), sky-presentation and sky-ui
+(silhouettes inside the hit sphere, bounded pools, authoritative shell timing,
+late join, reduced motion, guidance per role) and ship-camera (the departure
+chase camera never crosses the ship box). The five-client network test now walks
+each bot along a painted lane to a gate and leaves with the public E action,
+sends the recalled pirate back through a gate, and after the Tempest rides two
+pirates up the haven lift to the port and starboard aft guns: each lands 12+
+hitId-bearing cannon shots on its own lane's boss, every client sees exactly one
+defeated per skycrab, the cleared sky does not win, the gun crew releases and
+leaves through a real gate, and one victory, replay and disk persistence follow
+within the unchanged 480 s budget (about 166-170 s in practice).
+
+Browser QA ran a private headless Chrome against isolated servers on 127.0.0.1
+(never the Docker container). Opening voyage: the pirate stayed aboard past
+29 s with shipReturned false, repeated Space did nothing on deck, Space and the
+deck button only dismounted a gun, the bow gate's E opened the glider at
+(0, 60.6, -85.8), the lighthouse lift returned the pirate, the starboard gate's
+button launched at (10.2, 60.8, -55), both landings were dry, and no console or
+page errors appeared. The bow sign's full JUMP word reads past the fore-mast
+from the opening spawn on desktop and phone, and the ship banner no longer
+overlaps the health or loadout panels. Final battle: an isolated fixture places
+the first joining pirate at stage-4 boarding, after which every step is
+ordinary input. Air-first: mount the port stern gun, countdown, Galewrack
+(780 HP) shot down and its in-flight shell cancelled, "Switch sides" guidance,
+the dismounted marker pointing at the starboard stern gun, Squallmaw (700 HP)
+shot down, the stage still open with waves pending, starboard gate exit with the
+camera outside the ship box at (8.40, 61.38, -54.84), glide to the haven landing,
+waves 1-3 cleared with no knockdowns, 146 pearls in 144.7 s, restart to round 2
+aboard. Ground-first: gate, glide, all three waves cleared under live shelling
+(first ring at 80.5 s with the 2.8 s warning) with no knockdowns and both crabs
+alive (no premature win), lift, both guns, victory, restart. With five crew
+listed the quest column, deck banner, health, loadout and minimap do not overlap
+at 1440×900 or 400×850 (the phone quest column caps at 380 px and scrolls above
+the banner). Reduced motion and the low graphics setting keep the ring and
+shrinking disc readable. Zero browser errors in every run.
+
+Known limits: right after a gate exit while looking outboard the chase camera
+sits about 1.8 m behind the pirate for a moment (the same pull-in ground
+obstacles cause) rather than inside the ship; the stub only announces "Island
+secured!" and calls win(), moving nobody; no physical LAN device was tested.

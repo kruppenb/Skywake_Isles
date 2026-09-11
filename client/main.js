@@ -1,12 +1,13 @@
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { GameNet } from './net.js';
-import { createUI, findInteractable, sideEventAnnouncement, finaleAnnouncement, cannonPresentation, flyingTargetAtRay } from './ui.js';
+import { createUI, findInteractable, sideEventAnnouncement, finaleAnnouncement, skyWaveAnnouncement, cannonPresentation, flyingTargetAtRay } from './ui.js';
+import { skyBossAtRay } from './sky-finale.js';
 import { createAudio } from './audio.js';
 import { LocalPrediction, RenderClock, PREDICTION_STEP } from './prediction.js';
 import { weaponPresentation } from './weapon-presentation.js';
 import { SEED, SHRINES, CHESTS, heightAt, shipAt } from '/shared/world.js';
-import { SHIP_GUNS, GUN_COOLDOWN, gunAim, gunMuzzle } from '/shared/airship.js';
+import { SHIP_GUNS, GUN_COOLDOWN, GUN_RANGE, gunAim, gunMuzzle } from '/shared/airship.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES, weaponStats } from '/shared/weapons.js';
 
 const canvas = document.getElementById('world');
@@ -52,7 +53,9 @@ const ui = createUI({
     net.join(name, color);
   },
   onAction(action) { performAction(action); },
-  onDrop() { audio.unlock(); input.jump(); },
+  // The deck button runs the same E interaction the keyboard does, so it can
+  // never depart from somewhere the server would refuse.
+  onDeckAction() { audio.unlock(); performAction('interact'); },
   onModalChange() {
     synchronizeInput();
     sendNeutralInput();
@@ -178,25 +181,28 @@ function receiveState(next) {
     if (state.phase !== 'victory') { ui.setMap(false); ui.setPaused(false); }
     if (state.phase === 'voyage' && state.elapsed < 1) {
       input.setView(0, -.16);
-      ui.toast('The sails are up! Press Space to jump, then steer your glider with WASD.');
+      ui.toast('The sails are up! Walk to a jump gate, then press E to glide to the island.');
     }
     if (state.phase === 'finale') ui.toast('The final battle begins! Defend the lighthouse with your crew.');
   }
   const gunChanged = (authoritative.gunId || null) !== lastAuthoritativeGunId;
   const returned = authoritative.shipReturned && authoritative.mode === 'aboard'
     && (!lastAuthoritativeReturned || lastAuthoritativeMode !== 'aboard');
-  if (gunChanged || returned) {
+  // A confirmed gate departure ends the deck timeline: queued walking steps and
+  // a held key are consumed once here, so nothing replays onto the deck we left.
+  const departed = lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding';
+  if (gunChanged || returned || departed) {
     // Keep a held Space through the dismount ACK. Sending a neutral packet here
-    // would release its jump edge and let the same physical press jump overboard.
-    const boarding = !!authoritative.gunId || returned;
-    if (boarding) input.reset();
+    // would release its jump edge before the authority has consumed it.
+    const settling = !!authoritative.gunId || returned || departed;
+    if (settling) input.reset();
     nextShotAt = 0;
     ui.clearWeaponPresentation();
     const gun = SHIP_GUNS.find((entry) => entry.id === authoritative.gunId);
     if (gunChanged && gun) input.setView(gun.yaw, .1);
-    if (boarding) sendNeutralInput();
+    if (settling) sendNeutralInput();
   }
-  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer || gunChanged || returned);
+  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer || gunChanged || returned || departed);
   lastAuthoritativeGunId = authoritative.gunId || null;
   lastAuthoritativeReturned = !!authoritative.shipReturned;
   forcePrediction = false;
@@ -206,7 +212,7 @@ function receiveState(next) {
       audio.play('land');
       ui.toast('Boots on the island! Cyan ↑ airship lifts at Sunwake beach and the lighthouse return you to the guns. Find them on M.');
     }
-    if (lastAuthoritativeMode === 'ground' && authoritative.mode === 'aboard') ui.toast('Back aboard! E mans a deck gun. Space opens your glider when you are ready.');
+    if (lastAuthoritativeMode === 'ground' && authoritative.mode === 'aboard') ui.toast('Back aboard! E mans a deck gun. Walk to the bow or starboard JUMP gate and press E when you want to glide down.');
     lastAuthoritativeMode = authoritative.mode;
   }
   synchronizeInput();
@@ -286,6 +292,13 @@ function receiveEvent(event) {
       if (a) { ui.announce(a); audio.play('surge'); }
       break;
     }
+    case 'sky-wave': {
+      // The siege's ground waves get their own call-out rather than repeating
+      // the stage banner every time a rank forms up.
+      const a = skyWaveAnnouncement(event);
+      if (a) { ui.announce(a); audio.play('surge'); }
+      break;
+    }
     default: break;
   }
 }
@@ -297,7 +310,7 @@ function aimPoint(player) {
   if (gun && player.mode === 'aboard') {
     const aim = gunAim(gun, input.yaw, input.pitch);
     const muzzle = gunMuzzle(gun, shipAt(renderClock.elapsed), aim.yaw, aim.pitch);
-    return { ...aim, enemy: flyingTargetAtRay(state, muzzle.from, muzzle.direction) };
+    return { ...aim, enemy: skyBossAtRay(state, muzzle.from, muzzle.direction, GUN_RANGE) || flyingTargetAtRay(state, muzzle.from, muzzle.direction) };
   }
   const ray = world.aimRay();
   const origin = ray.origin;
@@ -369,7 +382,7 @@ function performAction(action) {
     if (target && !target.disabled) {
       // Stop held movement before requesting a lift, so fixed ticks queued
       // before its snapshot cannot carry island input onto the returned deck.
-      if (target.kind === 'airship-return') { input.reset(); sendInput(neutral(input)); }
+      if (target.kind === 'airship-return' || target.kind === 'jump-gate') { input.reset(); sendInput(neutral(input)); }
       else sendInput(base);
       net.action('interact', target.id);
     }

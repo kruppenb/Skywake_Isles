@@ -5,10 +5,11 @@ import { makePalette, GeoBatch, buildGalleon, buildPirate, buildWeapon, buildCra
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
-import { cameraTravel, scopeCameraPose } from './camera.js';
+import { cameraTravel, scopeCameraPose, shipClearFraction } from './camera.js';
 import { SHIP_GUNS } from '../shared/airship.js';
 import { canReturnAtShrine } from '../shared/shrines.js';
 import { createAirshipPresentation, gunCameraPose, updateDeckCannons } from './airship.js';
+import { createSkyFinalePresentation, skyBombardmentId } from './sky-finale.js';
 import { SCOPE_FOV } from './weapon-presentation.js';
 import { buildSettlements } from './settlement.js';
 import { createRemoteInterpolation, displayedSpeed, makeTracerFlight, sampleTracerFlight } from './interpolation.js';
@@ -527,6 +528,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     landmarkSites: scenery.landmarkSites, canopySites: scenery.canopySites, groundSites: scenery.groundSites });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
+  const skyFinale = createSkyFinalePresentation({ scene, palette });
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], pendingSurges = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
@@ -622,6 +624,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   }
   function makeTelegraph(event) {
     if (!Number.isFinite(event.x) || !Number.isFinite(event.z)) return;
+    // A skycrab shell already carries its own warning ring in the sky layer,
+    // which counts down from the authoritative impact time and survives a late
+    // join. Drawing the generic ring here too would double every telegraph.
+    if (skyBombardmentId(event.id)) return;
     const radius = event.radius || 3, group = new THREE.Group(), ring = meshRing(radius, .13, '#ffbd79', .9);
     group.add(ring);
     const fill = new THREE.Mesh(new THREE.CircleGeometry(radius, 40), new THREE.MeshBasicMaterial({ color: '#f49468', transparent: true, opacity: .12, side: THREE.DoubleSide, depthWrite: false })); fill.rotation.x = -Math.PI / 2; group.add(fill);
@@ -632,7 +638,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   }
 
   function showHit(event) {
-    const target = enemies.get(event.targetId) || airship.targets.get(event.targetId) || players.get(event.targetId);
+    const target = enemies.get(event.targetId) || airship.targets.get(event.targetId) || skyFinale.hitTarget(event.targetId) || players.get(event.targetId);
     const x = event.x ?? target?.group.position.x, y = event.y ?? (target?.group.position.y || 0) + 1, z = event.z ?? target?.group.position.z;
     if ([x, y, z].every(Number.isFinite)) {
       burst(x, y, z, '#ffe9bd', 8, .75);
@@ -739,9 +745,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       }
     } else if (event.kind === 'defeated') {
       if (Number.isFinite(event.x)) {
-        const boss = event.type === 'tempest', mini = event.type === 'tidebreaker';
-        burst(event.x, (event.y || heightAt(event.x, event.z)) + .8, event.z, boss ? '#f4d582' : mini ? '#bfe9f6' : '#f2b789', boss ? 55 : mini ? 34 : 19, boss ? 3.5 : mini ? 2.3 : 1.4);
-        pulse(event.x, event.z, mini ? '#a9ecff' : '#ffdb8a', boss ? 12 : mini ? 5 : 2.5);
+        const boss = event.type === 'tempest', mini = event.type === 'tidebreaker', skycrab = event.type === 'skycrab';
+        // A skycrab dies in the air: the burst stays at its sphere centre and the
+        // ground pulse is left to the enemies that actually stand on the island.
+        burst(event.x, skycrab ? event.y : (event.y || heightAt(event.x, event.z)) + .8, event.z,
+          skycrab ? '#cfe0ff' : boss ? '#f4d582' : mini ? '#bfe9f6' : '#f2b789', skycrab ? 70 : boss ? 55 : mini ? 34 : 19, skycrab ? 6 : boss ? 3.5 : mini ? 2.3 : 1.4);
+        if (!skycrab) pulse(event.x, event.z, mini ? '#a9ecff' : '#ffdb8a', boss ? 12 : mini ? 5 : 2.5);
       }
     } else if (event.kind === 'chest') {
       const chest = CHESTS.find(c => c.id === event.id);
@@ -965,6 +974,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       const anchor = new THREE.Vector3(player.x, player.y + (player.mode === 'ground' ? GROUND_CAMERA_HEIGHT : 2.7), player.z);
       desiredCamera.copy(anchor).addScaledVector(direction, -back).addScaledVector(right, player.mode === 'ground' ? GROUND_SHOULDER_OFFSET : .92);
       let safeFraction = 1;
+      // A gate departure starts metres from the hull, so a full glide chase can
+      // sit back inside the deck and look out through the jump sign. Pull it in
+      // until it clears the ship; falling away releases it within a second.
+      if (player.mode === 'gliding') safeFraction = shipClearFraction(anchor, desiredCamera, shipPose);
       if (player.mode === 'ground') {
         const dx = desiredCamera.x - anchor.x, dz = desiredCamera.z - anchor.z, lengthSq = dx * dx + dz * dz;
         for (const obstacle of OBSTACLES) {
@@ -1033,11 +1046,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     elapsed = state?.elapsed || 0; latestState = state; latestLocal = localPlayer;
     const time = Number.isFinite(view.time) ? view.time : clockTime;
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
-    ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time);
+    ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time, reducedMotionPreference.matches);
     updateDeckCannons(ship, state, localPlayer, view, dt);
     ocean.animate(time); sky.animate(time);
     updateCamera(dt, localPlayer, view, shipPose);
     airship.update(dt, state, time, camera, reducedMotionPreference.matches, clockTime);
+    skyFinale.update(dt, state, time, camera, { reducedMotion: reducedMotionPreference.matches, lowQuality, effectTime: clockTime });
     settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
     oldWatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     windwardFarm.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
@@ -1086,12 +1100,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), sky: skyFinale.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
     oldWatch.dispose(); airship.dispose();
     windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
+    skyFinale.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }
   resize(); update(0, null, null, { menu: true, time: 0 });

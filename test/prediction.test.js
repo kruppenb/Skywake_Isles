@@ -4,7 +4,7 @@ import { LocalPrediction, RenderClock, PREDICTION_STEP, PREDICTION_HISTORY_LIMIT
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { COLORS, SHIP_DURATION, SPAWN, heightAt, shipAt } from '../shared/world.js';
 import { Game } from '../server/game.js';
-import { SHIP_GUNS, gunAim, gunOperator } from '../shared/airship.js';
+import { SHIP_GUNS, SHIP_JUMP_POINTS, gunAim, gunOperator, jumpLaunchPose } from '../shared/airship.js';
 
 const controls = (changes = {}) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: 0, pitch: 0, ...changes });
 const pirate = (changes = {}) => ({ ...makePlayerPosition(), id: 'p0', lastInputSeq: -1, knockedUntil: 0, hp: 100, ...changes });
@@ -221,28 +221,47 @@ test('aboard reconciliation corrects deck offsets only and keeps the rendered fe
   near(later.deckX, before.deckX); near(later.deckZ, before.deckZ);
 });
 
-test('jump replay, auto-drop and landing keep current mode without blending back onto the boat', () => {
-  const start = pirate({ deckX: -2, x: -2 });
+test('an acknowledged gate departure lands the glide without snapping back onto the deck', () => {
+  const gate = SHIP_JUMP_POINTS[0];
+  const start = pirate({ deckX: gate.x, deckZ: gate.z, ...shipAt(0), y: shipAt(0).y });
   const prediction = new LocalPrediction(); prediction.reset(start);
-  prediction.step(1, controls({ jump: true }), .05, 'voyage');
-  assert.equal(prediction.sample(0, .05).mode, 'gliding');
-  prediction.reconcile(start, { phase: 'voyage', elapsed: 0, alpha: .4, renderElapsed: .07 });
+  // Local prediction never departs on its own: a held Space at the gate stays aboard.
+  for (let i = 1; i < 6; i++) prediction.step(i, controls({ jump: i % 2 === 1, forward: 1 }), i * .05, 'voyage');
+  assert.equal(prediction.current.mode, 'aboard', 'no client-side departure without the authority');
+  // The authority answers the E with a launch pose metres off the ship.
+  const launch = jumpLaunchPose(gate, shipAt(.3));
+  const departed = { ...start, ...launch, mode: 'gliding', grounded: false, vy: -6, jumpHeld: false,
+    deckX: gate.x, deckZ: gate.z, lastInputSeq: 5 };
+  prediction.reconcile(departed, { phase: 'voyage', elapsed: .3, simulationTime: .3, renderElapsed: .3, alpha: .5 });
   assert.equal(prediction.current.mode, 'gliding');
-  // The server tick at the same time can precede delivery of our jump packet.
-  prediction.reconcile(start, { phase: 'voyage', elapsed: .05, alpha: .4, renderElapsed: .07 });
-  assert.equal(prediction.current.mode, 'gliding', 'an unconsumed jump must not bounce back aboard');
-  const ack = { ...start }; movePlayer(ack, controls({ jump: true }), .05, .05); ack.lastInputSeq = 1;
-  prediction.reconcile(ack, { phase: 'voyage', elapsed: .05, alpha: .4, renderElapsed: .07 });
-  assert.equal(prediction.sample(.4, .07).mode, 'gliding');
-  for (let i = 2; i < 230; i++) prediction.step(i, controls(), i * .05, 'voyage');
+  assert.equal(prediction.pending.length, 0); assert.equal(prediction.history.length, 0);
+  xyzNear(prediction.sample(.5, .3), launch);
+  // A late snapshot from before the departure cannot pull the pirate back aboard.
+  prediction.step(6, controls({ forward: 1 }), .35, 'voyage');
+  prediction.reconcile({ ...departed, lastInputSeq: 5 }, { phase: 'voyage', elapsed: .3, simulationTime: .3, renderElapsed: .35, alpha: .5 });
+  assert.equal(prediction.current.mode, 'gliding');
+  assert.equal(prediction.current.gunId, null);
+  for (let i = 7; i < 260; i++) prediction.step(i, controls(), i * .05, 'voyage');
   assert.equal(prediction.current.mode, 'ground');
-  near(prediction.sample(0, 12).y, heightAt(prediction.current.x, prediction.current.z));
-  prediction.reset(start); prediction.step(1, controls(), SHIP_DURATION, 'voyage');
-  assert.equal(prediction.sample(0, SHIP_DURATION).mode, 'gliding');
-  near(prediction.sample(0, SHIP_DURATION).z, SPAWN.z);
+  near(prediction.sample(0, 13).y, heightAt(prediction.current.x, prediction.current.z));
+  assert.ok(heightAt(prediction.current.x, prediction.current.z) > 1, 'the acknowledged launch glides to dry ground');
   prediction.reset(ground()); prediction.step(1, controls({ jump: true }), .05, 'voyage');
   prediction.reconcile(ground(), { phase: 'voyage', elapsed: .05, alpha: .4 });
   assert.equal(prediction.current.grounded, false, 'an unconsumed ground jump stays airborne');
+});
+
+test('no duration, held key or replayed input can predict a departure from the deck', () => {
+  const prediction = new LocalPrediction();
+  for (const gate of [...SHIP_JUMP_POINTS, { x: 0, z: 0 }]) {
+    prediction.reset(pirate({ deckX: gate.x, deckZ: gate.z }), { simulationTime: SHIP_DURATION - .1 });
+    for (let i = 1; i < 40; i++) prediction.step(i, controls({ jump: true, forward: 1 }), SHIP_DURATION - .1 + i * .05, 'voyage');
+    assert.equal(prediction.current.mode, 'aboard');
+    assert.equal(prediction.sample(.5, SHIP_DURATION + 2).mode, 'aboard');
+    // Replaying acknowledged inputs across the old drop time changes nothing.
+    const held = { ...prediction.current, lastInputSeq: 20 };
+    prediction.reconcile(held, { phase: 'voyage', elapsed: SHIP_DURATION, simulationTime: SHIP_DURATION, renderElapsed: SHIP_DURATION, alpha: .5 });
+    assert.equal(prediction.current.mode, 'aboard');
+  }
 });
 
 test('teleport, down/rescue and explicit stale-history resets discard old visual and replay state', () => {
@@ -326,7 +345,7 @@ test('return and gun mounting discard old walking history and keep a stationary 
   }
 });
 
-test('Space dismount stays predicted through an unconsumed snapshot, then a fresh press glides', () => {
+test('Space dismount stays predicted through an unconsumed snapshot, and a fresh press stays aboard', () => {
   const gun = SHIP_GUNS[0], operator = gunOperator(gun), time = SHIP_DURATION + 20;
   const start = pirate({ gunId: gun.id, shipReturned: true, deckX: operator.x, deckZ: operator.z });
   const prediction = new LocalPrediction(); prediction.reset(start, { simulationTime: time });
@@ -341,7 +360,9 @@ test('Space dismount stays predicted through an unconsumed snapshot, then a fres
   assert.equal(prediction.current.mode, 'aboard', 'holding the first Space does not jump off');
   prediction.step(3, controls(), time + .15, 'voyage');
   prediction.step(4, controls({ jump: true }), time + .2, 'voyage');
-  assert.equal(prediction.current.mode, 'gliding'); assert.equal(prediction.sample(0, time + .2).mode, 'gliding');
+  assert.equal(prediction.current.mode, 'aboard', 'a second, fresh Space still stays aboard');
+  assert.equal(prediction.sample(0, time + .2).mode, 'aboard');
+  near(prediction.sample(0, time + .2).deckX, operator.x);
 });
 
 test('a repeat lift trip discards a pending ground jump even when shipReturned was already true', () => {

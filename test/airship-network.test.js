@@ -6,7 +6,7 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createGameServer } from '../server/index.js';
 import { shipAt, SHIP_DURATION } from '../shared/world.js';
-import { SHIP_GUNS, AIRSHIP_RETURNS, GUN_PIVOT_HEIGHT, gunAim, gunOperator } from '../shared/airship.js';
+import { SHIP_GUNS, SHIP_JUMP_POINTS, SHIP_JUMP_APPROACHES, AIRSHIP_RETURNS, GUN_PIVOT_HEIGHT, gunAim, gunOperator } from '../shared/airship.js';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, label, timeout = 4000) {
@@ -108,7 +108,21 @@ test('two public WebSocket crew share guns and flying target combat, dismount, r
     captain.input({ jump: true }); await until(() => captain.player.gunId === null && captain.player.mode === 'aboard', 'Space dismount');
     assert.equal(captain.state.shipGuns.find(gun => gun.id === port.id).occupantId, null);
     captain.input({ jump: false }); await pause(90); captain.input({ jump: true });
-    await until(() => captain.player.mode === 'gliding', 'second Space glides');
+    await pause(250); assert.equal(captain.player.mode, 'aboard', 'a second Space never leaves the ship');
+    captain.input({ jump: false }); await pause(90);
+    // An E from the middle of the deck, and a forged gate id, are both refused.
+    const deniedBefore = captain.errors.filter(error => error.code === 'TOO_FAR').length;
+    captain.action('interact', SHIP_JUMP_POINTS[0].id);
+    captain.action('interact', 'jump-gate-imaginary');
+    await until(() => captain.errors.filter(error => error.code === 'TOO_FAR').length >= deniedBefore + 1, 'distant gate press denied');
+    assert.equal(captain.player.mode, 'aboard');
+    const gate = SHIP_JUMP_POINTS[0];
+    for (const waypoint of [...SHIP_JUMP_APPROACHES[gate.id][0], gate]) await walk(captain, waypoint, true, 9000);
+    captain.action('interact', gate.id);
+    await until(() => captain.player.mode === 'gliding', 'walking to the bow gate and pressing E departs');
+    const launched = captain.player;
+    assert.ok(Math.abs(launched.z - (shipAt(captain.state.elapsed).z + gate.launch.z)) < 8, 'the server places the launch ahead of the bow');
+    assert.ok(captain.events.some(event => event.kind === 'airship-jump' && event.playerId === captain.id && event.id === gate.id));
     captain.action('interact', AIRSHIP_RETURNS[0].id);
     await until(() => captain.errors.some(error => error.code === 'TOO_FAR'), 'airborne return denied');
     await walk(captain, AIRSHIP_RETURNS[0], false, 16000);

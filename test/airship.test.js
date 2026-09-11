@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { SHIP_DURATION, SHIP_OBSTACLES, shipAt, heightAt } from '../shared/world.js';
-import { SHIP_SCALE, SHIP_DECK, SHIP_GUNS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_DAMAGE, GUN_COOLDOWN, GUN_RANGE, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH, gunAim, gunMuzzle, gunOperator } from '../shared/airship.js';
+import { SHIP_SCALE, SHIP_DECK, SHIP_GUNS, SHIP_JUMP_POINTS, SHIP_JUMP_APPROACHES, JUMP_INTERACTION_RANGE, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERACTION_RANGE, GUN_DAMAGE, GUN_COOLDOWN, GUN_RANGE, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH, gunAim, gunMuzzle, gunOperator, jumpPointFor, jumpLaunchPose } from '../shared/airship.js';
 
 function setup(count = 2) {
   const events = [], game = new Game({ onEvent: event => events.push(event) });
@@ -20,6 +20,22 @@ function deck(game, p, gun) {
 function mount(game, p, gun = SHIP_GUNS[0]) {
   deck(game, p, gun);
   assert.equal(game.action(p.id, 'interact', gun.id).ok, true);
+}
+// Walk the authored approach lane, so a route around the fore-mast is proved
+// rather than assumed; no test moves a pirate onto a gate by assignment.
+function walkToGate(game, p, gate) {
+  const ship = shipAt(game.elapsed);
+  Object.assign(p, { mode: 'aboard', gunId: null, grounded: true, vy: 0, x: ship.x + p.deckX, z: ship.z + p.deckZ, y: ship.y });
+  const lane = SHIP_JUMP_APPROACHES[gate.id][0];
+  let steps = 0;
+  for (const waypoint of [...lane, gate]) {
+    while (Math.hypot(p.deckX - waypoint.x, p.deckZ - waypoint.z) > 0.2 && steps++ < 400) {
+      const dx = waypoint.x - p.deckX, dz = waypoint.z - p.deckZ, d = Math.hypot(dx, dz);
+      movePlayer(p, { yaw: 0, right: dx / d, forward: -dz / d }, 0.05, game.elapsed);
+    }
+  }
+  assert.ok(steps < 400, `walked the deck to ${gate.id}`);
+  return steps;
 }
 function ground(p, point = AIRSHIP_RETURNS[0]) {
   Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, gunId: null, vy: 0 });
@@ -108,7 +124,102 @@ test('late return keeps equipment and health, stops input/bursts, and survives t
   assert.deepEqual([p.deckX, p.deckZ, p.hp, p.ammo, p.gunId, p._burst, p.jumpHeld], [0, 0, 37, 3, null, null, false]);
   assert.deepEqual(p.inventory, inventory); assert.equal(p._input.forward, 0); assert.equal(p._input.jump, false);
   game.tick(); assert.equal(p.mode, 'aboard'); assert.equal(p.y, shipAt(game.elapsed).y);
-  input(game, p, { jump: true }); game.tick(); assert.equal(p.mode, 'gliding');
+  // A held Space carried across the lift, and a fresh one after it, both stay aboard.
+  input(game, p, { jump: true }); game.tick(); assert.equal(p.mode, 'aboard');
+  input(game, p, { jump: false }); game.tick(); input(game, p, { jump: true }); game.tick();
+  assert.equal(p.mode, 'aboard'); assert.equal(p.deckX, 0); assert.equal(p.deckZ, 0);
+  // Only a gate lets this returned pirate leave, and it keeps their equipment.
+  walkToGate(game, p, SHIP_JUMP_POINTS[1]);
+  assert.equal(game.action(p.id, 'interact').ok, true);
+  assert.equal(p.mode, 'gliding'); assert.ok(p.hp >= 37); assert.deepEqual(p.inventory, inventory);
+});
+
+test('two obvious gates sit clear of every gun zone, mast, cabin and the lift arrival', () => {
+  assert.equal(SHIP_JUMP_POINTS.length, 2);
+  const [bow, starboard] = SHIP_JUMP_POINTS;
+  assert.equal(bow.x, 0); assert.ok(bow.z < -8, 'the first gate is a bow launch in the opening forward view');
+  assert.ok(starboard.x > 4 && Math.abs(starboard.z) < 8, 'the second gate is a side-deck launch, not the cabin stern');
+  for (const gate of SHIP_JUMP_POINTS) {
+    assert.ok(gate.x >= SHIP_DECK.minX && gate.x <= SHIP_DECK.maxX);
+    assert.ok(gate.z >= SHIP_DECK.minZ && gate.z <= SHIP_DECK.maxZ);
+    for (const gun of SHIP_GUNS) {
+      assert.ok(Math.hypot(gate.x - gun.x, gate.z - gun.z) > JUMP_INTERACTION_RANGE + GUN_INTERACTION_RANGE,
+        `${gate.id} prompt never overlaps ${gun.id}`);
+    }
+    for (const obstacle of SHIP_OBSTACLES) {
+      if (obstacle.type === 'circle') assert.ok(Math.hypot(gate.x - obstacle.x, gate.z - obstacle.z) >= obstacle.radius + 0.6, obstacle.id);
+      else assert.ok(gate.x <= obstacle.minX - 0.6 || gate.x >= obstacle.maxX + 0.6 || gate.z <= obstacle.minZ - 0.6 || gate.z >= obstacle.maxZ + 0.6, obstacle.id);
+    }
+    // Arriving by lift at deck centre never lands inside a gate zone.
+    assert.ok(Math.hypot(gate.x, gate.z) > JUMP_INTERACTION_RANGE);
+    for (const lane of SHIP_JUMP_APPROACHES[gate.id]) for (const point of lane) {
+      for (const obstacle of SHIP_OBSTACLES) {
+        if (obstacle.type === 'circle') assert.ok(Math.hypot(point.x - obstacle.x, point.z - obstacle.z) >= obstacle.radius + 0.6, `${gate.id} lane clears ${obstacle.id}`);
+      }
+    }
+  }
+  assert.ok(Math.hypot(bow.x - starboard.x, bow.z - starboard.z) > 2 * JUMP_INTERACTION_RANGE, 'gate zones never overlap each other');
+});
+
+test('every spawn slot and gun stance can walk to both gates and depart with a single E', () => {
+  const { game, crew } = setup(5);
+  for (const gate of SHIP_JUMP_POINTS) {
+    for (const start of [...crew.map(member => ({ x: member.deckX, z: member.deckZ })), ...SHIP_GUNS.map(gunOperator)]) {
+      const p = crew[0];
+      Object.assign(p, { mode: 'aboard', deckX: start.x, deckZ: start.z, hp: 100, knockedUntil: 0 });
+      walkToGate(game, p, gate);
+      assert.ok(jumpPointFor({ x: p.deckX, z: p.deckZ }, SHIP_OBSTACLES), `${JSON.stringify(start)} reaches ${gate.id}`);
+      assert.equal(game.action(p.id, 'interact').ok, true);
+      assert.equal(p.mode, 'gliding');
+      assert.deepEqual({ x: p.x, y: p.y, z: p.z }, jumpLaunchPose(gate, shipAt(game.elapsed)));
+    }
+  }
+});
+
+test('gate departure needs a real gate, a live unmounted pirate and an active voyage', () => {
+  const { game, p, events } = setup();
+  const gate = SHIP_JUMP_POINTS[0];
+  // Nowhere near a gate, and a forged or misspelt target, are all refused.
+  for (const target of [undefined, gate.id, 'jump-gate-invalid', SHIP_JUMP_POINTS[1].id]) {
+    Object.assign(p, { mode: 'aboard', deckX: 0, deckZ: 0 });
+    assert.equal(game.action(p.id, 'interact', target).ok, false, String(target));
+    assert.equal(p.mode, 'aboard');
+  }
+  // A gate cannot be used through the fore-mast from the far side.
+  Object.assign(p, { mode: 'aboard', deckX: 0, deckZ: 0 });
+  walkToGate(game, p, gate);
+  const reached = { x: p.deckX, z: p.deckZ };
+  for (const invalid of [{ hp: 0 }, { knockedUntil: 10 }, { online: false }, { gunId: SHIP_GUNS[0].id }]) {
+    Object.assign(p, { mode: 'aboard', hp: 100, online: true, knockedUntil: 0, gunId: null }, invalid, reached);
+    assert.notEqual(game.departAtJumpPoint(p, gate).ok, true, JSON.stringify(invalid));
+    assert.equal(p.mode, 'aboard');
+  }
+  Object.assign(p, { hp: 100, online: true, knockedUntil: 0, gunId: null, ...reached });
+  for (const phase of ['lobby', 'victory']) {
+    game.phase = phase;
+    assert.equal(game.action(p.id, 'interact', gate.id).ok, false, phase);
+    assert.equal(game.departAtJumpPoint(p, gate).ok, false, phase);
+    assert.equal(p.mode, 'aboard');
+  }
+  game.phase = 'finale';
+  assert.equal(game.action(p.id, 'interact', gate.id).ok, true);
+  assert.equal(p.mode, 'gliding'); assert.equal(p.jumpHeld, false); assert.equal(p.vy, -6);
+  assert.ok(events.some(event => event.kind === 'airship-jump' && event.playerId === p.id && event.id === gate.id));
+  // A second press from the air cannot depart again.
+  assert.equal(game.action(p.id, 'interact', gate.id).ok, false);
+});
+
+test('a mounted E only releases the station and can never open a gate in the same press', () => {
+  const { game, p } = setup();
+  const gun = SHIP_GUNS[0];
+  mount(game, p, gun);
+  // Stand the mounted pirate on a gate: releasing the gun is still all E does.
+  Object.assign(p, { deckX: SHIP_JUMP_POINTS[0].x, deckZ: SHIP_JUMP_POINTS[0].z });
+  assert.equal(game.action(p.id, 'interact', SHIP_JUMP_POINTS[0].id).ok, false, 'a gate target cannot steal a mounted press');
+  assert.equal(p.gunId, gun.id); assert.equal(p.mode, 'aboard');
+  assert.equal(game.action(p.id, 'interact').ok, true);
+  assert.equal(p.gunId, null); assert.equal(p.mode, 'aboard');
+  assert.ok(game.shipGuns.every(station => !station.occupantId));
 });
 
 test('implicit return interaction keeps fallen crewmate revival priority', () => {
@@ -139,15 +250,19 @@ test('gun seats are exclusive and mounted movement pins position with authoritat
   mount(game, p, SHIP_GUNS[1]); assert.equal(game.shipGuns.filter(g => g.occupantId).length, 2);
 });
 
-test('E and Space dismount after flight stay aboard, held jump cannot trigger glide', () => {
+test('E and Space dismount after flight stay aboard, and a second Space never leaves the ship', () => {
   for (const action of ['interact', 'jump']) {
     const { game, p } = setup(); mount(game, p); game.elapsed = SHIP_DURATION + 3; game.tick();
     if (action === 'interact') game.action(p.id, action, p.gunId);
     else { input(game, p, { jump: true }); game.tick(); }
     assert.equal(p.gunId, null); assert.ok(game.shipGuns.every(gun => !gun.occupantId));
     tick(game, 0.15); assert.equal(p.mode, 'aboard');
+    // Releasing and pressing Space again is a fresh edge, and still does nothing.
     input(game, p, { jump: false }); game.tick(); input(game, p, { jump: true }); game.tick();
-    assert.equal(p.mode, 'gliding');
+    assert.equal(p.mode, 'aboard');
+    for (let i = 0; i < 12; i++) { input(game, p, { jump: i % 2 === 0 }); game.tick(); }
+    assert.equal(p.mode, 'aboard');
+    assert.equal(p.y, shipAt(game.elapsed).y);
   }
 });
 

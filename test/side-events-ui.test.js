@@ -142,8 +142,13 @@ test('finale banners announce each stage, name the lighthouse, and flag the last
   assert.match(twoTidebreakers.subtitle, /^2 Tidebreakers march/);
   const oneTidebreaker = finaleAnnouncement({ kind: 'finale', stage: 2, stages: FINALE_STAGES.length, spawns: [{ type: 'tidebreaker', x: 1, z: 1 }] });
   assert.match(oneTidebreaker.subtitle, /^1 Tidebreaker marches/);
-  const last = finaleAnnouncement({ kind: 'finale', stage: FINALE_STAGES.length, stages: FINALE_STAGES.length, spawns: [{ type: 'tempest', x: 0, z: -16 }] });
-  assert.equal(last.final, true); assert.match(last.subtitle, /Tempest Crab/);
+  // The Tempest still announces its own stage, but the skycrab siege is the
+  // stage that now carries the final flag.
+  const bossStage = FINALE_STAGES.findIndex(stage => stage.kind === 'boss') + 1;
+  const tempest = finaleAnnouncement({ kind: 'finale', stage: bossStage, stages: FINALE_STAGES.length, spawns: [{ type: 'tempest', x: 0, z: -16 }] });
+  assert.match(tempest.subtitle, /Tempest Crab/); assert.equal(tempest.final, false);
+  const last = finaleAnnouncement({ kind: 'finale', stage: FINALE_STAGES.length, stages: FINALE_STAGES.length, spawns: [] });
+  assert.equal(last.final, true); assert.match(last.subtitle, /[Ss]kycrab/);
   const notFinal = finaleAnnouncement({ kind: 'finale', stage: 3, stages: 4, spawns: [] });
   assert.equal(notFinal.final, false);
   for (const event of [null, {}, { kind: 'side-event', id: 'defense-market', status: 'active', wave: 1 },

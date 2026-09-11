@@ -4,7 +4,9 @@ import { Game, sideEventSpawns, sideEventPathClear, sideEventWaypoint } from '..
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
 import { FINALE_STAGES, FINALE_STAGE_DELAY } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
-import { BEACON, CHESTS, SHRINES, COLORS, heightAt } from '../shared/world.js';
+import { BEACON, CHESTS, SHRINES, COLORS, heightAt, shipAt } from '../shared/world.js';
+import { SHIP_GUNS, gunOperator } from '../shared/airship.js';
+import { damageSkyBoss, livingSkyBosses } from '../server/sky-finale.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { inSafeLanding } from '../shared/encounters.js';
 
@@ -13,6 +15,22 @@ const ticks = (game, seconds) => { for (let i = 0; i < Math.ceil(seconds / 0.05)
 const locate = (p, point) => Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, vy: 0 });
 const enemiesFor = (game, id) => [...game.enemies.values()].filter(enemy => enemy._sideEvent === id);
 const eventFor = (game, id) => game.sideEvents.find(event => event.id === id);
+
+// The last finale stage is fought from a deck gun against flying bosses, so a
+// landed pirate boards through the normal action and the lifecycle is driven
+// directly (the cannon path itself belongs to the airship suites).
+function finishSkyStage(game, p) {
+  const gun = SHIP_GUNS[0], operator = gunOperator(gun), ship = shipAt(game.elapsed);
+  Object.assign(p, { mode: 'aboard', gunId: null, hp: p.maxHp, knockedUntil: 0, grounded: true, vy: 0,
+    deckX: operator.x, deckZ: operator.z, x: ship.x + operator.x, y: ship.y, z: ship.z + operator.z });
+  assert.equal(game.action(p.id, 'interact', gun.id).ok, true);
+  for (let step = 0; step < 4000 && game.phase === 'finale'; step++) {
+    game.tick(0.05);
+    for (const boss of livingSkyBosses(game)) damageSkyBoss(game, boss.id, boss.hp, p.id);
+    game.releaseSpawns(game.finale, Infinity);
+    for (const enemy of [...game.enemies.values()]) if (enemy._finale) game.damageEnemy(enemy, enemy.hp, p.id);
+  }
+}
 // Later ranks surge in seconds after the first; materialise the whole wave so
 // an assertion sees the formation the server placed rather than its front rank.
 const release = (game, id) => game.releaseSpawns(eventFor(game, id), Infinity);
@@ -444,6 +462,13 @@ test('reconnect preserves defense state; finale cancels before boss; abandon and
   }
   assert.equal(game.enemies.get(game.bossId).type, 'tempest');
   game.damageEnemy(game.enemies.get(game.bossId), 10000, p.id);
+  // The Tempest hands over to the skycrab siege; the cancelled defense must stay
+  // cancelled through it, and only that last stage wins the voyage.
+  assert.equal(game.phase, 'finale');
+  ticks(game, FINALE_STAGE_DELAY + 0.1);
+  assert.equal(game.finale.stage, FINALE_STAGES.length);
+  assert.equal(eventFor(game, point.id).status, 'cancelled'); assert.equal(enemiesFor(game, point.id).length, 0);
+  finishSkyStage(game, p);
   assert.equal(game.phase, 'victory');
   assert.equal(game.action(p.id, 'restart').ok, true);
   assert.equal(game.finale.stage, 0); assert.equal(game.finale.stages, FINALE_STAGES.length);

@@ -1,4 +1,4 @@
-import { WORLD_RADIUS, SHIP_DURATION, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
+import { WORLD_RADIUS, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
 import { resolveWorldCollision } from './collision.js';
 import { SHIP_DECK, SHIP_GUNS, gunAim, gunOperator } from './airship.js';
 
@@ -69,12 +69,10 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
     p.y = ship.y;
     p.vy = 0;
     p.grounded = true;
-    if (elapsed >= SHIP_DURATION && !p.shipReturned) {
-      p.x = SPAWN.x + clamp(p.deckX, -3, 3); p.z = SPAWN.z + clamp(p.deckZ, -3, 3);
-      p.y = 42; p.mode = 'gliding'; p.grounded = false; p.vy = -6;
-    } else if (jump) {
-      p.mode = 'gliding'; p.vy = -6; p.grounded = false;
-    }
+    // Being aboard is a durable, safe state. Nothing here can leave the ship:
+    // jumping does nothing on the open deck, no timer drops anybody, and the
+    // deck stays hard-clamped. Departure is a server-validated jump-gate
+    // interaction, never a movement outcome.
     return p;
   }
 

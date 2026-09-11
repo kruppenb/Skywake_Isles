@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { airshipBanner, cannonPresentation, findInteractable, flyingTargetAtRay, nearestObjective } from '../client/ui.js';
-import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, GUN_COOLDOWN, GUN_RANGE, gunMuzzle, gunOperator } from '../shared/airship.js';
-import { SHIP_DURATION, SHRINES, heightAt, shipAt } from '../shared/world.js';
+import { airshipBanner, cannonPresentation, deckPromptMirrored, findInteractable, flyingTargetAtRay, glideLanding, nearestObjective, objectiveMarkerHeight } from '../client/ui.js';
+import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, SHIP_JUMP_POINTS, JUMP_INTERACTION_RANGE, GUN_COOLDOWN, GUN_RANGE, gunMuzzle, gunOperator, jumpLaunchPose } from '../shared/airship.js';
+import { SHIP_DURATION, SPAWN, BEACON, SHRINES, heightAt, shipAt } from '../shared/world.js';
 import { createRemoteInterpolation, displayedSpeed } from '../client/interpolation.js';
 
 function fixture(point = AIRSHIP_RETURNS[0]) {
@@ -99,16 +99,169 @@ test('cannon HUD uses station cooldown, unlimited role and neutral scope despite
   }
 });
 
-test('ship banner shows opening countdown only until a player opts into staying aboard', () => {
-  const { state, player } = fixture(); aboard(state, player); state.elapsed = SHIP_DURATION - 4;
-  assert.match(airshipBanner(state, player).text, /^4s until/);
-  player.gunId = SHIP_GUNS[0].id; player.shipReturned = true;
-  assert.equal(airshipBanner(state, player).button, 'Leave gun');
-  assert.match(airshipBanner(state, player).text, /Hold click fire/);
-  player.gunId = null; state.elapsed = SHIP_DURATION + 60;
-  assert.doesNotMatch(airshipBanner(state, player).text, /until|0s/);
-  assert.match(airshipBanner(state, player).text, /E man/);
-  assert.equal(airshipBanner(state, { ...player, mode: 'ground' }), null);
+test('ship banner never counts down or advertises Space, and only offers its button at a gate', () => {
+  for (const elapsed of [2, SHIP_DURATION - 4, SHIP_DURATION + 600]) {
+    const { state, player } = fixture(); aboard(state, player); state.elapsed = elapsed;
+    const away = airshipBanner(state, player);
+    assert.equal(away.button, null, 'no departure button away from a gate');
+    assert.doesNotMatch(away.text, /until|drops|\d+s|Space/);
+    assert.match(away.text, /JUMP gate/);
+    player.gunId = SHIP_GUNS[0].id; player.shipReturned = true;
+    assert.equal(airshipBanner(state, player).button, 'Leave gun');
+    assert.match(airshipBanner(state, player).text, /Hold click fire/);
+    player.gunId = null;
+    for (const gate of SHIP_JUMP_POINTS) {
+      Object.assign(player, { deckX: gate.x, deckZ: gate.z });
+      const banner = airshipBanner(state, player);
+      assert.equal(banner.button, 'Jump & glide to island');
+      assert.match(banner.text, new RegExp(gate.name));
+      assert.doesNotMatch(banner.text, /Space/);
+      assert.equal(airshipBanner({ ...state, phase: 'finale' }, player).button, 'Glide to lighthouse');
+    }
+    assert.equal(airshipBanner(state, { ...player, mode: 'ground' }), null);
+  }
+});
+
+test('only deck-mounted markers use an absolute height; island objectives keep terrain offsets', () => {
+  const ship = shipAt(40);
+  const gate = { id: 'jump-gate-bow', kind: 'jump-gate', x: ship.x, y: ship.y + 2.6, z: ship.z - 11 };
+  assert.equal(objectiveMarkerHeight(gate), ship.y + 2.6);
+  // A finale boss reports feet height and must keep its own raised offset.
+  const boss = { id: 'boss', kind: 'boss', x: BEACON.x, y: heightAt(BEACON.x, BEACON.z), z: BEACON.z };
+  assert.equal(objectiveMarkerHeight(boss), heightAt(BEACON.x, BEACON.z) + 4);
+  for (const kind of ['landing', 'beacon', 'shrine', undefined]) {
+    assert.equal(objectiveMarkerHeight({ kind, x: SPAWN.x, y: heightAt(SPAWN.x, SPAWN.z), z: SPAWN.z }), heightAt(SPAWN.x, SPAWN.z) + 9, String(kind));
+  }
+  assert.equal(objectiveMarkerHeight({ kind: 'jump-gate', x: 0, y: NaN, z: 0 }), heightAt(0, 0) + 9);
+});
+
+test('the deck banner and its button share the aboard interaction guard', () => {
+  const active = () => { const scenario = fixture(); aboard(scenario.state, scenario.player); return scenario; };
+  for (const mutate of [
+    ({ state }) => { state.phase = 'lobby'; },
+    ({ state }) => { state.phase = 'victory'; },
+    ({ player, state }) => { player.knockedUntil = state.elapsed + 6; },
+    ({ player }) => { player.hp = 0; },
+    ({ player }) => { player.online = false; },
+  ]) {
+    const scenario = active(); mutate(scenario);
+    assert.equal(airshipBanner(scenario.state, scenario.player), null, 'no stale deck text outside an active voyage');
+    // The prompt agrees, so the banner can never offer an E the server refuses.
+    assert.equal(findInteractable(scenario.state, scenario.player), null);
+    Object.assign(scenario.player, { deckX: SHIP_JUMP_POINTS[0].x, deckZ: SHIP_JUMP_POINTS[0].z });
+    assert.equal(airshipBanner(scenario.state, scenario.player), null, 'standing on a gate does not revive the button');
+    scenario.player.gunId = SHIP_GUNS[0].id;
+    assert.equal(airshipBanner(scenario.state, scenario.player), null, 'nor does a mounted station');
+  }
+  // Valid active states keep the instructional text even with no gate in reach.
+  for (const phase of ['voyage', 'finale']) {
+    const { state, player } = active(); state.phase = phase;
+    Object.assign(player, { deckX: 0, deckZ: 0, gunId: null });
+    const banner = airshipBanner(state, player);
+    assert.equal(banner.button, null); assert.match(banner.text, /JUMP gate/);
+  }
+  // An occupied gun offers no button: that prompt belongs to the E hint.
+  const { state, player } = active();
+  const operator = gunOperator(SHIP_GUNS[0]);
+  Object.assign(player, { deckX: operator.x, deckZ: operator.z, gunId: null });
+  state.shipGuns.find((entry) => entry.id === SHIP_GUNS[0].id).occupantId = 'friend';
+  state.players.push({ id: 'friend', name: 'Crab Captain' });
+  assert.equal(airshipBanner(state, player).button, null);
+});
+
+test('the deck banner owns the aboard E prompt and never duplicates it beside itself', () => {
+  const { state, player } = fixture(); aboard(state, player);
+  // At a gate, and while mounted, the banner button is the only E presentation.
+  Object.assign(player, { deckX: SHIP_JUMP_POINTS[0].x, deckZ: SHIP_JUMP_POINTS[0].z, gunId: null });
+  assert.equal(deckPromptMirrored(airshipBanner(state, player), findInteractable(state, player)), true);
+  player.gunId = SHIP_GUNS[0].id;
+  assert.equal(deckPromptMirrored(airshipBanner(state, player), findInteractable(state, player)), true);
+  // A gun you have not mounted still gets its own prompt: the banner has no button.
+  const operator = gunOperator(SHIP_GUNS[0]);
+  Object.assign(player, { deckX: operator.x, deckZ: operator.z, gunId: null });
+  const banner = airshipBanner(state, player), prompt = findInteractable(state, player);
+  assert.equal(banner.button, null); assert.equal(prompt.kind, 'gun');
+  assert.equal(deckPromptMirrored(banner, prompt), false);
+  // Ground interactions are never suppressed.
+  const island = fixture();
+  assert.equal(airshipBanner(island.state, island.player), null);
+  assert.equal(deckPromptMirrored(null, findInteractable(island.state, island.player)), false);
+});
+
+test('both gates prompt for E from every side of their pad and never from a gun stance', () => {
+  for (const gate of SHIP_JUMP_POINTS) {
+    const { state, player } = fixture(); aboard(state, player);
+    for (const [dx, dz] of [[0, 0], [1.4, 0], [-1.4, 0], [0, 1.4], [0, -1.4], [1.3, 1.3]]) {
+      Object.assign(player, { deckX: gate.x + dx, deckZ: gate.z + dz });
+      const prompt = findInteractable(state, player);
+      assert.equal(prompt?.id, gate.id, `${gate.id} at ${dx},${dz}`);
+      assert.equal(prompt.kind, 'jump-gate');
+      assert.equal(prompt.label, 'Jump & glide to island');
+      assert.equal(findInteractable({ ...state, phase: 'finale' }, player).label, 'Glide to lighthouse');
+    }
+    Object.assign(player, { deckX: gate.x, deckZ: gate.z + JUMP_INTERACTION_RANGE + 0.3 });
+    assert.notEqual(findInteractable(state, player)?.kind, 'jump-gate', 'out of range');
+    // Every gun stance offers the gun, never a gate.
+    for (const gun of SHIP_GUNS) {
+      const operator = gunOperator(gun);
+      Object.assign(player, { deckX: operator.x, deckZ: operator.z, gunId: null });
+      assert.equal(findInteractable(state, player)?.kind, 'gun');
+    }
+    // A mounted crew member is still only offered the station.
+    player.gunId = SHIP_GUNS[0].id;
+    Object.assign(player, { deckX: gate.x, deckZ: gate.z });
+    assert.equal(findInteractable(state, player).label, 'Leave gun');
+  }
+});
+
+test('aboard guidance marks a physical gate and gliding guidance marks reachable ground', () => {
+  const { state, player } = fixture(); aboard(state, player);
+  Object.assign(player, { gunId: null, deckX: 0, deckZ: 0 });
+  const ship = shipAt(state.elapsed);
+  const marker = nearestObjective(state, player);
+  const forward = SHIP_JUMP_POINTS.reduce((best, gate) => (gate.z < best.z ? gate : best));
+  assert.equal(marker.kind, 'jump-gate');
+  assert.equal(marker.id, forward.id, 'the opening spawn is marked to the gate its view already faces');
+  assert.equal(marker.x, ship.x + forward.x);
+  assert.equal(marker.z, ship.z + forward.z);
+  assert.ok(marker.y > ship.y, 'the marker rides the deck rather than the island terrain');
+  // Every spawn slot starts pointed at the forward gate, never turned around.
+  for (let slot = 0; slot < 5; slot++) {
+    Object.assign(player, { deckX: ((slot % 3) - 1) * 2, deckZ: Math.floor(slot / 3) * 2 });
+    assert.equal(nearestObjective(state, player).id, forward.id, `spawn slot ${slot}`);
+  }
+  // Standing at, or walking up to, another gate follows that one instead.
+  for (const gate of SHIP_JUMP_POINTS) {
+    Object.assign(player, { deckX: gate.x, deckZ: gate.z });
+    assert.equal(nearestObjective(state, player).id, gate.id);
+  }
+  const rail = SHIP_JUMP_POINTS.find((gate) => gate.id !== forward.id);
+  Object.assign(player, { deckX: rail.x - 2, deckZ: rail.z - 2 });
+  assert.equal(nearestObjective(state, player).id, rail.id, 'approaching the rail gate follows it');
+  Object.assign(player, { deckX: gunOperator(SHIP_GUNS[3]).x, deckZ: gunOperator(SHIP_GUNS[3]).z });
+  assert.equal(nearestObjective(state, player).id, rail.id, 'the starboard aft gunner is sent to the gate at hand');
+  Object.assign(player, { deckX: 0, deckZ: -6 });
+  assert.equal(nearestObjective(state, player).id, forward.id, 'walking forward marks the bow gate');
+  // An opening bow departure still points at the friendly landing beach.
+  const opening = jumpLaunchPose(SHIP_JUMP_POINTS[0], shipAt(0));
+  const early = glideLanding({ ...state, phase: 'voyage' }, { ...opening, mode: 'gliding' });
+  assert.equal(early.x, SPAWN.x); assert.equal(early.z, SPAWN.z);
+  // A late departure from the parked ship is pointed at ground it can reach.
+  const late = jumpLaunchPose(SHIP_JUMP_POINTS[0], shipAt(SHIP_DURATION + 90));
+  const landing = glideLanding({ ...state, phase: 'voyage' }, { ...late, mode: 'gliding' });
+  assert.ok(Math.hypot(landing.x - late.x, landing.z - late.z) < Math.hypot(SPAWN.x - late.x, SPAWN.z - late.z));
+  assert.ok(Math.hypot(landing.x - late.x, landing.z - late.z) <= 12 + (late.y - heightAt(late.x, late.z)) * 1.25);
+  // The finale sends returning crew to the open landing beside the haven lift
+  // from BOTH gates: a straight line from the bow launch to the beacon itself
+  // runs into the lighthouse tower, and this approach clears it.
+  const lift = AIRSHIP_RETURNS.find((entry) => entry.id === 'airship-return-haven');
+  for (const gate of SHIP_JUMP_POINTS) {
+    const pose = jumpLaunchPose(gate, shipAt(SHIP_DURATION + 90));
+    const finale = glideLanding({ ...state, phase: 'finale' }, { ...pose, mode: 'gliding' });
+    assert.equal(finale.x, lift.x); assert.equal(finale.z, lift.z);
+    assert.match(finale.name, /Lighthouse/);
+    assert.notEqual(finale.z, BEACON.z, `${gate.id} is not aimed through the tower`);
+  }
 });
 
 test('flying target reticle intersects exact authoritative sphere centers and nearest surfaces', () => {

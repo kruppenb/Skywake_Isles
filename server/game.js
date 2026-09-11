@@ -1,5 +1,5 @@
-import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, heightAt, shipAt } from '../shared/world.js';
-import { SHIP_GUNS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_DAMAGE, GUN_RANGE, gunAim, gunOperator, gunMuzzle } from '../shared/airship.js';
+import { MAX_PLAYERS, SEED, COLORS, SPAWN, BEACON, SHRINES, CHESTS, SHIP_OBSTACLES, heightAt, shipAt } from '../shared/world.js';
+import { SHIP_GUNS, SHIP_JUMP_POINTS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_DAMAGE, GUN_RANGE, gunAim, gunOperator, gunMuzzle, raySphereSurface, jumpPointFor, jumpLaunchPose } from '../shared/airship.js';
 import { canReturnAtShrine, SHRINE_RETURN_RANGE } from '../shared/shrines.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
@@ -8,6 +8,8 @@ import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
 import { FINALE_STAGES, FINALE_STAGE_DELAY, FINALE_FRONT, FINALE_ELITE_FRONT, FINALE_ARC, FINALE_RANK_SIZE, FINALE_DIRECTION_DELAY, shardBearing, finaleStageRoster } from '../shared/finale.js';
+import { SKY_STAGE_KIND, skyStageCleared } from '../shared/sky-finale.js';
+import { startSkyStage, tickSkyStage, settleSkyStage, skyCounts, skyStageNumber, publicSkyState, cancelSkyActivity, clearSkyStage, livingSkyBosses, damageSkyBoss } from './sky-finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
 const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
@@ -167,13 +169,26 @@ export function sideEventSpawns(id, playerCount, wave, occupied = []) {
 // Each stage of the final battle. Wave stages march in from the bearing of each
 // shrine the crew looted a shard from, one direction after another; the boss
 // stage claims the arena in front of the lighthouse with no placement checks.
+// The airship stage has no ground roster to place at all: it is rejected here
+// BEFORE anything reads `groups`, and server/sky-finale.js spawns its finite
+// waves through finaleGroupSpawns instead.
 export function finaleStageSpawns(stage, playerCount, occupied = []) {
   const roster = finaleStageRoster(stage, playerCount);
-  if (!roster || !Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
+  if (!roster || roster.kind === SKY_STAGE_KIND) return null;
+  if (!Array.isArray(occupied) || occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
   if (roster.tempest) return [{ type: 'tempest', x: BEACON.x, z: BEACON.z - 16, zone: 'haven', delay: 0 }];
+  return finaleGroupSpawns(roster.groups, occupied);
+}
+
+// The shared formation geometry for every lighthouse wave, stage rosters and
+// sky-stage ground waves alike: one column per shrine direction, each direction
+// a beat behind the last, elites in their own closer rank.
+export function finaleGroupSpawns(groups, occupied = []) {
+  if (!Array.isArray(groups) || !Array.isArray(occupied) ||
+    occupied.some(item => ![item?.x, item?.z].every(Number.isFinite))) return null;
   const result = [];
-  for (let direction = 0; direction < roster.groups.length; direction++) {
-    const group = roster.groups[direction], shrine = SHRINES.find(s => s.id === group.from);
+  for (let direction = 0; direction < groups.length; direction++) {
+    const group = groups[direction], shrine = SHRINES.find(s => s.id === group.from);
     if (!shrine) return null;
     const bearing = shardBearing(shrine), delay = direction * FINALE_DIRECTION_DELAY;
     const crabRanks = Math.ceil(group.crab / FINALE_RANK_SIZE);
@@ -235,6 +250,10 @@ export class Game {
   }
 
   resetRound() {
+    // Tear the sky stage down explicitly before the fresh state is built, so a
+    // restart or abandoned round can never leave a boss, shell, queued rank or
+    // hidden practice flyer behind.
+    if (this.finale?._sky) clearSkyStage(this);
     this.phase = 'lobby'; this.elapsed = 0; this.pearls = 0; this.shards = 0;
     this.bossId = null; this.victory = null; this.checkpoint = { ...SPAWN };
     this.shrines = SHRINES.map(s => ({ id: s.id, status: 'dormant', charge: 0, remaining: 0 }));
@@ -242,8 +261,11 @@ export class Game {
       integrity: 100, maxIntegrity: 100, startedAt: 0, endsAt: 0, finishedAt: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
     // Stage 0 means the beacon is unlit; `stages` travels in the snapshot so a
-    // client can label "stage 2/3" without importing the stage table.
-    this.finale = { stage: 0, stages: FINALE_STAGES.length, remaining: 0, _nextStageAt: 0, _crewCount: 1, _pending: [], _mark: null };
+    // client can label "stage 2/4" without importing the stage table. `_sky`
+    // holds the airship stage's private lifecycle while it runs, and nothing
+    // else: a fresh round starts with no bosses, shells or completion record.
+    this.finale = { stage: 0, stages: FINALE_STAGES.length, remaining: 0, _nextStageAt: 0, _crewCount: 1, _pending: [], _mark: null, _sky: null };
+    this._completion = null;
     this.pings = []; this.drops = []; this.enemies.clear();
     this.shipGuns = SHIP_GUNS.map(gun => ({ id: gun.id, occupantId: null, readyAt: 0 }));
     this.flyingTargets = Array.from({ length: 8 }, (_, index) => ({ id: `flying-crab-${index + 1}`, type: 'flying-crab',
@@ -365,7 +387,7 @@ export class Game {
     if (action === 'ping') return this.ping(p);
     if (action === 'interact') return this.interact(p, target);
     if (p.gunId) return action === 'fire' ? this.fireCannon(p) : bad('Leave the deck gun to use your equipment.', 'MOUNTED');
-    if (p.mode === 'aboard') return bad('Jump from the ship to join the adventure.');
+    if (p.mode === 'aboard') return bad('Use a jump gate to glide down before using your equipment.');
     if (action === 'fire') return this.fire(p);
     if (action === 'melee') return this.melee(p);
     if (action === 'reload') return this.reload(p);
@@ -377,6 +399,38 @@ export class Game {
   releaseGun(p) {
     for (const station of this.shipGuns) if (station.occupantId === p.id) station.occupantId = null;
     p.gunId = null;
+  }
+
+  // One E dispatcher for everything aboard. A mounted press only releases the
+  // station and can never also open a gate, and both branches share the same
+  // voyage/finale guard at this server boundary instead of trusting the client.
+  interactAboard(p, target) {
+    if (this.phase !== 'voyage' && this.phase !== 'finale') return bad('Set sail to begin the adventure.');
+    if (p.gunId) return this.interactGun(p, target);
+    const gate = jumpPointFor({ x: p.deckX, z: p.deckZ }, SHIP_OBSTACLES, target);
+    if (gate) return this.departAtJumpPoint(p, gate);
+    if (target && SHIP_JUMP_POINTS.some(point => point.id === target)) {
+      return bad('Stand on the jump gate with a clear path across its planks.', 'TOO_FAR');
+    }
+    return this.interactGun(p, target);
+  }
+
+  // The gate, never the client, decides where a pirate leaves the ship. The
+  // authored offset clears the rail and the rendered hull at every point of the
+  // flight and while parked, so the ordinary glider opens in open air.
+  departAtJumpPoint(p, gate) {
+    if (!p.online || p.hp <= 0 || p.knockedUntil || p.mode !== 'aboard' || p.gunId ||
+      (this.phase !== 'voyage' && this.phase !== 'finale')) {
+      return bad('Stand on a jump gate to glide down to the island.', 'TOO_FAR');
+    }
+    const launch = jumpLaunchPose(gate, shipAt(this.elapsed));
+    // A seat left behind by a disconnect never follows a pirate off the ship.
+    this.releaseGun(p);
+    Object.assign(p, launch, { mode: 'gliding', grounded: false, vy: -6, jumpHeld: false,
+      deckX: gate.x, deckZ: gate.z, _burst: null });
+    p._input = restInput(p); p._inputAt = this.clock;
+    this.emit({ kind: 'airship-jump', playerId: p.id, id: gate.id });
+    return good();
   }
 
   interactGun(p, target) {
@@ -391,7 +445,7 @@ export class Game {
       Math.hypot(p.x - ship.x - gun.x, p.y - ship.y, p.z - ship.z - gun.z) <= GUN_INTERACTION_RANGE);
     nearby.sort((a, b) => Math.hypot(p.deckX - a.x, p.deckZ - a.z) - Math.hypot(p.deckX - b.x, p.deckZ - b.z));
     const gun = nearby[0];
-    if (!gun) return bad('Walk closer to a deck gun.', 'TOO_FAR');
+    if (!gun) return bad('Walk closer to a deck gun or a marked jump gate.', 'TOO_FAR');
     const station = this.shipGuns.find(item => item.id === gun.id);
     if (station.occupantId) return bad('A crewmate is already using that gun.', 'GUN_OCCUPIED');
     station.occupantId = p.id;
@@ -418,7 +472,9 @@ export class Game {
   }
 
   tickFlyingTargets() {
-    if (this.phase !== 'voyage' && this.phase !== 'finale') return;
+    // Practice flyers are hidden and inert for the whole skycrab siege: they
+    // never respawn into a real fight or count toward its objectives.
+    if (this.phase !== 'voyage' && this.phase !== 'finale' || this.finale._sky) return;
     const ship = shipAt(this.elapsed);
     for (const target of this.flyingTargets) {
       if (target.hp <= 0) {
@@ -446,16 +502,18 @@ export class Game {
     station.readyAt = this.elapsed + GUN_COOLDOWN;
     Object.assign(p, gunAim(gun, p.yaw, p.pitch));
     const { from, direction } = gunMuzzle(gun, ship, p.yaw, p.pitch);
+    // The skycrab siege replaces the practice flyers with the two real bosses:
+    // one pool or the other, never both, so no practice respawn or reward can
+    // leak into the boss fight and no skycrab can be shot before it flies.
+    const sky = !!this.finale._sky;
+    const targets = sky ? livingSkyBosses(this) : this.flyingTargets;
     let hit = null, nearest = GUN_RANGE;
-    for (const target of this.flyingTargets) {
+    for (const target of targets) {
       if (target.hp <= 0) continue;
-      const x = target.x - from.x, y = target.y - from.y, z = target.z - from.z;
-      const along = x * direction.x + y * direction.y + z * direction.z;
-      const discriminant = target.radius ** 2 - (x * x + y * y + z * z - along * along);
-      if (discriminant < 0) continue;
-      const root = Math.sqrt(discriminant), enter = along - root, leave = along + root;
-      const surface = enter >= 0 ? enter : leave;
-      if (surface < 0 || surface > nearest) continue;
+      // The gunner's own clamped aim is tested against the sphere: a barrel
+      // pointed away misses, exactly as it does against a practice flyer.
+      const surface = raySphereSurface(from, direction, target);
+      if (surface === null || surface > nearest) continue;
       const point = { x: from.x + direction.x * surface, y: from.y + direction.y * surface, z: from.z + direction.z * surface };
       if (!hasWorldLineOfSight(from, point)) continue;
       nearest = surface; hit = target;
@@ -463,13 +521,15 @@ export class Game {
     const endpoint = { x: from.x + direction.x * nearest, y: from.y + direction.y * nearest, z: from.z + direction.z * nearest };
     const to = hit ? endpoint : clipShotEndpoint(from, endpoint), damage = hit ? Math.min(hit.hp, GUN_DAMAGE) : 0;
     this.emit({ kind: 'shot', weapon: 'cannon', gunId: gun.id, playerId: p.id, from, to, ...(hit ? { hitId: hit.id, damage } : {}) });
-    if (hit) {
-      hit.hp -= damage;
-      this.emit({ kind: 'hit', targetId: hit.id, sourceId: p.id, damage, x: hit.x, y: hit.y, z: hit.z });
-      if (hit.hp <= 0) {
-        hit._respawnAt = this.elapsed + 7;
-        this.emit({ kind: 'target-down', id: hit.id, type: hit.type, sourceId: p.id, x: hit.x, y: hit.y, z: hit.z });
-      }
+    if (!hit) return good();
+    // The shot is on the wire first, then the lifecycle owns the consequences:
+    // it applies the damage, emits the hit, and pays the kill exactly once.
+    if (sky) { damageSkyBoss(this, hit.id, GUN_DAMAGE, p.id); return good(); }
+    hit.hp -= damage;
+    this.emit({ kind: 'hit', targetId: hit.id, sourceId: p.id, damage, x: hit.x, y: hit.y, z: hit.z });
+    if (hit.hp <= 0) {
+      hit._respawnAt = this.elapsed + 7;
+      this.emit({ kind: 'target-down', id: hit.id, type: hit.type, sourceId: p.id, x: hit.x, y: hit.y, z: hit.z });
     }
     return good();
   }
@@ -615,7 +675,7 @@ export class Game {
   }
 
   interact(p, target) {
-    if (p.mode === 'aboard') return this.interactGun(p, target);
+    if (p.mode === 'aboard') return this.interactAboard(p, target);
     if (p.mode !== 'ground') return bad('Land near the treasure to interact.', 'TOO_FAR');
     const options = [];
     for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
@@ -781,6 +841,14 @@ export class Game {
   startFinaleStage(n) {
     const definition = FINALE_STAGES[n - 1];
     if (!definition) return;
+    // The airship stage brings no ground roster to place, so it branches before
+    // the generic spawn helper: server/sky-finale.js owns its setup from here.
+    if (definition.kind === SKY_STAGE_KIND) {
+      startSkyStage(this, n);
+      this.emit({ kind: 'finale', stage: n, stages: FINALE_STAGES.length, spawns: [] });
+      this.emit({ kind: 'notice', message: definition.notice });
+      return;
+    }
     const spawns = finaleStageSpawns(n, this.finale._crewCount, [...this.enemies.values()]);
     // A crowded lighthouse can block every candidate; retry a second later
     // rather than skipping a stage or throwing mid-tick.
@@ -798,19 +866,66 @@ export class Game {
     // Stage 0 with a retry pending is a first stage that had no room yet; a
     // finale phase with no stage and no retry stays inert.
     if (this.phase !== 'finale' || (this.finale.stage < 1 && !this.finale._nextStageAt)) return;
+    // The sky stage releases its own ranks inside its lifecycle tick.
+    if (this.finale._sky) { tickSkyStage(this); return; }
     this.releaseSpawns(this.finale);
     this.settleFinale();
   }
 
   // A stage ends only when everything it brought is gone, pending ranks
-  // included; the voyage is won when the last stage in the table is cleared.
+  // included; the last stage in the table hands the island over instead of
+  // winning directly.
   settleFinale() {
     const finale = this.finale;
+    if (finale._sky) { settleSkyStage(this); return; }
     finale.remaining = [...this.enemies.values()].filter(enemy => enemy._finale === finale.stage).length + finale._pending.length;
     if (finale.remaining) return;
-    if (finale.stage >= finale.stages) { this.win(); return; }
+    // The last stage never wins here: completeIsland() is the only route, and it
+    // refuses a final stage whose lifecycle is missing rather than declaring a
+    // victory nobody fought for.
+    if (finale.stage >= finale.stages) { this.completeIsland(); return; }
     if (!finale._nextStageAt) finale._nextStageAt = this.elapsed + FINALE_STAGE_DELAY;
     else if (this.elapsed + 1e-8 >= finale._nextStageAt) this.startFinaleStage(finale.stage + 1);
+  }
+
+  // The one boundary an encounter may finish through, and the only caller of
+  // beginIslandDeparture. It re-asks every condition itself rather than trusting
+  // the caller: no remaining=0 shortcut, no forced stage number and no second
+  // completion can slip past it, and the sky stage must still be `active` here
+  // so the guard runs BEFORE `cleared` is latched.
+  completeIsland() {
+    const finale = this.finale;
+    // Identity first: the running stage must really BE the last stage in the
+    // table and that stage must be the airship stage, with its lifecycle block
+    // present. A forced stage number, an out-of-range index or a missing _sky
+    // is a broken state, never a finished island, and the mutable `remaining`
+    // field is never consulted.
+    if (this.phase !== 'finale' || this._completion || !skyStageNumber(this) || !finale._sky) return null;
+    if (!skyStageCleared(skyCounts(this))) return null;
+    finale._sky.status = 'cleared';
+    cancelSkyActivity(this);
+    // A small bookkeeping record tied to this run, not a claim that travel
+    // exists: there is no island id or navigation system to reference yet.
+    this._completion = { island: 'tideglass', round: this.round, seed: SEED, stage: finale.stage,
+      elapsed: this.elapsed, pearls: this.pearls, crew: Math.max(1, this.onlineCount) };
+    this.beginIslandDeparture(this._completion);
+    return this._completion;
+  }
+
+  // Future: regroup aboard, sail, and load the next island BEFORE terminal
+  // victory freezes inputs. Today the stub routes straight to win(), adds no
+  // network action, and never resets the round or loads a world.
+  beginIslandDeparture(completion) {
+    // No boarding, sailing or relocation happens yet, so the notice claims none.
+    this.emit({ kind: 'notice', message: 'Island secured!' });
+    this.win();
+    return completion;
+  }
+
+  // Sky-stage ground waves reuse the stage formation geometry rather than
+  // duplicating it, with the current battlefield as the occupied set.
+  groundWaveSpawns(groups) {
+    return finaleGroupSpawns(groups, [...this.enemies.values()]);
   }
 
   routeDestination(enemy, point) {
@@ -852,7 +967,15 @@ export class Game {
   revive(p, by = null) {
     p.hp = 65; p.knockedUntil = 0; p.invulnerableUntil = this.elapsed + 3; p._damageAt = this.elapsed;
     if (!by) {
-      const slot = Math.max(0, [...this.players.keys()].indexOf(p.id));
+      let slot = Math.max(0, [...this.players.keys()].indexOf(p.id));
+      // The sky stage's haven checkpoint authors exactly MAX_PLAYERS slots. The
+      // players Map can be longer when disconnected characters are still
+      // reserved, so index the online roster there instead of the whole Map.
+      // Earlier stages keep their existing slot behaviour.
+      if (this.finale._sky) {
+        const online = [...this.players.values()].filter(other => other.online).map(other => other.id);
+        slot = clamp(online.includes(p.id) ? online.indexOf(p.id) : slot, 0, MAX_PLAYERS - 1);
+      }
       p.x = this.checkpoint.x + 2 + slot * 0.8; p.z = this.checkpoint.z + 3;
       p.y = heightAt(p.x, p.z); p.mode = 'ground'; p.grounded = true; p.vy = 0;
     } else by.rescues++;
@@ -1022,6 +1145,10 @@ export class Game {
 
   win() {
     if (this.phase === 'victory') return;
+    // However victory is reached, the sky stage ends with it: no boss, shell,
+    // queued rank or public sky block outlives the fight. The completion record
+    // is bookkeeping and stays until the round resets.
+    clearSkyStage(this);
     this.phase = 'victory'; this.enemies.clear();
     for (const p of this.players.values()) { p._burst = null; this.releaseGun(p); }
     this.victory = { pearls: this.pearls, duration: this.elapsed,
@@ -1033,13 +1160,15 @@ export class Game {
   }
 
   snapshot() {
+    const sky = publicSkyState(this);
     return { phase: this.phase, elapsed: this.elapsed, simulationTime: this.clock, seed: SEED, round: this.round, hostId: this.hostId,
       players: [...this.players.values()].map(p => ({ ...cleanObject(p, PUBLIC_PLAYER), collectedDropIds: [...p.collectedDropIds], inventory: Object.fromEntries(Object.entries(p.inventory).map(([weapon, slot]) => [weapon, { rarity: slot.rarity, ammo: slot.ammo }])) })),
       enemies: [...this.enemies.values()].map(e => cleanObject(e, PUBLIC_ENEMY)),
       shipGuns: this.shipGuns.map(gun => ({ ...gun })),
       flyingTargets: (this.phase === 'voyage' || this.phase === 'finale') ? this.flyingTargets.filter(target => target.hp > 0).map(target => cleanObject(target, PUBLIC_FLYING_TARGET)) : [],
       sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
-      finale: cleanObject(this.finale, ['stage', 'stages', 'remaining']),
+      // `sky` is a fresh bounded copy and appears only while that stage runs.
+      finale: { ...cleanObject(this.finale, ['stage', 'stages', 'remaining']), ...(sky ? { sky } : {}) },
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
       pings: this.pings.map(p => ({ ...p })), stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };

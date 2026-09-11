@@ -103,8 +103,10 @@ Movement fields: x,y,z,yaw,pitch,vy,mode ('aboard'|'gliding'|'ground'),
 jumpHeld,grounded. y is feet position. Walk 8m/s, sprint 11, jump velocity
 8, gravity 22; descending from a high jump automatically glides at -6m/s.
 While aboard, follow shipAt(elapsed), allow deck movement within +/-4 x,
-+/-8 z via deckX/deckZ; jump leaves the ship. At SHIP_DURATION auto-drop
-over safe SPAWN. Lobby caller passes elapsed=0 and suppresses jump.
++/-8 z via deckX/deckZ. Aboard is a durable safe state: movement never leaves
+the ship, jump only releases a mounted gun, and no timer drops anybody.
+Departure is an authoritative jump-gate interaction (see below), not a
+movement outcome. Lobby caller passes elapsed=0 and suppresses jump.
 Gliding steers freely; on landing y=heightAt and mode='ground'. Water/safety
 boundary returns player to SPAWN safely. Circle obstacle collision, slope
 following, no falling damage. A knocked player cannot move (caller enforces).
@@ -136,11 +138,38 @@ Late joins allowed; drop from safe area then join the current shared progress.
 State shape, all fields always present:
 {phase:'lobby'|'voyage'|'finale'|'victory',elapsed,seed,round,hostId,
  players:[],enemies:[],shrines:[],chests:[],pearls,shards,bossId:null|string,
- finale:{stage,stages,remaining},
+ finale:{stage,stages,remaining,sky?},
  pings:[],stats:{wins,voyages,bestPearls},victory:null|{pearls,duration,rescues,kills}}
 finale.stage is 0 until the beacon is lit, then the 1-based index into
 shared/finale.js FINALE_STAGES; stages is that list's length; remaining counts
 the stage's living and still-forming enemies (boss minions excluded).
+finale.sky is present ONLY while the skycrab siege (the airship stage) runs as
+the real, current, last stage of phase finale; a forced stage number, a torn
+down lifecycle, victory, lobby and the first three stages all publish no sky
+block at all, so older clients are unchanged. It is live state, never an event history, and every array
+is bounded: at most SKY_BOSSES.length (2) bosses and SKY_BOMBARD_MAX_ACTIVE (2)
+shells, so a late joiner reads the whole fight from one snapshot.
+{status:'boarding'|'countdown'|'active'|'cleared',countdownEndsAt,wave,waves,
+ groundActive,groundPending,groundFuture,nextWaveAt,
+ bosses:[{id,name,x,y,z,yaw,hp,maxHp,radius,state:'flying'|'winding'|'down'}],
+ bombardments:[{id,bossId,x,y,z,impactX,impactY,impactZ,radius,launchAt,impactAt}]}
+All of those times are absolute state.elapsed seconds like knockedUntil, and 0
+when they do not apply. boarding waits for any able pirate at a cannon,
+countdown is the shared SKY_COUNTDOWN grace after that latch, active runs the
+fight and is the only status the completion guard answers true for; cleared is
+the terminal state completeIsland() latches after that guard has already
+passed. wave is 0 before the first
+ground wave, then 1..waves; groundActive counts living stage enemies,
+groundPending the ranks still forming up and groundFuture the waves that have
+not started, so the HUD never reads an inter-wave gap as a cleared objective.
+wave is the number of waves actually placed on the island, never a display
+cursor that can run ahead of them.
+A boss keeps its stable id for the whole stage and lingers for
+SKY_BOSS_DOWN_LINGER after death before leaving the array. Sky boss x,y,z is
+the CENTRE of the radius hit sphere (like flyingTargets, unlike Enemy.y which
+is feet), a bombardment's x,y,z is its launch point at the boss and impact* the
+ground point its warning ring marks. Sky bosses are never in enemies[] and
+never practice flyingTargets, which are hidden for the whole stage.
 Player public fields:
 {id,name,color,online,ready,x,y,z,yaw,pitch,vy,mode,jumpHeld,grounded,
  deckX,deckZ,hp,maxHp,ammo,maxAmmo,weapon,reloadUntil,healUntil,
@@ -169,12 +198,26 @@ side-event {id,status,wave,reward?,spawns?:[{type,x,z,delay}]} (spawns only
 when a wave forms; delay is the seconds until that rank breaks the surface;
 clients stage the surge and its banner from this event, never from
 snapshots), finale {stage,stages,spawns:[{type,x,z,delay,from?}]} (one per
-stage start; from names the shrine whose direction a wave unit comes from).
+stage start; from names the shrine whose direction a wave unit comes from; the
+airship stage announces itself with an empty spawns list because its ground
+waves form later), sky-wave {wave,waves,spawns:[{type,x,z,delay,from?}]} (one
+per skycrab-siege ground wave, staged like a finale surge without re-announcing
+the stage banner). A skycrab bombardment reuses the existing telegraph and
+splash events, and a downed one emits defeated {id,type:'skycrab',x,y,z}.
 World/client tolerate extra fields and unknown events.
 
 Loop: host presses Set sail (launch) in lobby, all online crew begin aboard,
-phase voyage elapsed reset to zero. The client shows Space to jump and auto
-glide; server auto-drops remaining crew. Three shrine quests any order:
+phase voyage elapsed reset to zero. Crew stay aboard until they walk onto one
+of the two SHIP_JUMP_POINTS gates and press E; the same rule applies on the
+opening voyage and on every later visit, and nothing ejects an idle pirate.
+interactAboard dispatches an aboard E: a mounted press only releases the
+station, otherwise jumpPointFor resolves a gate from deckX/deckZ using
+JUMP_INTERACTION_RANGE and a clear deck route past SHIP_OBSTACLES (no
+replicated in-zone flag). Both branches require phase voyage or finale. The
+server, never the client, supplies the launch pose: shipAt(elapsed) plus the
+gate's authored launch offset, which clears the rail, rendered hull, gunwale
+and bowsprit at every flight time and while parked, then mode='gliding' with
+vy=-6 and an airship-jump event. Three shrine quests any order:
 E within 4m starts a shrine, spawning 3–11 guards scaled with the crew size.
 Defeating its last living guard captures it immediately, with no proximity or
 charging requirement. Cleared shrine grants shared shard, 25 pearls and checkpoint;
@@ -215,10 +258,110 @@ ranks 2.5s apart, each shrine direction 1.5s after the last) and march on
 the dais, chasing pirates within 30m that they can reach. Stage 2: the
 Tidebreaker elites from the optional defenses' final wave (2 + one per two
 pirates, dealt across the shrine directions, 32m out). Stage 3: the Tempest
-Crab spawns 16m in front of the beacon. A fourth stage is reserved. Boss has
+Crab spawns 16m in front of the beacon. Boss has
 telegraphed swipes and ranged splashes (events acceptable for visuals) and
 minion summons with cap; its minions leave with it.
 Boss 650HP solo +180 per additional player; normal crabs ~45–65HP.
+Stage 4 is the skycrab siege (shared/sky-finale.js), the one stage whose
+finaleStageRoster returns a typed descriptor {kind:'airship',bossCount:2,
+groundWaveCount:3} instead of ground groups: a caller must dispatch on kind and
+never read it as an empty ground roster. Two giant skycrabs fly slow closed
+lanes beside the parked airship while three finite ground waves march the same
+shrine roads stage one uses. Lanes are authored in ship-local metres and added
+to shipAt(elapsed), which is parked at (0,62,-60) from 28s on, so the beacon
+lies 64m dead astern in the gap between the broadside arcs where no gun can
+traverse. Each lane therefore stays on one broadside (port centre x=-34, run
+28m along z, 6m sway; starboard x=34, run 27m, 5.5m sway) and 1.6-9.7m above
+the gun pivot, tracing one closed ellipse every 46s/52s at under 4 m/s with an
+integer number of altitude beats per lap. skyBossReachableFromGun(pose,gun,ship)
+is the authoring and diagnostic rule for those lanes, NOT a runtime hit test: it
+AUTO-AIMS the seat at the pose, applies the real gunAim traverse/pitch clamps and
+then runs the server's own nearest-sphere test from gunMuzzle, so a clamped seat
+simply misses. Cannon damage must still raycast the player's own validated
+yaw/pitch; selecting hits with this helper would turn misses into auto-hits.
+Every authored sample and
+extremum is aimed dead on from at least two seats on the boss's own broadside,
+inside GUN_RANGE with >=0.1rad of traverse headroom, always above the pivot
+(never depressed through the hull) and with clear line of sight; a pose over
+the lighthouse or dead astern has no solution at all. Galewrack (port) is
+780HP +150 per extra pirate, Squallmaw (starboard) 700 +135, both capped at the
+latched crew and under 1.8x solo, 40 pearls each. A boss lobs ONE telegraphed
+shell at a time, 2.8s of warning, 4.6m ring, 15 damage, only to ground pirates
+within 4m of the impact height and inside 46m of the beacon. The arrival pocket
+is the haven lift with RETURN_RANGE (3.2m) around it, nothing wider: no shell is
+aimed into it AND a pirate standing in it is exempt from a ring centred legally
+just outside, since arrival safety is about the pirate's position, not only the
+shell's. Ground enemies still walk into that pocket and attack normally, and it
+shelters nothing else on the dais. Cadence eases from 8/8.6s to 5.4/5.8s as a
+boss's health falls and it never gains a phase, a minion or a second attack.
+Stage entry sets SKY_CHECKPOINT, derived from the haven lift and MAX_PLAYERS so
+Game.revive()'s existing (+2+slot*.8, +3) offsets put all five slots at
+x6.4..9.6,z12 — no collision push, dry ground, within 1.6m of the lift and
+inside the pocket. WP-2 must clamp the sky-stage revive slot to 0..MAX_PLAYERS-1:
+addPlayer caps the ONLINE crew while revive indexes the whole players Map, which
+can run past the authored row when offline characters are still reserved, so
+during this stage revive indexes the online roster instead. Earlier stages keep
+their current checkpoints and slot behaviour, and the existing 8s auto-revive
+with 3s protection is unchanged.
+Ground waves use only the classes the finale already fields, crabs and
+Tidebreakers, with no new ground attack vocabulary: 2 crabs per shrine +1 per
+extra pirate, then 1 crab per shrine +1 per extra pirate led by one Tidebreaker,
+then a crab per shrine plus 1-3 Tidebreakers. That is 4-10 units per wave and
+14-24 for the stage, one wave in the field at a time with a 6s gap, extras dealt
+round robin from a cursor that carries across unit types, and nothing is ever
+refilled. skyStageCleared() is the single guarded question, asked while the
+stage is active: both bosses gone, the last wave started, no future wave left
+and no living or queued ground rank. Each of those is checked independently, so
+a mis-set wave index alone cannot pass. Boarding, a countdown, a gap, a queued
+rank or an empty enemy map never wins.
+server/sky-finale.js owns that lifecycle and the Game is its adapter. The stage
+starts in `boarding`: any online, living, un-knocked pirate holding any valid
+cannon (including one already mounted) latches a one-way SKY_COUNTDOWN, after
+which the bosses appear on their lanes, wave one forms and bombardment begins.
+Bosses that have not spawned yet still count as remaining, so an empty live
+array during boarding cannot read as a cleared sky, and finale.remaining is
+every skycrab and attacker the stage still owes (queued ranks and unstarted
+waves included) rather than only the enemies standing on the island. Every wave,
+the first one included, waits on one deadline — its authored gap, or one second
+after a blocked attempt — so nothing retries per tick; a placement that is
+missing, empty or short of the planned roster is a failed attempt rather than a
+smaller wave, and the count of placed waves never advances past work that never
+spawned. Practice flying
+targets are hidden and inert for the whole stage and return with the next
+voyage's reset; bossId stays null because the two skycrabs carry their own ids.
+A bombardment picks the eligible ground pirate nearest the dais (ties by id) and
+falls on a fixed ring around the lighthouse when nobody is downstairs, which is
+never a failure state. A defeated skycrab pays its pearls and kill credit once,
+cancels its own outstanding shells, and lingers SKY_BOSS_DOWN_LINGER before
+leaving the public array.
+A deck gun shoots the skycrabs with exactly the checks it already used on the
+practice flyers: online, alive, mounted in a station it really occupies, still
+standing at that station, in voyage or finale, off cooldown, and then a ray from
+gunMuzzle along the gunner's OWN clamped yaw/pitch against the nearest sphere
+surface inside GUN_RANGE with world line of sight. shared/airship.js
+raySphereSurface(from, direction, target) is that one ray/sphere test, shared so
+a client reticle can agree with the server; nothing aims for the player, so a
+barrel pointed away misses. While the sky stage owns the deck the pool is
+livingSkyBosses(game) and never the practice flyers, so no practice respawn or
+reward can leak into the boss fight; outside the stage the eight flyers behave
+exactly as before. The shot event is published first with its true hitId and
+damage, then a sky hit is routed into damageSkyBoss(), which applies the damage,
+emits the hit, and on a kill pays pearls and credit once, cancels that boss's
+shells and settles the stage. Handheld guns and the cutlass never reach the sky.
+completeIsland() is the only encounter route to victory: it
+checks the stage's identity first (the running stage must really be the table's
+last stage AND the airship stage AND still own its lifecycle block, so a forced
+stage number, an out-of-range index or a missing block is a broken state rather
+than a finished island), never consults the mutable remaining field, re-asks the
+shared guard while the stage is still active, latches `cleared`, records a small
+{island,round,seed,stage,elapsed,pearls,crew} result and calls
+beginIslandDeparture() — the documented stub that today only announces "Island
+secured!" (no crew is moved or boarded yet) and calls win(). Future travel
+replaces that stub BEFORE terminal victory; it adds no network action and loads
+no world now. win() itself, by any route, tears the stage down: no boss, shell,
+queued rank, stage enemy, hidden practice flyer or public sky block outlives the
+fight, while the completion record stays until the round resets. Restart and
+abandoned-round resets clear the same state.
 Defeat boss -> victory tableau + all-player results -> host New voyage resets
 to lobby for replay. Persist aggregate victories and best pearls.
 
@@ -279,8 +422,18 @@ Prevent multiple render loops/listeners after replay/reconnect. local player
 movement predicted, reconcile network corrections without constant stutter.
 Pointer lock on click; normal keyboard/mouse and right drag fallback supported
 on LAN HTTP, Escape shows pause/help menu and releases input. Left click fire,
-mouse look, WASD/arrows move, Shift sprint, Space jump/drop, F cutlass, E
-interact/revive, Q heal, R reload, 1/2 weapons, G ping, M large map, Esc menu.
+mouse look, WASD/arrows move, Shift sprint, Space jump on land and leave a
+deck gun (never leaves the ship), F cutlass, E interact/revive/jump gate,
+Q heal, R reload, 1/2 weapons, G ping, M large map, Esc menu.
+Jump gates are persistent deck signage, not a tutorial notice: a dark pad with
+gold chevrons, a gold-framed board reading JUMP in block capitals, and a cyan
+cone pointing outward, plus painted approach lanes routing past the fore-mast.
+They read without colour, glow or motion. While aboard, the objective marker
+and quest panel name the nearest gate and its distance; while gliding they name
+a landing area the glider can still reach (the lighthouse in the finale). The
+ship banner offers its button only when the server would accept the press, and
+it sends the same interact action E does. Clear queued controls and send one
+neutral packet on a confirmed departure acknowledgement, exactly as on boarding.
 Input does not leak through name field or buttons. Reset keys on blur/lost lock.
 For browser automation `?test=1` permits gameplay keyboard without pointer
 lock; this is only an input accessibility fallback, no simulation shortcuts.

@@ -1,12 +1,14 @@
-import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt } from '../shared/world.js';
+import { COLORS, REGIONS, SHRINES, CHESTS, BEACON, SPAWN, WORLD_RADIUS, SHIP_OBSTACLES, heightAt, regionAt, shipAt } from '../shared/world.js';
 import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, pointOfInterestAt } from '../shared/exploration.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES } from '../shared/weapons.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_COLOR } from '../shared/side-events.js';
 import { FINALE_STAGES } from '../shared/finale.js';
 import { ENEMY_TYPES } from '../shared/enemies.js';
-import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_RANGE } from '../shared/airship.js';
+import { AIRSHIP_RETURNS, RETURN_RANGE, SHIP_GUNS, SHIP_JUMP_POINTS, GUN_INTERACTION_RANGE, GUN_COOLDOWN, GUN_RANGE, jumpPointFor } from '../shared/airship.js';
 import { canReturnAtShrine } from '../shared/shrines.js';
+import { SKY_BOSSES, SKY_GROUND_WAVES } from '../shared/sky-finale.js';
+import { skyState } from './sky-finale.js';
 import { createLootReveal } from './loot-reveal.js';
 
 const $ = (id) => document.getElementById(id);
@@ -68,12 +70,70 @@ export function finaleAnnouncement(event) {
   return { kicker: 'Tideglass Lighthouse', title: `Stage ${event.stage}`, subtitle, final: event.stage >= stages };
 }
 
+// Each ground wave of the siege gets its own call-out. It never repeats the
+// stage banner, and it is driven by the event so a late joiner sees no stale one.
+export function skyWaveAnnouncement(event) {
+  if (!event || event.kind !== 'sky-wave' || !Number.isInteger(event.wave) || event.wave < 1) return null;
+  const plan = SKY_GROUND_WAVES[event.wave - 1];
+  if (!plan) return null;
+  const waves = Number.isInteger(event.waves) ? event.waves : SKY_GROUND_WAVES.length;
+  const spawns = Array.isArray(event.spawns) ? event.spawns : [];
+  const elites = spawns.filter((spawn) => spawn?.type === 'tidebreaker').length;
+  const final = event.wave >= waves;
+  return { kicker: plan.name, title: final ? 'Last wave' : `Wave ${event.wave} of ${waves}`,
+    subtitle: elites > 0 ? `${elites} Tidebreaker${elites === 1 ? '' : 's'} lead${elites === 1 ? 's' : ''} the march on the dais!` : plan.notice,
+    final };
+}
+
+export function jumpGateLabel(state) {
+  return state?.phase === 'finale' ? 'Glide to lighthouse' : 'Jump & glide to island';
+}
+
+// Objectives that already carry a world height — a gate or a gun on the moving
+// deck, a skycrab on its lane — mark that exact point. Everything standing on the
+// island keeps its terrain-relative offset, including the Tempest, whose y is a
+// feet position. A new kind opts in here explicitly.
+const ABSOLUTE_MARKER_KINDS = new Set(['jump-gate', 'cannon', 'sky-boss']);
+export function objectiveMarkerHeight(objective) {
+  if (ABSOLUTE_MARKER_KINDS.has(objective?.kind) && Number.isFinite(objective.y)) return objective.y;
+  return heightAt(objective.x, objective.z) + (objective.kind === 'boss' ? 4 : 9);
+}
+
+// Guidance leads with the gate the opening view is already facing — the forward
+// one, on the bow — rather than turning a new pirate around toward a marginally
+// closer gate behind them. Once somebody is beside another gate, the marker
+// follows the one at hand instead of sending them back across the deck.
+const GATE_AT_HAND = 5.5;
+export function aboardGate(player) {
+  const gates = SHIP_JUMP_POINTS.map((point) => ({ ...point, distance: Math.hypot(player.deckX - point.x, player.deckZ - point.z) }));
+  return gates.filter((gate) => gate.distance <= GATE_AT_HAND).sort((a, b) => a.distance - b.distance)[0]
+    || gates.reduce((forward, gate) => (gate.z < forward.z ? gate : forward));
+}
+
+// The deck banner already presents the one action E performs, so a second
+// floating E prompt saying the same thing only crowds it. A nearby gun nobody
+// has mounted keeps its own prompt, and ground prompts are untouched.
+export function deckPromptMirrored(banner, interact) {
+  return !!banner?.button && ['jump-gate', 'gun'].includes(interact?.kind);
+}
+
+// The one aboard eligibility guard. The deck banner, its button and the E prompt
+// must never disagree about whether an interaction is possible.
+export function canActAboard(state, player) {
+  return !!player && player.mode === 'aboard' && ['voyage', 'finale'].includes(state?.phase)
+    && player.online !== false && player.hp > 0 && !(player.knockedUntil > state.elapsed);
+}
+
 export function findInteractable(state, player) {
   if (!player || player.knockedUntil > state.elapsed || state.phase === 'victory') return null;
   if (player.mode === 'aboard') {
-    if (!['voyage', 'finale'].includes(state.phase) || player.online === false || !(player.hp > 0)) return null;
+    if (!canActAboard(state, player)) return null;
     const mounted = SHIP_GUNS.find((gun) => gun.id === player.gunId);
     if (mounted) return { ...mounted, kind: 'gun', label: 'Leave gun' };
+    // Gates mirror the server dispatcher: same deck-local range and clear route,
+    // and their zones never reach a gun, so one E is never ambiguous.
+    const gate = jumpPointFor({ x: player.deckX, z: player.deckZ }, SHIP_OBSTACLES);
+    if (gate) return { ...gate, kind: 'jump-gate', color: '#ffd16c', label: jumpGateLabel(state) };
     const nearby = SHIP_GUNS.map((gun) => ({ ...gun, distance: Math.hypot(player.deckX - gun.x, player.deckZ - gun.z) }))
       .filter((gun) => gun.distance <= GUN_INTERACTION_RANGE).sort((a, b) => a.distance - b.distance);
     for (const gun of nearby) {
@@ -129,11 +189,16 @@ export function findInteractable(state, player) {
   return options.sort((a, b) => a.distance - b.distance)[0] || null;
 }
 
+// The deck banner never counts anybody down and never advertises Space: staying
+// aboard is safe forever. Its button is the same interaction the E prompt offers,
+// so it appears only where the server would accept the press, and the whole
+// banner disappears rather than holding stale text outside an active voyage.
 export function airshipBanner(state, player) {
-  if (player?.mode !== 'aboard') return null;
-  if (player.gunId) return { text: 'Mouse aim · Hold click fire · E / Space leave gun', button: 'Leave gun' };
-  if (player.shipReturned) return { text: 'Welcome aboard! E man a deck gun · Space jump & glide', button: 'Jump & glide' };
-  return { text: `${Math.max(0, Math.ceil(SHIP_DURATION - state.elapsed))}s until the crew drops. E man a deck gun or Space glide.`, button: 'Jump & glide' };
+  if (!canActAboard(state, player)) return null;
+  const action = findInteractable(state, player);
+  if (player.gunId && action?.kind === 'gun') return { text: 'Mouse aim · Hold click fire · E or Space leaves the gun', button: 'Leave gun' };
+  if (action?.kind === 'jump-gate') return { text: `${action.name}: press E to open your glider and drop to the island.`, button: jumpGateLabel(state) };
+  return { text: 'Walk onto a JUMP gate — the bow ramp or the starboard rail — then press E to glide down. E also mans a deck gun.', button: null };
 }
 
 export function cannonPresentation(state, player, { elapsed = state.elapsed, connected = false, controlsActive = false, menuOpen = false } = {}) {
@@ -163,10 +228,163 @@ export function flyingTargetAtRay(state, origin, direction) {
   return target;
 }
 
+// Steering a glider carries roughly 8 m across for every 6 m of descent, so a
+// late departure from the parked ship is pointed at ground it can actually
+// reach instead of the distant opening beach.
+export function glideLanding(state, player) {
+  const reach = 12 + Math.max(0, player.y - heightAt(player.x, player.z)) * 1.25;
+  const lighthouse = { ...BEACON, name: 'Tideglass Lighthouse', kind: 'landing' };
+  const options = REGIONS.map((region) => ({ id: region.id, x: region.x, z: region.z, name: region.name,
+    kind: 'landing', distance: distance(player, region) })).sort((a, b) => a.distance - b.distance);
+  // In the finale both gates aim at the open landing beside the haven lift, not
+  // the beacon itself: a straight line from the bow launch to the dais runs into
+  // the lighthouse tower, and this approach clears it.
+  if (state.phase === 'finale') return { ...LIGHTHOUSE_LANDING };
+  const reachable = options.find((option) => option.distance <= reach) || options[0];
+  return reachable.id === 'haven' ? lighthouse : reachable;
+}
+
+// --- Skycrab siege -----------------------------------------------------------
+//
+// Every read of the fourth stage funnels through skyState(), so an earlier
+// stage, a victory tableau and a restart all fall back to the existing finale
+// HUD untouched. Nothing below infers state from an event.
+const HAVEN_LIFT = AIRSHIP_RETURNS.find((lift) => lift.id === 'airship-return-haven');
+const LIGHTHOUSE_LANDING = { id: 'lighthouse-landing', x: HAVEN_LIFT.x, z: HAVEN_LIFT.z,
+  name: 'Lighthouse landing', kind: 'landing' };
+const gunSide = (gunId) => {
+  const gun = SHIP_GUNS.find((entry) => entry.id === gunId);
+  return gun ? (gun.x < 0 ? 'port' : 'starboard') : null;
+};
+const skyBossSide = (id) => SKY_BOSSES.find((boss) => boss.id === id)?.side || null;
+
+// The bounded HUD model for the siege: two boss rows in authored order, the
+// wave counter and the ground work that is still coming. Counts include queued
+// ranks and unstarted waves, so an inter-wave gap never reads as cleared.
+export function skyHud(state, player) {
+  const sky = skyState(state);
+  if (!sky) return null;
+  const setup = sky.status === 'boarding' || sky.status === 'countdown';
+  const cleared = sky.status === 'cleared';
+  const bosses = SKY_BOSSES.map((descriptor) => {
+    const live = sky.bosses.find((boss) => boss.id === descriptor.id);
+    const planned = setup && !live;
+    const down = !planned && (cleared || !live || live.state === 'down' || !(live.hp > 0));
+    const maxHp = live?.maxHp > 0 ? live.maxHp : 0;
+    return { id: descriptor.id, name: descriptor.name, side: descriptor.side,
+      hp: live?.hp ?? 0, maxHp, percent: maxHp ? clamp(Math.ceil((live.hp / maxHp) * 100), 0, 100) : 0,
+      state: planned ? 'planned' : down ? 'down' : live.state,
+      down, planned, winding: !down && live?.state === 'winding' };
+  });
+  const airLeft = setup ? bosses.length : bosses.filter((boss) => !boss.down).length;
+  // Active/pending are attackers; future is a count of waves, not more attackers.
+  const groundLeft = sky.groundActive + sky.groundPending;
+  const hasGroundWork = !cleared && (groundLeft > 0 || sky.groundFuture > 0);
+  const countdown = sky.status === 'countdown' ? Math.max(0, Math.ceil(sky.countdownEndsAt - state.elapsed)) : 0;
+  let phase = `Wave ${Math.max(1, sky.wave)} of ${sky.waves}`;
+  if (sky.status === 'boarding') phase = 'Waiting for a gunner';
+  else if (sky.status === 'countdown') phase = `Skycrabs dive in ${countdown}s`;
+  else if (cleared) phase = 'Island secured';
+  else if (!hasGroundWork) phase = 'Ground clear';
+  const waiting = sky.status === 'active' && !groundLeft && sky.groundFuture > 0;
+  const future = sky.groundFuture > 0 ? ` · ${sky.groundFuture} wave${sky.groundFuture === 1 ? '' : 's'} to come` : '';
+  return { status: sky.status, countdown, bosses, airLeft, groundLeft, hasGroundWork, waiting, phase,
+    wave: sky.wave, waves: sky.waves, groundActive: sky.groundActive,
+    groundPending: sky.groundPending, groundFuture: sky.groundFuture,
+    ground: cleared ? 'All three waves cleared.' : setup ? 'Three finite waves march once the crabs dive.'
+      : waiting ? `Wave ${Math.min(sky.waves, sky.wave + 1)} of ${sky.waves} is forming up${future}.`
+      : groundLeft ? `${groundLeft} attacker${groundLeft === 1 ? '' : 's'} active or incoming${future}`
+      : 'All three waves cleared.' };
+}
+
+// What a gunner needs and the old practice HUD never told them: which crab is on
+// their side, how far round it is, and — when their side is finished — that the
+// fight is elsewhere. It never aims for them: the marker and the words point,
+// the player still swings the gun.
+export function skyGunnerGuidance(state, player) {
+  const hud = skyHud(state, player);
+  if (!hud || !player?.gunId) return null;
+  const side = gunSide(player.gunId);
+  if (!side) return null;
+  const mine = hud.bosses.find((boss) => boss.side === side);
+  const other = hud.bosses.find((boss) => boss.side !== side);
+  if (hud.status === 'boarding' || hud.status === 'countdown') {
+    return { kind: 'ready', boss: null,
+      title: 'Hold this gun — the skycrabs are coming',
+      detail: hud.status === 'countdown' ? `Two skycrabs dive in ${hud.countdown}s. Swing the gun and watch your broadside.`
+        : 'Hold this station. A ready gunner starts the shared countdown automatically.' };
+  }
+  if (mine && !mine.down) {
+    return { kind: 'boss', boss: mine, title: `Shoot ${mine.name}`,
+      detail: `${mine.name} flies the ${mine.side} lane · ${mine.percent}% left. Swing to the marker; it loops astern and back.` };
+  }
+  if (other && !other.down) {
+    return { kind: 'switch', boss: other, title: `Switch sides — ${other.name} is still up`,
+      detail: `Your lane is clear. Press E to leave this gun, then take a ${other.side} gun for ${other.name} (${other.percent}%).` };
+  }
+  if (hud.hasGroundWork) {
+    return { kind: 'descend', boss: null, title: 'Sky clear — get down to the lighthouse',
+      detail: `Press E to leave the gun, walk to a jump gate and glide down. ${hud.ground}` };
+  }
+  return { kind: 'clear', boss: null, title: 'Island secured', detail: 'Both skycrabs are down and the dais is clear.' };
+}
+
+// Stage-four objective priority, ahead of the generic finale and strand
+// branches. A physical waypoint always comes first: a gun, a gate, the lift or
+// the dais — never a distant beach.
+export function skyObjective(state, player) {
+  const hud = skyHud(state, player);
+  if (!hud || !player || hud.status === 'cleared') return null;
+  const setup = hud.status === 'boarding' || hud.status === 'countdown';
+  if (player.mode === 'aboard') {
+    const ship = shipAt(state.elapsed);
+    const gateMarker = () => {
+      const gate = aboardGate(player);
+      return { id: gate.id, name: gate.name, kind: 'jump-gate', x: ship.x + gate.x, y: ship.y + 2.6, z: ship.z + gate.z };
+    };
+    if (player.gunId) {
+      const gunner = skyGunnerGuidance(state, player);
+      if (gunner?.boss) {
+        const live = skyState(state).bosses.find((boss) => boss.id === gunner.boss.id);
+        return live ? { id: live.id, name: live.name, kind: 'sky-boss', x: live.x, y: live.y, z: live.z } : null;
+      }
+      // A ready gunner should hold position, not follow an exit marker.
+      return gunner?.kind === 'descend' ? gateMarker() : null;
+    }
+    if (setup || hud.airLeft) {
+      const sides = new Set(hud.bosses.filter((boss) => setup || !boss.down).map((boss) => boss.side));
+      const guns = SHIP_GUNS.filter((gun) => sides.has(gunSide(gun.id)))
+        .map((gun) => ({ gun, occupied: !!state.shipGuns?.some((station) => station.id === gun.id
+          && station.occupantId && station.occupantId !== player.id),
+        distance: Math.hypot(player.deckX - gun.x, player.deckZ - gun.z) }))
+        .sort((a, b) => Number(a.occupied) - Number(b.occupied) || a.distance - b.distance);
+      const choice = guns[0];
+      if (choice) {
+        const { gun, occupied } = choice;
+        return { id: gun.id, name: `${gun.name}${occupied ? ' (occupied)' : ''}`, kind: 'cannon', occupied,
+          x: ship.x + gun.x, y: ship.y + 1.85, z: ship.z + gun.z };
+      }
+    }
+    return hud.hasGroundWork ? gateMarker() : null;
+  }
+  if (player.mode === 'gliding') return { ...LIGHTHOUSE_LANDING };
+  // On the ground: the dais while a wave is out, the haven lift while the fight
+  // is only in the air or still forming up.
+  if (setup || (!hud.hasGroundWork && hud.airLeft)) return { ...HAVEN_LIFT, name: 'Lighthouse airship lift', kind: 'lift' };
+  return { ...BEACON, name: 'Tideglass Lighthouse', kind: 'beacon' };
+}
+
 export function nearestObjective(state, player) {
   if (!player) return null;
+  if (skyState(state)) return skyObjective(state, player);
   if (player.gunId) return null;
-  if (player.mode === 'aboard' || player.mode === 'gliding') return { ...SPAWN, id: 'strand', name: 'Sunwake Strand', kind: 'landing' };
+  if (player.mode === 'aboard') {
+    // A physical gate comes first aboard: the marker is a place to walk to, not
+    // a distant beach the pirate cannot steer for yet.
+    const ship = shipAt(state.elapsed), gate = aboardGate(player);
+    return { id: gate.id, name: gate.name, kind: 'jump-gate', x: ship.x + gate.x, y: ship.y + 2.6, z: ship.z + gate.z };
+  }
+  if (player.mode === 'gliding') return glideLanding(state, player);
   if (state.phase === 'finale') {
     const boss = state.enemies.find((enemy) => enemy.id === state.bossId);
     return boss ? { ...boss, name: 'Tempest Crab', kind: 'boss' } : { ...BEACON, name: 'Tideglass Lighthouse', kind: 'beacon' };
@@ -482,7 +700,7 @@ export function createUI(callbacks = {}) {
   button('launch-button', () => callbacks.onAction?.('launch'));
   button('ready-button', () => callbacks.onAction?.('ready'));
   button('restart-button', () => callbacks.onAction?.('restart'));
-  button('drop-button', () => callbacks.onDrop?.());
+  button('deck-action-button', () => callbacks.onDeckAction?.());
   for (const weapon of WEAPON_ORDER) button(`weapon-${weapon}`, () => callbacks.onAction?.(weapon));
   button('heal-button', () => callbacks.onAction?.('heal'));
   button('menu-button', () => api.setPaused(!paused));
@@ -501,6 +719,34 @@ export function createUI(callbacks = {}) {
   button('boot-retry', () => location.reload());
   // The logo is an explicit return to the welcome screen, without a page unload.
   listen(document.querySelector('.wordmark'), 'click', (event) => { event.preventDefault(); if (joined) api.setPaused(true); });
+
+  // Two boss rows, built once from the authored roster and only updated after
+  // that, so the siege HUD never grows with events or snapshots.
+  const skyRows = new Map();
+  function renderSkyProgress(sky) {
+    text(refs['sky-phase'], sky.phase);
+    for (const boss of sky.bosses) {
+      let row = skyRows.get(boss.id);
+      if (!row) {
+        const item = document.createElement('li');
+        const name = document.createElement('span'); name.className = 'sky-boss-name';
+        const percent = document.createElement('strong'); percent.className = 'sky-boss-percent';
+        const meter = document.createElement('progress'); meter.max = 1; meter.value = 1;
+        const note = document.createElement('span'); note.className = 'sky-boss-note';
+        item.append(name, percent, meter, note); refs['sky-bosses'].append(item);
+        row = { item, name, percent, meter, note }; skyRows.set(boss.id, row);
+      }
+      text(row.name, boss.name);
+      text(row.percent, boss.planned ? '—' : boss.down ? 'Down' : `${boss.percent}%`);
+      row.meter.value = boss.planned ? 1 : boss.maxHp > 0 && !boss.down ? Math.max(0, boss.hp / boss.maxHp) : 0;
+      row.meter.setAttribute('aria-label', `${boss.name}: ${boss.planned ? 'approaching' : boss.down ? 'defeated' : `${boss.percent}% health`}`);
+      text(row.note, boss.planned ? `${boss.side} lane · not yet diving`
+        : boss.down ? 'Defeated' : boss.winding ? `${boss.side} lane · winding up a shell` : `${boss.side} lane`);
+      row.item.classList.toggle('down', boss.down || boss.planned);
+      row.item.classList.toggle('winding', !!boss.winding);
+    }
+    text(refs['sky-ground'], sky.ground);
+  }
 
   function roster(state, localPlayer) {
     const signature = `${state.hostId}|${state.players.map((player) => `${player.id}:${player.name}:${player.color}:${player.online}:${player.ready}`).join('|')}`;
@@ -662,7 +908,7 @@ export function createUI(callbacks = {}) {
       refs.reticle.classList.toggle('cannon', !!player?.gunId);
       refs.reticle.classList.toggle('reloading', presentation.reloading);
       show(refs['look-hint'], presentation.active && (!view.locked || player?.weapon === 'longshot'));
-      text(refs['look-hint'], player?.gunId ? 'Hold right mouse to aim · Hold click fire · E / Space leave gun'
+      text(refs['look-hint'], player?.gunId ? 'Hold right mouse to aim · Hold click fire · E or Space leaves the gun'
         : presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
         : player?.weapon === 'longshot' ? 'Hold right mouse to scope Longshot · R reload · Esc menu'
           : 'Click to aim · Hold right mouse to look · R reload · Esc menu');
@@ -710,12 +956,40 @@ export function createUI(callbacks = {}) {
       let title = 'Find the three compass shards';
       let detail = objective ? `${objective.name} · ${objectiveDistance} m away` : 'Explore the island with your crew.';
       let activeShrine = null;
-      if (player.mode === 'aboard') {
-        title = player.gunId ? 'Try the deck cannon' : player.shipReturned ? 'The sky is yours again' : 'Take a gun or jump & glide';
+      const sky = skyHud(state, player);
+      const gunner = skyGunnerGuidance(state, player);
+      if (gunner) {
+        // The old practice line was the only thing a gunner ever read. During the
+        // siege they get their own crab, its health and where the fight moved to.
+        title = gunner.title;
+        detail = objective && gunner.kind === 'boss' ? `${gunner.detail} · ${objectiveDistance} m` : gunner.detail;
+      } else if (sky && player.mode === 'aboard') {
+        const ready = sky.status === 'boarding' || sky.status === 'countdown';
+        title = objective?.occupied ? 'The cannons are crewed' : ready ? 'Man a deck cannon'
+          : sky.airLeft ? 'Gunners to the cannons' : sky.hasGroundWork ? 'Get down to the lighthouse' : 'Island secured';
+        detail = objective?.occupied ? (sky.hasGroundWork
+          ? 'Wait for a suitable gun, or use a jump gate to help on the ground.'
+          : 'Your crewmates are on the remaining guns. Stay aboard while they finish the skycrabs.')
+          : ready ? `E at a deck gun starts the siege${sky.countdown ? ` · diving in ${sky.countdown}s` : ''} · ${objective?.name || 'a gun'} ${objectiveDistance} m away`
+          : sky.airLeft ? `${objective?.name || 'A deck gun'} · ${objectiveDistance} m away · only the cannons reach the skycrabs.`
+          : sky.hasGroundWork ? `Sky clear. ${objective?.name || 'A jump gate'} · ${objectiveDistance} m away · E to glide down and hold the dais.`
+          : 'Both skycrabs are down and every wave is cleared.';
+      } else if (sky && player.mode === 'ground') {
+        title = sky.hasGroundWork ? 'Hold the lighthouse' : sky.airLeft ? 'Take the lift to a cannon' : 'Island secured';
+        detail = sky.hasGroundWork ? `${sky.ground} · watch for the ringed shells.`
+          : sky.airLeft ? `${objective?.name || 'The haven lift'} · ${objectiveDistance} m away · the skycrabs only fall to cannon fire.`
+          : 'Both skycrabs are down and every wave is cleared.';
+      } else if (player.mode === 'aboard') {
+        // Aboard guidance always names a physical gate and how far it is, so it
+        // survives a missed toast and reads without colour or motion.
+        title = player.gunId ? 'Try the deck cannon' : 'Walk to a jump gate, then press E';
         detail = player.gunId ? 'Aim at the winged flying crabs. Two hits, then a fresh target returns.'
-          : 'E at a deck gun to practice. Space opens your glider.';
+          : `${objective?.name || 'A jump gate'} · ${objectiveDistance} m away · E opens your glider. The deck is safe: stay as long as you like.`;
       } else if (player.mode === 'gliding') {
-        title = 'Glide onto the island'; detail = 'Steer with WASD. Sunwake Strand is a friendly landing spot.';
+        title = 'Glide onto the island';
+        // A long return from the bow gate needs the whole glide: say so rather
+        // than letting a pirate drift and land short.
+        detail = `Steer with WASD toward ${objective?.name || 'open ground'} · ${objectiveDistance} m away.${objectiveDistance > 70 ? ' Hold Shift the whole way.' : ''}`;
       } else if (state.phase === 'finale') {
         const stage = FINALE_STAGES[(state.finale?.stage || 0) - 1];
         const boss = state.enemies.find((enemy) => enemy.id === state.bossId && enemy.hp > 0);
@@ -745,6 +1019,8 @@ export function createUI(callbacks = {}) {
         text(refs['shrine-label'], 'Defenders remaining');
         text(refs['shrine-remaining'], activeShrine.remaining);
       }
+      show(refs['sky-progress'], !!sky);
+      if (sky) renderSkyProgress(sky);
       if (sideEvent) {
         const active = sideEvent.status === 'active';
         text(refs['side-event-name'], `${sideEvent.name}${sideEvent.distance > 32 ? ` · ${Math.round(sideEvent.distance)} m` : ''}`);
@@ -799,11 +1075,15 @@ export function createUI(callbacks = {}) {
       text(refs['heal-label'], heal ? `Heal ready in ${heal}s` : 'Healing pulse'); refs['heal-button'].classList.toggle('ready', !heal && !mounted); refs['heal-button'].disabled = !!heal || downed || mounted;
       show(refs['knocked-banner'], downed);
       if (downed) text(refs['knocked-text'], `A crewmate can help you up. Otherwise, a safe rescue arrives in ${Math.ceil(player.knockedUntil - state.elapsed)}s.`);
-      show(refs['ship-banner'], player.mode === 'aboard');
       const banner = airshipBanner(state, player);
-      if (banner) { text(refs['ship-banner-text'], banner.text); text(refs['drop-button'], `Space · ${banner.button}`); }
+      // The deck button is the same E interaction, not a synthetic key: it is
+      // hidden unless the server would actually accept the press, and the banner
+      // itself hides rather than keeping stale text when the deck is not usable.
+      show(refs['ship-banner'], !!banner);
+      show(refs['deck-action-button'], !!banner?.button);
+      if (banner) { text(refs['ship-banner-text'], banner.text); if (banner.button) text(refs['deck-action-button'], `E · ${banner.button}`); }
       const interact = findInteractable(state, player);
-      show(refs['interact-hint'], !!interact && !downed);
+      show(refs['interact-hint'], !!interact && !downed && !deckPromptMirrored(banner, interact));
       if (interact) {
         text(refs['interact-hint'].lastElementChild, interact.label); refs['interact-hint'].style.borderColor = interact.color || '#ffd16c';
         refs['interact-hint'].classList.toggle('occupied', !!interact.disabled);
@@ -813,7 +1093,7 @@ export function createUI(callbacks = {}) {
       show(refs['boss-health'], state.phase === 'finale' && !!boss);
       if (boss) { refs['boss-meter'].value = boss.hp / boss.maxHp; text(refs['boss-percent'], `${Math.ceil(boss.hp / boss.maxHp * 100)}%`); }
       show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && (player.mode === 'ground' || mounted));
-      if (target) { text(refs['target-health'].firstElementChild, target.type === 'flying-crab' ? 'Flying crab' : ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
+      if (target) { text(refs['target-health'].firstElementChild, target.name || (target.type === 'flying-crab' ? 'Flying crab' : ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name)); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
       const bearing = ((-view.yaw * 180 / Math.PI) % 360 + 360) % 360;
       for (const point of compassPoints) {
         const delta = ((point.degrees - bearing + 540) % 360) - 180;
@@ -822,7 +1102,7 @@ export function createUI(callbacks = {}) {
       show(refs['objective-marker'], !!objective && !downed && !paused && !mapOpen);
       if (objective) {
         const bounds = refs.world.getBoundingClientRect();
-        const position = world.project({ x: objective.x, y: heightAt(objective.x, objective.z) + (objective.kind === 'boss' ? 4 : 9), z: objective.z });
+        const position = world.project({ x: objective.x, y: objectiveMarkerHeight(objective), z: objective.z });
         let x = position.x; let y = position.y;
         let edge = !position.visible || x < 42 || x > bounds.width - 42 || y < 82 || y > bounds.height - 120;
         if (edge) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { SPAWN, BEACON, SHRINES, OBSTACLES, WORLD_RADIUS, SHIP_DURATION, heightAt, regionAt, shipAt, seededRandom } from '../shared/world.js';
-import { SHIP_DECK } from '../shared/airship.js';
+import { SHIP_DECK, SHIP_JUMP_POINTS, jumpLaunchPose } from '../shared/airship.js';
 
 function ground(x = SPAWN.x, z = SPAWN.z) {
   return { ...makePlayerPosition(), x, z, y: heightAt(x, z), mode: 'ground', grounded: true };
@@ -47,7 +47,7 @@ test('movement normalization and yaw use the documented third-person basis', () 
   assert.ok(Math.abs(q.z - SPAWN.z) < 1e-8);
 });
 
-test('lobby deck, voluntary drop, glide landing, and automatic drop are safe', () => {
+test('the deck is a durable safe state: rails clamp, Space stays aboard, and no timer drops the crew', () => {
   const p = makePlayerPosition();
   // Follow the clear aisle past the mast and fore gun before testing the bow rail.
   for (let i = 0; i < 8; i++) movePlayer(p, { right: 1, yaw: 0 }, 0.05, 0);
@@ -55,13 +55,37 @@ test('lobby deck, voluntary drop, glide landing, and automatic drop are safe', (
   for (let i = 0; i < 20; i++) movePlayer(p, { right: 1, yaw: 0 }, 0.05, 0);
   assert.equal(p.deckX, SHIP_DECK.maxX); assert.equal(p.deckZ, SHIP_DECK.minZ);
   assert.equal(p.y, shipAt(0).y);
-  movePlayer(p, { jump: true, yaw: 0 }, 0.05, 1);
-  assert.equal(p.mode, 'gliding');
-  for (let i = 0; i < 250; i++) movePlayer(p, { yaw: 0 }, 0.05, 1 + i * 0.05);
-  assert.equal(p.mode, 'ground'); assert.equal(p.y, heightAt(p.x, p.z));
+  // A fresh Space edge on the open deck, on a rail, at a gate and after any
+  // duration only sets jumpHeld. Departure is a server-validated gate action.
+  for (const [deckX, deckZ] of [[SHIP_DECK.maxX, SHIP_DECK.minZ], [0, 0], [SHIP_JUMP_POINTS[0].x, SHIP_JUMP_POINTS[0].z], [SHIP_JUMP_POINTS[1].x, SHIP_JUMP_POINTS[1].z]]) {
+    for (const elapsed of [1, SHIP_DURATION - 0.05, SHIP_DURATION, SHIP_DURATION + 90]) {
+      Object.assign(p, { deckX, deckZ, jumpHeld: false });
+      movePlayer(p, { jump: false, yaw: 0 }, 0.05, elapsed);
+      movePlayer(p, { jump: true, yaw: 0 }, 0.05, elapsed);
+      assert.equal(p.mode, 'aboard', `Space at ${deckX},${deckZ} after ${elapsed}s stays aboard`);
+      assert.equal(p.deckX, deckX); assert.equal(p.deckZ, deckZ);
+    }
+  }
   const q = makePlayerPosition();
-  movePlayer(q, {}, 0.05, SHIP_DURATION);
-  assert.equal(q.mode, 'gliding'); assert.equal(q.x, SPAWN.x); assert.equal(q.z, SPAWN.z);
+  for (let i = 0; i < 40; i++) movePlayer(q, { jump: i % 2 === 0 }, 0.05, SHIP_DURATION + i * 0.05);
+  assert.equal(q.mode, 'aboard'); assert.equal(q.deckX, 0); assert.equal(q.deckZ, 0);
+  assert.equal(q.y, shipAt(SHIP_DURATION + 1.95).y);
+});
+
+test('a gate launch offset glides down to safe island ground at every departure time', () => {
+  for (const gate of SHIP_JUMP_POINTS) for (const elapsed of [0, 7, 14, 21, SHIP_DURATION, SHIP_DURATION + 120]) {
+    const ship = shipAt(elapsed);
+    const p = { ...makePlayerPosition(), ...jumpLaunchPose(gate, ship), deckX: gate.x, deckZ: gate.z,
+      mode: 'gliding', grounded: false, vy: -6 };
+    assert.ok(Math.hypot(p.x, p.z) < WORLD_RADIUS - 6, `${gate.id} launches over the island at ${elapsed}s`);
+    let steps = 0;
+    while (p.mode !== 'ground' && steps++ < 400) movePlayer(p, { yaw: 0 }, 0.05, elapsed + steps * 0.05);
+    assert.ok(steps < 400, `${gate.id} lands at ${elapsed}s`);
+    assert.equal(p.y, heightAt(p.x, p.z));
+    // A landing that fell into the sea would have been teleported back to spawn.
+    assert.ok(heightAt(p.x, p.z) > 1, `${gate.id} lands on dry ground at ${elapsed}s`);
+    assert.ok(Math.hypot(p.x - SPAWN.x, p.z - SPAWN.z) > 1 || elapsed < 1);
+  }
 });
 
 test('jump is edge triggered, obstacles collide, and water returns pirates safely', () => {

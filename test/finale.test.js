@@ -11,6 +11,7 @@ import { MAX_PLAYERS, BEACON, SHRINES, COLORS, heightAt } from '../shared/world.
 const stageNumber = id => FINALE_STAGES.findIndex(stage => stage.id === id) + 1;
 const CRABS = stageNumber('crabs'), ELITES = stageNumber('elites');
 const BOSS = FINALE_STAGES.findIndex(stage => stage.kind === 'boss') + 1;
+const SKY = FINALE_STAGES.findIndex(stage => stage.kind === 'airship') + 1;
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const ticks = (game, seconds) => { for (let i = 0; i < Math.ceil(seconds / 0.05); i++) game.tick(0.05); };
@@ -41,8 +42,10 @@ function clearStage(game, p) {
 }
 
 test('every finale stage is a named roster that scales with the crew that lit the beacon', () => {
-  assert.equal(FINALE_STAGES.at(-1).kind, 'boss');
-  assert.ok(CRABS >= 1 && ELITES > CRABS && BOSS === FINALE_STAGES.length);
+  // The Tempest is no longer last: the skycrab siege is appended after it and
+  // brings a typed airship descriptor instead of a ground roster.
+  assert.equal(FINALE_STAGES.at(-1).kind, 'airship');
+  assert.ok(CRABS >= 1 && ELITES > CRABS && BOSS === FINALE_STAGES.length - 1 && SKY === FINALE_STAGES.length);
   for (const stage of FINALE_STAGES) for (const key of ['id', 'kind', 'name', 'unit', 'objective', 'banner', 'notice']) {
     assert.equal(typeof stage[key], 'string', `${stage.id} describes its ${key}`);
   }
@@ -61,6 +64,10 @@ test('every finale stage is a named roster that scales with the crew that lit th
     assert.ok(Math.max(...elites) - Math.min(...elites) <= 1, 'Tidebreakers are dealt round-robin across the shrines');
   }
   assert.deepEqual(finaleStageRoster(BOSS, 1), { tempest: 1, groups: [] });
+  for (let count = 1; count <= MAX_PLAYERS; count++) {
+    assert.deepEqual(finaleStageRoster(SKY, count), { kind: 'airship', bossCount: 2, groundWaveCount: 3 },
+      'the airship stage is a typed descriptor, never an empty ground roster');
+  }
   for (const args of [[0, 1], [FINALE_STAGES.length + 1, 1], [1.5, 1], [1, 0], [1, MAX_PLAYERS + 1], [1, NaN]]) {
     assert.equal(finaleStageRoster(...args), null);
   }
@@ -146,7 +153,7 @@ test('lighting the beacon opens the first stage with a public snapshot, one even
   assert.ok(game.snapshot().enemies.every(enemy => Object.keys(enemy).every(key => !key.startsWith('_'))));
 });
 
-test('cleared stages advance after a pause, ending with the Tempest Crab and a synchronous victory', () => {
+test('cleared stages advance after a pause, ending with the Tempest handing over to the skycrab siege', () => {
   const { game, p, events } = setup(5);
   lightBeacon(game, p); p.mode = 'aboard';
   assert.equal(game.finale.stage, CRABS);
@@ -174,10 +181,15 @@ test('cleared stages advance after a pause, ending with the Tempest Crab and a s
   assert.equal(boss.maxHp, ENEMY_TYPES.tempest.hp + ENEMY_TYPES.tempest.hpPerExtraPlayer * 4);
   assert.ok(events.some(event => event.kind === 'notice' && event.message === FINALE_STAGES[BOSS - 1].notice));
   game.damageEnemy(boss, 10000, p.id);
-  assert.equal(game.phase, 'victory', 'the last kill of the last stage wins in the same call');
-  assert.equal(game.finale.stage, BOSS); assert.equal(game.finale.remaining, 0); assert.equal(game.stats.wins, 1);
-  assert.equal(game.action(p.id, 'restart').ok, true);
-  assert.equal(game.finale.stage, 0); assert.equal(game.finale.stages, FINALE_STAGES.length);
+  // The Tempest is no longer the last stage: it clears, pauses, and the fourth
+  // stage forms up. Victory now belongs to the skycrab siege (sky-finale tests).
+  assert.equal(game.phase, 'finale', 'the Tempest no longer ends the voyage');
+  assert.equal(game.finale.stage, BOSS); assert.equal(game.finale.remaining, 0);
+  assert.equal(game.stats.wins, 0); assert.equal(game.victory, null);
+  ticks(game, FINALE_STAGE_DELAY + 0.1);
+  assert.equal(game.finale.stage, SKY);
+  assert.equal(game.snapshot().finale.sky.status, 'boarding', 'and waits for a gunner rather than winning');
+  assert.ok(game.finale.remaining > 0, 'its skycrabs and waves are still owed');
 });
 
 test('stage attackers gather on the lighthouse dais and swipe at the crew defending it', () => {
@@ -213,7 +225,10 @@ test('boss minions leave with the Tempest Crab instead of holding its stage open
   assert.ok(minions.length >= 1, 'the boss summons tide crabs of its own');
   assert.ok(minions.every(minion => !minion._finale), 'summoned crabs never count toward the stage roster');
   game.damageEnemy(boss, 10000, p.id);
-  assert.equal(game.phase, 'victory'); assert.equal(game.enemies.size, 0);
+  assert.equal(game.enemies.size, 0, 'the minions leave with it instead of holding the stage open');
+  assert.equal(game.finale.remaining, 0); assert.equal(game.phase, 'finale');
+  ticks(game, FINALE_STAGE_DELAY + 0.1);
+  assert.equal(game.finale.stage, SKY, 'and the cleared boss stage opens the next one');
 });
 
 test('a hand-set finale phase without a stage is inert, and abandoning resets the battle', () => {
