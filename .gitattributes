@@ -1,3 +1,0 @@
-# Hash-pinned CC0 anatomy data: the build and test/player-character.test.js verify its
-# exact SHA-256, so it must never receive line-ending conversion on checkout or archive.
-tools/player-character/base.obj -text

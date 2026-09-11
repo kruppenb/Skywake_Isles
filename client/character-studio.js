@@ -1,34 +1,55 @@
-// Skywake Character Studio: an isolated inspection page for the original
-// pirate prototype in client/assets/player-character/hero.glb.
+// Skywake Character Studio: an isolated inspection page for the player
+// character asset in client/assets/player-character/navigator-meshy.glb.
 //
-// This page is a renderer only. It never joins a game session, never imports
-// the game entry point and never replaces the live player, which is still the
-// procedural buildPirate model in client/models.js. Everything reported here is
-// measured from the GLB loaded in the browser; no manifest JSON is fetched,
-// because the server intentionally does not serve JSON.
+// This page is a renderer only. It never joins a game session and never
+// imports the game entry point. "Game model" builds the asset through the same
+// buildPlayerCharacter renderer the game uses, beside the old procedural pirate,
+// so every gameplay pose can be inspected. Everything reported here is measured
+// from the GLB loaded in the browser; no manifest JSON is fetched, because the
+// server intentionally does not serve JSON.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { makePalette, buildPirate } from './models.js';
+import { WEAPONS } from '../shared/weapons.js';
+import { isCrewMaskMaterial, installCrewTint, setCrewTint, crewTintHex, buildPlayerCharacter, NAVIGATOR_URL } from './player-character.js';
 
-const HERO_URL = '/assets/player-character/hero.glb';
-const CLIPS = ['idle', 'walk', 'rig_check'];
-// The accent the GLB ships with. The other swatches in the page mirror the
-// in-game crew colours without importing gameplay state.
-const AUTHORED_CREW = '#429f9a';
+const DEFAULT_HERO_URL = NAVIGATOR_URL;
+// `?glb=/assets/…/other.glb` points the studio at another served asset (an alternate build under
+// review) without touching the shipped asset. Only same-origin /assets paths are accepted;
+// anything else falls back to the shipped navigator.
+function heroUrlFromQuery() {
+  try {
+    const requested = new URLSearchParams(window.location.search).get('glb');
+    if (requested && /^\/assets\/[\w./-]+\.glb$/.test(requested) && !requested.includes('..')) return requested;
+  } catch (error) { /* no query available: use the default */ }
+  return DEFAULT_HERO_URL;
+}
+const HERO_URL = heroUrlFromQuery();
+const DEFAULT_CLIPS = ['idle', 'walk', 'run'];
+// Replaced by the loaded file's own clip names once a GLB with animations arrives.
+let CLIPS = DEFAULT_CLIPS.slice();
+// The coral baked into the navigator's atlas, which is also the game's default
+// crew colour. The other swatches mirror the in-game crew colours without
+// importing gameplay state.
+const AUTHORED_CREW = '#eb785d';
 const SPREAD = .95;
 
 // Camera presets. The character faces -Z, so an inspection camera parked on -Z
 // looks at its face and the preset yaw spins the turntable underneath it.
-// `gameplay` instead uses the real gameplay rig numbers (FOV 50, near .12,
-// back 7.45, height 2.42, shoulder 1.48, pitch -.15) as a scale approximation;
-// it is not the game world and is deliberately left unscaled.
+// Fitted presets are expressed as fractions of the subject's measured height
+// (target height, camera height, distance back), so a 2.75 m Meshy build and
+// the 3.27 m procedural pirate both frame the same way. `gameplay` instead uses
+// the real gameplay rig numbers (FOV 50, near .12, back 7.45, height 2.42,
+// shoulder 1.48, pitch -.15) as a scale approximation; it is not the game world
+// and is deliberately left unscaled.
 const CAMERAS = {
-  front: { yaw: 0, fov: 32, near: .1, position: [0, 1.48, -5.6], target: [0, 1.36, 0], fit: true },
-  threeQuarter: { yaw: -.62, fov: 32, near: .1, position: [0, 1.66, -5.5], target: [0, 1.34, 0], fit: true },
-  back: { yaw: Math.PI, fov: 32, near: .1, position: [0, 1.48, -5.6], target: [0, 1.36, 0], fit: true },
-  face: { yaw: -.24, fov: 26, near: .05, position: [0, 2.36, -1.75], target: [0, 2.30, 0], fit: true },
+  front: { yaw: 0, fov: 32, near: .1, target: .50, eye: .545, distance: 2.06, fit: true },
+  threeQuarter: { yaw: -.62, fov: 32, near: .1, target: .49, eye: .61, distance: 2.02, fit: true },
+  back: { yaw: Math.PI, fov: 32, near: .1, target: .50, eye: .545, distance: 2.06, fit: true },
+  face: { yaw: -.24, fov: 26, near: .05, target: .845, eye: .868, distance: .64, fit: true },
   gameplay: { yaw: 0, fov: 50, near: .12, position: [1.48, 2.42, 7.45], pitch: -.15, fit: false },
 };
+const FALLBACK_HEIGHT = 2.72;
 const LIGHTING = {
   studio: { background: '#39424b', ground: '#4c545c', exposure: 1 },
   island: { background: '#85d9ee', ground: '#d9c79b', exposure: 1.18 },
@@ -73,8 +94,9 @@ scene.background = background;
 const camera = new THREE.PerspectiveCamera(32, 1, .1, 260);
 const turntable = new THREE.Group(); turntable.name = 'studio-turntable';
 const heroSlot = new THREE.Group(); heroSlot.name = 'studio-hero-slot';
+const gameSlot = new THREE.Group(); gameSlot.name = 'studio-game-slot';
 const baselineSlot = new THREE.Group(); baselineSlot.name = 'studio-baseline-slot';
-turntable.add(heroSlot, baselineSlot);
+turntable.add(heroSlot, gameSlot, baselineSlot);
 scene.add(turntable);
 
 const ground = new THREE.Mesh(new THREE.CircleGeometry(9, 64),
@@ -126,6 +148,36 @@ const BASELINE_PLAYER = Object.freeze({ mode: 'ground', weapon: 'flintlock', pit
 const baselinePose = { dt: 1 / 60, elapsed: 0, aiming: false };
 let baseline = null;
 let baselineStats = null;
+
+// ---------------------------------------------------------- game model pose --
+// The Game model view drives the live renderer (and the procedural pirate beside
+// it) with this player state, the same shape world.js hands to animate().
+const pose = { weapon: 'flintlock', state: 'ground', aiming: false, reload: false, reloadProgress: null, knocked: false, pitch: 0, speed: 0 };
+let gameModel = null;
+let reloadUntil = 0;
+const gamePlayer = { mode: 'ground', weapon: 'flintlock', pitch: 0, online: true, reloadUntil: 0, gunId: null, knockedUntil: 0, hp: 10 };
+const gamePose = { dt: 1 / 60, elapsed: 0, aiming: false };
+
+function gamePlayerState(elapsedNow) {
+  const duration = WEAPONS[pose.weapon]?.reload || 1;
+  // A pinned reloadProgress holds the stroke at one instant for screenshots; a plain
+  // Reload toggle starts one real stroke from the moment it is pressed.
+  if (pose.reloadProgress !== null) reloadUntil = elapsedNow + duration * (1 - pose.reloadProgress);
+  gamePlayer.mode = pose.state === 'aboard' ? 'aboard' : pose.state;
+  gamePlayer.gunId = pose.state === 'aboard' ? 'studio-gun' : null;
+  gamePlayer.weapon = pose.weapon; gamePlayer.pitch = pose.pitch;
+  gamePlayer.knockedUntil = pose.knocked ? elapsedNow + 1 : 0;
+  gamePlayer.reloadUntil = pose.reload || pose.reloadProgress !== null ? reloadUntil : 0;
+  return gamePlayer;
+}
+
+function ensureGameModel() {
+  if (gameModel || !renderer) return;
+  gameModel = buildPlayerCharacter(palette, state.crew, { url: HERO_URL });
+  gameModel.group.name = 'game-model';
+  gameSlot.add(gameModel.group);
+  applySurface();
+}
 
 function materialsOf(mesh) {
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -254,7 +306,7 @@ function loadHero() {
   if (!renderer) return;
   disposeHero();
   state.loading = true; state.ready = false; state.error = null;
-  setStatus('loading', 'Loading the original prototype…');
+  setStatus('loading', 'Loading the player character…');
   applyMode();
   sync();
   // A retry must not be answered from a cached failure.
@@ -274,7 +326,12 @@ function onHeroLoaded(gltf) {
       // be culled while the turntable spins.
       node.frustumCulled = false;
       node.userData.studioBaseMaterial = node.material;
-      for (const material of materialsOf(node)) if (material && material.name === 'crew_accent') crewMaterial = material;
+      for (const material of materialsOf(node)) {
+        // Two tint conventions: the Blender prototype's separate crew_accent material (tinted
+        // through material.color) and the Meshy build's alpha-mask material (per-texel shader).
+        if (material && material.name === 'crew_accent') crewMaterial = material;
+        else if (isCrewMaskMaterial(material)) { installCrewTint(material, state.crew); crewMaterial = material; }
+      }
     });
     heroStats = measure(heroRoot);
     heroStats.url = HERO_URL;
@@ -282,12 +339,19 @@ function onHeroLoaded(gltf) {
       name: clip.name, duration: Number(clip.duration.toFixed(4)), tracks: clip.tracks.length,
     }));
     heroStats.crewMaterial = crewMaterial ? crewMaterial.name : null;
-    heroStats.authoredCrewHex = crewMaterial ? `#${crewMaterial.color.getHexString(THREE.SRGBColorSpace)}` : null;
+    heroStats.crewConvention = crewMaterial ? (isCrewMaskMaterial(crewMaterial) ? 'baseColorAlpha' : 'baseColorFactor') : null;
+    heroStats.authoredCrewHex = crewMaterial
+      ? (isCrewMaskMaterial(crewMaterial) ? crewTintHex(crewMaterial) : `#${crewMaterial.color.getHexString(THREE.SRGBColorSpace)}`) : null;
 
     if (gltf.animations && gltf.animations.length) {
       mixer = new THREE.AnimationMixer(heroRoot);
       for (const clip of gltf.animations) actions[clip.name] = mixer.clipAction(clip);
     }
+    // The clip buttons follow whatever the loaded file actually contains.
+    CLIPS = gltf.animations && gltf.animations.length ? gltf.animations.map(clip => clip.name) : DEFAULT_CLIPS.slice();
+    api.clips = CLIPS.slice();
+    renderClipButtons(CLIPS);
+    if (!CLIPS.includes(state.clip)) state.clip = CLIPS[0];
     heroSlot.add(heroRoot);
     applyCrew(state.crew);
     applySurface();
@@ -339,16 +403,47 @@ function renderReport() {
 
 // ------------------------------------------------------------------ modes ---
 function applyMode(next = state.mode) {
-  if (next !== 'hero' && next !== 'current' && next !== 'side') return;
+  if (next !== 'hero' && next !== 'current' && next !== 'side' && next !== 'game') return;
   state.mode = next;
-  const side = next === 'side';
+  const side = next === 'side' || next === 'game';
+  if (next === 'game') ensureGameModel();
   heroSlot.position.x = side ? SPREAD : 0;
+  gameSlot.position.x = side ? SPREAD : 0;
   baselineSlot.position.x = side ? -SPREAD : 0;
-  heroSlot.visible = next !== 'current' && !!heroRoot;
+  heroSlot.visible = next !== 'current' && next !== 'game' && !!heroRoot;
+  gameSlot.visible = next === 'game' && !!gameModel;
   baselineSlot.visible = next !== 'hero';
   press('mode-buttons', 'mode', next);
   applyCamera();
   sync();
+}
+
+function applyPose(partial = {}) {
+  if (partial.weapon && WEAPONS[partial.weapon]) pose.weapon = partial.weapon;
+  if (['ground', 'gliding', 'aboard'].includes(partial.state)) pose.state = partial.state;
+  if (typeof partial.aiming === 'boolean') pose.aiming = partial.aiming;
+  if (typeof partial.knocked === 'boolean') pose.knocked = partial.knocked;
+  if (typeof partial.reload === 'boolean') {
+    pose.reload = partial.reload;
+    if (partial.reload) reloadUntil = elapsed + (WEAPONS[pose.weapon]?.reload || 1);
+  }
+  if (partial.reloadProgress === null || Number.isFinite(partial.reloadProgress)) pose.reloadProgress = partial.reloadProgress;
+  if (Number.isFinite(partial.pitch)) pose.pitch = THREE.MathUtils.clamp(partial.pitch, -1.2, 1.2);
+  if (Number.isFinite(partial.speed)) pose.speed = Math.max(0, partial.speed);
+  press('weapon-buttons', 'weapon', pose.weapon);
+  press('state-buttons', 'state', pose.state);
+  press('pitch-buttons', 'pitch', String(pose.pitch));
+  press('speed-buttons', 'speed', String(pose.speed));
+  const toggles = element('toggle-buttons');
+  if (toggles) for (const button of toggles.querySelectorAll('button[data-toggle]')) button.setAttribute('aria-pressed', String(!!pose[button.dataset.toggle]));
+  sync();
+}
+
+// Height of what the fitted cameras must frame, from the measured bounds.
+function subjectHeight() {
+  const hero = heroStats && (heroSlot.visible || gameSlot.visible) ? heroStats.bounds.max[1] : 0;
+  const current = baselineStats && baselineSlot.visible ? baselineStats.bounds.max[1] : 0;
+  return Math.max(hero, current) || FALLBACK_HEIGHT;
 }
 
 function applyCamera(next = state.camera) {
@@ -364,20 +459,20 @@ function applyCamera(next = state.camera) {
   turntable.rotation.y = state.yaw;
   camera.fov = preset.fov;
   camera.near = preset.near;
-  let [x, y, z] = preset.position;
   if (preset.fit) {
-    // Widen for two subjects, and again for tall narrow phone viewports so the
-    // figure is never cropped sideways. The procedural player's hat plume
-    // reaches ~3.27 m, above the prototype's 2.72 m, so any view containing it
-    // needs a taller frame.
-    let scale = state.mode === 'hero' ? 1 : state.mode === 'current' ? 1.2 : 1.25;
+    // Frame whatever is on stage: the loaded asset, the procedural player, or
+    // the taller of the two side by side. Widen for two subjects, and again for
+    // tall narrow phone viewports so the figure is never cropped sideways.
+    const height = subjectHeight();
+    let scale = state.mode === 'side' ? 1.25 : 1;
     const aspect = camera.aspect || 1;
     if (aspect < 1.2) scale *= Math.min(2.1, 1.2 / aspect);
-    z *= scale;
+    camera.position.set(0, preset.eye * height, -preset.distance * height * scale);
+    camera.lookAt(0, preset.target * height, 0);
+  } else {
+    camera.position.set(preset.position[0], preset.position[1], preset.position[2]);
+    camera.rotation.set(preset.pitch, 0, 0);
   }
-  camera.position.set(x, y, z);
-  if (preset.pitch === undefined) camera.lookAt(preset.target[0], preset.target[1], preset.target[2]);
-  else camera.rotation.set(preset.pitch, 0, 0);
   camera.updateProjectionMatrix();
   press('camera-buttons', 'camera', next);
   sync();
@@ -423,7 +518,8 @@ function applyCrew(hex = state.crew) {
   if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return;
   const changed = hex.toLowerCase() !== state.crew.toLowerCase();
   state.crew = hex.toLowerCase();
-  if (crewMaterial) crewMaterial.color.copy(tintColor.setStyle(hex, THREE.SRGBColorSpace));
+  if (crewMaterial && !setCrewTint(crewMaterial, hex)) crewMaterial.color.copy(tintColor.setStyle(hex, THREE.SRGBColorSpace));
+  if (gameModel) gameModel.setCrewColor(state.crew);
   // The procedural baseline bakes its accent into vertex colours, so matching
   // it means rebuilding that one model; the old one is disposed first.
   if (!baseline || changed) buildBaseline(state.crew);
@@ -436,7 +532,7 @@ function applySurface(next = state.surface) {
   if (next !== 'textured' && next !== 'clay' && next !== 'wireframe') return;
   state.surface = next;
   const override = next === 'clay' ? clayMaterial : next === 'wireframe' ? wireMaterial : null;
-  for (const subject of [heroRoot, baseline && baseline.group]) {
+  for (const subject of [heroRoot, baseline && baseline.group, gameModel && gameModel.group]) {
     if (!subject) continue;
     subject.traverse(node => {
       if (!node.isMesh || node.name === 'pirate-contact-shadow') return;
@@ -470,6 +566,20 @@ function press(containerId, attribute, value) {
   }
 }
 
+function renderClipButtons(names) {
+  const container = element('clip-buttons');
+  if (!container) return;
+  container.replaceChildren(...names.map(name => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = `clip-${name.replace(/[^\w-]+/g, '-')}`;
+    button.dataset.clip = name;
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = name.replace(/_/g, ' ').replace(/^\w/, first => first.toUpperCase());
+    return button;
+  }));
+}
+
 function bindGroup(containerId, attribute, handler) {
   const container = element(containerId);
   if (!container) return;
@@ -485,6 +595,13 @@ bindGroup('lighting-buttons', 'lighting', applyLighting);
 bindGroup('clip-buttons', 'clip', applyClip);
 bindGroup('crew-buttons', 'crew', applyCrew);
 bindGroup('surface-buttons', 'surface', applySurface);
+bindGroup('weapon-buttons', 'weapon', value => applyPose({ weapon: value }));
+bindGroup('state-buttons', 'state', value => applyPose({ state: value }));
+bindGroup('pitch-buttons', 'pitch', value => applyPose({ pitch: Number(value) }));
+bindGroup('speed-buttons', 'speed', value => applyPose({ speed: Number(value) }));
+bindGroup('toggle-buttons', 'toggle', value => applyPose({ [value]: !pose[value] }));
+const fireButton = element('pose-fire');
+if (fireButton) fireButton.addEventListener('click', () => { if (gameModel) gameModel.fire(pose.weapon); if (baseline) baseline.fire(pose.weapon); });
 playButton.addEventListener('click', () => applyPlaying(!state.playing));
 element('rotate-left').addEventListener('click', () => rotate(-.22));
 element('rotate-right').addEventListener('click', () => rotate(.22));
@@ -544,10 +661,17 @@ function frame() {
   if (state.playing) {
     elapsed += delta;
     if (mixer) mixer.update(delta);
-    if (baseline && baselineSlot.visible) {
-      baselinePose.dt = delta;
-      baseline.animate(elapsed, 0, BASELINE_PLAYER, baselinePose);
-    }
+  }
+  // The game model and, in that view, the procedural pirate beside it follow the
+  // Pose controls even while paused, so a pinned reload stroke can be inspected.
+  if (state.mode === 'game') {
+    const player = gamePlayerState(elapsed);
+    gamePose.dt = state.playing ? delta : 0; gamePose.elapsed = elapsed; gamePose.aiming = pose.aiming;
+    if (gameModel) gameModel.animate(elapsed, pose.speed, player, gamePose);
+    if (baseline && baselineSlot.visible) baseline.animate(elapsed, pose.speed, player, gamePose);
+  } else if (state.playing && baseline && baselineSlot.visible) {
+    baselinePose.dt = delta;
+    baseline.animate(elapsed, 0, BASELINE_PLAYER, baselinePose);
   }
   renderer.render(scene, camera);
 }
@@ -559,6 +683,7 @@ function dispose() {
   window.removeEventListener('resize', resize);
   disposeHero();
   disposeBaseline();
+  if (gameModel) { gameModel.dispose(); gameSlot.remove(gameModel.group); gameModel.group.traverse(node => { if (node.isMesh) disposeMeshResources(node); }); gameModel = null; }
   ground.geometry.dispose();
   ground.material.dispose();
   clayMaterial.dispose();
@@ -579,7 +704,7 @@ const api = {
   ready: false, loading: true, error: null,
   mode: state.mode, camera: state.camera, lighting: state.lighting, clip: state.clip,
   surface: state.surface, crewColor: state.crew, playing: state.playing, yaw: state.yaw,
-  clips: CLIPS.slice(), modes: ['hero', 'current', 'side'], cameras: Object.keys(CAMERAS),
+  clips: CLIPS.slice(), modes: ['hero', 'current', 'side', 'game'], cameras: Object.keys(CAMERAS),
   lightings: Object.keys(LIGHTING), surfaces: ['textured', 'clay', 'wireframe'],
   layout: { heroX: SPREAD, baselineX: -SPREAD, note: 'Side by side only; both slots sit at x=0 otherwise.' },
   hero: null, baseline: null,
@@ -590,6 +715,9 @@ const api = {
   setSurface: applySurface,
   setCrewColor: applyCrew,
   setPlaying: applyPlaying,
+  setPose: applyPose,
+  getPose: () => ({ ...pose, gameKind: gameModel ? gameModel.kind : null }),
+  fire: () => { if (gameModel) gameModel.fire(pose.weapon); if (baseline) baseline.fire(pose.weapon); },
   rotate,
   reset: resetView,
   retry: () => { state.attempts++; loadHero(); },
@@ -601,7 +729,8 @@ const api = {
     surface: state.surface, crewColor: state.crew, playing: state.playing, yaw: state.yaw,
     exposure: renderer ? renderer.toneMappingExposure : null,
     cameraPosition: camera.position.toArray(), fov: camera.fov, near: camera.near,
-    heroVisible: heroSlot.visible, baselineVisible: baselineSlot.visible,
+    heroVisible: heroSlot.visible, baselineVisible: baselineSlot.visible, gameVisible: gameSlot.visible,
+    gameKind: gameModel ? gameModel.kind : null, pose: { ...pose },
     hero: heroStats, baseline: baselineStats,
   }),
   refs: {
@@ -612,6 +741,8 @@ const api = {
     get actions() { return actions; },
     get crewMaterial() { return crewMaterial; },
     get baseline() { return baseline; },
+    get gameModel() { return gameModel; },
+    gameSlot,
   },
 };
 

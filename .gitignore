@@ -3,5 +3,8 @@ data/
 .qa/
 tools/__pycache__/
 screenshots/
+meshy_output/
+.env
+.env.local
 *.log
 .DS_Store

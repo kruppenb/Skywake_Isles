@@ -616,7 +616,7 @@ function characterStrap(batch, a, b, width, thickness, color) {
 
 // Wrist sockets sit at the back of each palm. The support hand cups the
 // fore-end, except on the pistol where it wraps around the firing hand.
-const WEAPON_HANDLING = {
+export const WEAPON_HANDLING = {
   flintlock: { left: [-.24, -.17, .075], right: [.055, -.145, .21], stance: [.20, .65, -.70], supportRoll: -.15 },
   scatter: { left: [-.27, -.20, -.32], right: [.055, -.145, .21], stance: [.55, .69, -.405], supportRoll: .04 },
   repeater: { left: [-.265, -.18, -.32], right: [.055, -.145, .21], stance: [.55, .70, -.405], supportRoll: .02 },
@@ -715,6 +715,36 @@ export function buildWeapon(palette, kind = 'flintlock') {
   const stowedSocket = new THREE.Object3D(); stowedSocket.name = 'stowed-muzzle-' + kind;
   stowedSocket.position.copy(muzzle); stowed.add(stowedSocket);
   return { group, stowed, socket, stowedSocket, action, actionOrigin };
+}
+
+// The crew-coloured glider, hidden until the pirate is gliding. Its grips at
+// (±.70, 2.29, −.17) are the hand targets shared by every player renderer.
+export const GLIDER_GRIP = Object.freeze({ x: .70, y: 2.29, z: -.17 });
+export function buildGlider(palette, color = '#eb785d') {
+  const glider = new THREE.Group(); glider.name = 'pirate-glider';
+  const gb = new GeoBatch(palette), sailVertices = [], sailIndices = [], sailColors = [], leather = '#674938';
+  for (let row = 0; row <= 3; row++) for (let col = 0; col <= 12; col++) {
+    const x = (col / 12 - .5) * 6.4, t = row / 3;
+    const y = 3.85 + .48 * Math.cos(x / 3.2 * Math.PI / 2) - t * .34;
+    const z = -.65 + t * (1.6 + .23 * Math.cos(col / 12 * Math.PI * 6));
+    sailVertices.push(x, y, z);
+    const c = new THREE.Color(col % 4 < 2 ? color : '#ffdfa0'); sailColors.push(c.r, c.g, c.b);
+    if (row < 3 && col < 12) { const n = row * 13 + col; sailIndices.push(n, n + 13, n + 1, n + 1, n + 13, n + 14); }
+  }
+  const cloth = surface(sailVertices, sailIndices);
+  cloth.setAttribute('color', new THREE.Float32BufferAttribute(sailColors, 3)); gb.add(cloth); cloth.dispose();
+  const grips = [];
+  for (const side of [-1, 1]) {
+    gb.line([0, 4.30, -.68], [side * 3.2, 3.85, -.68], .065, '#644d3d');
+    gb.line([side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z], [side * 2.7, 3.90, -.60], .022, '#f7e6b9');
+    gb.line([side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z], [side * 2.7, 3.56, 1.0], .022, '#f7e6b9');
+    gb.add('characterCylinder', [side * GLIDER_GRIP.x, GLIDER_GRIP.y + .02, GLIDER_GRIP.z], [.044, .19, .044], [0, 0, side * -.35], leather);
+    const grip = new THREE.Object3D(); grip.name = (side < 0 ? 'left' : 'right') + '-glider-grip';
+    grip.position.set(side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z); glider.add(grip); grips.push(grip);
+  }
+  gb.line([0, 4.30, -.68], [0, 3.8, 1.2], .055, '#644d3d');
+  glider.add(gb.mesh()); glider.visible = false;
+  return { group: glider, grips };
 }
 
 export function buildPirate(palette, color = '#eb785d') {
@@ -873,28 +903,7 @@ export function buildPirate(palette, color = '#eb785d') {
       segment: new THREE.Vector3(), glideTarget: new THREE.Vector3(side * .70, 2.29, -.17) });
   }
 
-  const glider = new THREE.Group(); glider.name = 'pirate-glider';
-  const gb = new GeoBatch(palette), sailVertices = [], sailIndices = [], sailColors = [];
-  for (let row = 0; row <= 3; row++) for (let col = 0; col <= 12; col++) {
-    const x = (col / 12 - .5) * 6.4, t = row / 3;
-    const y = 3.85 + .48 * Math.cos(x / 3.2 * Math.PI / 2) - t * .34;
-    const z = -.65 + t * (1.6 + .23 * Math.cos(col / 12 * Math.PI * 6));
-    sailVertices.push(x, y, z);
-    const c = new THREE.Color(col % 4 < 2 ? color : '#ffdfa0'); sailColors.push(c.r, c.g, c.b);
-    if (row < 3 && col < 12) { const n = row * 13 + col; sailIndices.push(n, n + 13, n + 1, n + 1, n + 13, n + 14); }
-  }
-  const cloth = surface(sailVertices, sailIndices);
-  cloth.setAttribute('color', new THREE.Float32BufferAttribute(sailColors, 3)); gb.add(cloth); cloth.dispose();
-  for (const side of [-1, 1]) {
-    gb.line([0, 4.30, -.68], [side * 3.2, 3.85, -.68], .065, '#644d3d');
-    gb.line([side * .70, 2.29, -.17], [side * 2.7, 3.90, -.60], .022, '#f7e6b9');
-    gb.line([side * .70, 2.29, -.17], [side * 2.7, 3.56, 1.0], .022, '#f7e6b9');
-    gb.add('characterCylinder', [side * .70, 2.31, -.17], [.044, .19, .044], [0, 0, side * -.35], leather);
-    const grip = new THREE.Object3D(); grip.name = (side < 0 ? 'left' : 'right') + '-glider-grip';
-    grip.position.set(side * .70, 2.29, -.17); glider.add(grip);
-  }
-  gb.line([0, 4.30, -.68], [0, 3.8, 1.2], .055, '#644d3d');
-  glider.add(gb.mesh()); glider.visible = false; group.add(glider);
+  const glider = buildGlider(palette, color).group; group.add(glider);
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(.70, 20), new THREE.MeshBasicMaterial({
     color: '#183c46', transparent: true, opacity: .20, depthWrite: false }));
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);

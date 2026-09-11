@@ -1,239 +1,194 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "skywake-navigator",
-  "generator": "tools/build-player-character.py",
-  "buildVersion": "1.0.0-prototype",
-  "seed": 523118,
-  "blenderVersion": "5.2.1 LTS",
-  "glb": "hero.glb",
-  "sha256": "3d23b27cc6bf03001744cca77eafd6e772f51b15faa1700844ad5cdb70b3588a",
-  "bytes": 2948148,
+  "generator": "tools/meshy/build_navigator.py (Blender 5.2.1) on Meshy multi-image-to-3D + rig outputs, albedo from tools/meshy/albedo.py",
+  "glb": "navigator-meshy.glb",
+  "sha256": "7323000466396209352719a1d84f91f6c6e5e68fc61e1d07280fe7b557a04666",
+  "bytes": 6553672,
   "units": "meters",
   "forward": "-Z",
   "up": "+Y",
   "rootNode": "SkywakeNavigator",
-  "triangles": 35656,
-  "meshPrimitives": 8,
-  "skinnedPrimitives": 8,
+  "rootScale": 1.4843,
+  "triangles": 41357,
+  "meshPrimitives": 1,
   "materialNames": [
-    "brass",
-    "cloth_ivory",
-    "cloth_navy",
-    "crew_accent",
-    "eye",
-    "hair",
-    "leather",
-    "skin"
+    "navigator"
   ],
-  "tintableMaterial": "crew_accent",
-  "tintableBaseColorFactor": [
-    0.05448027700185776,
-    0.34670406579971313,
-    0.32314321398735046,
-    1
-  ],
-  "textures": [
-    {
-      "name": "navigator_normal",
-      "width": 1024,
-      "height": 1024,
-      "mimeType": "image/png",
-      "embeddedBytes": 343438,
-      "decodedBytes": 5592404
-    },
+  "crewTint": {
+    "convention": "baseColorAlpha",
+    "reference": [
+      0.6982,
+      0.3977,
+      0.3521
+    ],
+    "material": "navigator"
+  },
+  "images": [
     {
       "name": "navigator_albedo",
+      "mimeType": "image/png",
       "width": 2048,
       "height": 2048,
-      "mimeType": "image/png",
-      "embeddedBytes": 1027069,
+      "channels": 4,
+      "embeddedBytes": 4042656,
       "decodedBytes": 22369620
     }
   ],
-  "decodedTextureBytes": 27962024,
-  "textureAccounting": "sum of width*height*4 over the base level and every integer-halved mip level down to 1x1, per unique embedded image; matches client/environment-assets.js textureMemoryBytes",
-  "texelCoverage": {
-    "accent": 253733,
-    "brass": 72271,
-    "coat": 972526,
-    "eye": 64096,
-    "hair": 259504,
-    "hat": 265561,
-    "leather": 260158,
-    "shirt": 256509,
-    "skin": 429786,
-    "trouser": 250685
-  },
+  "decodedTextureBytes": 22369620,
   "bounds": {
     "min": [
-      -0.7855,
-      0.0,
-      -0.5212
+      -0.7562,
+      0,
+      -0.3274
     ],
     "max": [
-      0.7855,
-      2.72,
-      0.2947
+      0.755,
+      2.75,
+      0.2841
     ]
   },
   "skins": 1,
-  "jointCount": 20,
+  "jointCount": 29,
   "joints": [
-    "root",
-    "hips",
-    "coat_tail.L",
-    "coat_tail.R",
-    "spine",
-    "chest",
+    "Hips",
+    "LeftUpLeg",
+    "LeftLeg",
+    "LeftFoot",
+    "LeftToeBase",
+    "RightUpLeg",
+    "RightLeg",
+    "RightFoot",
+    "RightToeBase",
+    "Spine02",
+    "Spine01",
+    "Spine",
+    "LeftShoulder",
+    "LeftArm",
+    "LeftForeArm",
+    "LeftHand",
+    "glider_grip.L",
+    "weapon_grip.L",
     "neck",
-    "head",
-    "upper_arm.L",
-    "forearm.L",
-    "hand.L",
-    "upper_arm.R",
-    "forearm.R",
-    "hand.R",
-    "thigh.L",
-    "shin.L",
-    "foot.L",
-    "thigh.R",
-    "shin.R",
-    "foot.R"
+    "Head",
+    "head_end",
+    "headfront",
+    "RightShoulder",
+    "RightArm",
+    "RightForeArm",
+    "RightHand",
+    "glider_grip.R",
+    "weapon_grip.R",
+    "stow_back"
   ],
   "animations": [
     {
       "name": "idle",
-      "duration": 4.0417,
-      "channels": 60,
-      "samplers": 60
-    },
-    {
-      "name": "rig_check",
-      "duration": 2.0417,
-      "channels": 60,
-      "samplers": 60
+      "duration": 4.0333,
+      "channels": 87,
+      "samplers": 87
     },
     {
       "name": "walk",
-      "duration": 1.0417,
-      "channels": 60,
-      "samplers": 60
+      "duration": 1.0667,
+      "channels": 87,
+      "samplers": 87
+    },
+    {
+      "name": "run",
+      "duration": 0.6667,
+      "channels": 87,
+      "samplers": 87
     }
   ],
   "sockets": [
     {
-      "name": "glider_grip.L",
-      "bone": "hand.L",
-      "ancestry": [
-        "hand.L",
-        "forearm.L",
-        "upper_arm.L",
-        "chest",
-        "spine",
-        "hips",
-        "root",
-        "SkywakeNavigator"
-      ],
-      "restTranslationGame": [
-        -0.6372,
-        1.5726,
-        -0.2576
-      ]
-    },
-    {
-      "name": "glider_grip.R",
-      "bone": "hand.R",
-      "ancestry": [
-        "hand.R",
-        "forearm.R",
-        "upper_arm.R",
-        "chest",
-        "spine",
-        "hips",
-        "root",
-        "SkywakeNavigator"
-      ],
-      "restTranslationGame": [
-        0.6372,
-        1.5726,
-        -0.2576
-      ]
-    },
-    {
-      "name": "stow_back",
-      "bone": "chest",
-      "ancestry": [
-        "chest",
-        "spine",
-        "hips",
-        "root",
-        "SkywakeNavigator"
-      ],
-      "restTranslationGame": [
-        0.0,
-        1.8083,
-        0.1473
-      ]
-    },
-    {
       "name": "weapon_grip.L",
-      "bone": "hand.L",
+      "parent": "LeftHand",
       "ancestry": [
-        "hand.L",
-        "forearm.L",
-        "upper_arm.L",
-        "chest",
-        "spine",
-        "hips",
-        "root",
+        "LeftHand",
+        "LeftForeArm",
+        "LeftArm",
+        "LeftShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
         "SkywakeNavigator"
-      ],
-      "restTranslationGame": [
-        -0.6232,
-        1.5426,
-        -0.2816
       ]
     },
     {
       "name": "weapon_grip.R",
-      "bone": "hand.R",
+      "parent": "RightHand",
       "ancestry": [
-        "hand.R",
-        "forearm.R",
-        "upper_arm.R",
-        "chest",
-        "spine",
-        "hips",
-        "root",
+        "RightHand",
+        "RightForeArm",
+        "RightArm",
+        "RightShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
         "SkywakeNavigator"
-      ],
-      "restTranslationGame": [
-        0.6232,
-        1.5426,
-        -0.2816
+      ]
+    },
+    {
+      "name": "glider_grip.L",
+      "parent": "LeftHand",
+      "ancestry": [
+        "LeftHand",
+        "LeftForeArm",
+        "LeftArm",
+        "LeftShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "glider_grip.R",
+      "parent": "RightHand",
+      "ancestry": [
+        "RightHand",
+        "RightForeArm",
+        "RightArm",
+        "RightShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "stow_back",
+      "parent": "Spine",
+      "ancestry": [
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
       ]
     }
   ],
-  "budgets": {
-    "maxTriangles": 50000,
-    "maxMaterials": 8,
-    "maxMeshPrimitives": 16,
-    "maxGlbBytes": 8388608,
-    "maxDecodedTextureBytes": 33554432,
-    "maxDeformJoints": 64,
-    "maxImageDimension": 2048
-  },
-  "source": {
-    "anatomy": "tools/player-character/base.obj",
-    "anatomySha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c",
-    "license": "CC0 1.0 (MakeHuman base mesh hm08, released CC0 September 2020)",
-    "statement": "Original pirate design, clothing, textures and rig built in Blender on MakeHuman CC0 anatomy topology."
+  "meshyTasks": {
+    "multiImageTo3d": "01a091b6-5ad1-7534-a2ba-835316a356f2",
+    "rig": "01a091b9-9557-77a8-ae76-1d8b84d19345",
+    "idleAnimation": "01a091ba-b8d6-751d-937c-71b32fb47b5e",
+    "retextureTrial": "01a091d8-9461-70d9-a066-73e12508df83"
   },
   "limitations": [
-    "Renderer-only prototype: the live player is still client/models.js buildPirate.",
-    "Sockets are future integration anchors; no current weapon or glider compatibility is claimed.",
-    "walk is a rig proof, not production locomotion; idle is a subtle breathing loop.",
-    "No finger or toe bones: hands and feet are rigid to hand.L/R and foot.L/R.",
-    "Face detail is procedural texture plus a light sculpt over CC0 topology, not a hand sculpt."
+    "No finger or toe bones: hands are rigid to LeftHand/RightHand, so grips are posed by the runtime IK, not by finger curls.",
+    "idle/walk/run are Meshy library clips; the runtime overrides both arms, the head pitch and the legs during glide and knockback.",
+    "The crew mask is a hue classification of the Meshy atlas; the headband, lips and brass buttons are deliberately excluded.",
+    "The coat-back vent, lining and belt tab are projected from the back concept plate, not modelled."
   ]
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c3044">
-  <meta name="description" content="Isolated viewer for the original Skywake pirate prototype. Not the live player model.">
+  <meta name="description" content="Isolated viewer for the Skywake navigator player character asset.">
   <meta name="robots" content="noindex">
   <title>Skywake Character Studio</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -15,12 +15,11 @@
   <div id="studio" class="studio" data-ready="false" data-error="false">
     <header class="studio-header">
       <h1>Skywake Character Studio</h1>
-      <p id="prototype-banner" class="prototype-banner" role="note">Original prototype &middot; not the live player model</p>
+      <p id="prototype-banner" class="prototype-banner" role="note">Skywake navigator &middot; the live player asset under review</p>
       <p class="prototype-note">
-        A rough visual draft, shown for shape and surface review only. It is not accepted production quality and it is
-        not wired into gameplay: the live player is still the procedural model in <code>client/models.js</code>.
-        Known artefacts in this build include shoulder seam tabs, solid facial hair and coat-skirt penetration in a
-        deep crouch.
+        Inspection page for <code>client/assets/player-character/navigator-meshy.glb</code>, the Meshy-built pirate that
+        <code>client/player-character.js</code> now renders as every player. Prototype shows the raw asset and its clips;
+        Game model runs the live renderer beside the old procedural pirate. Known residuals are listed under Honest limits.
       </p>
     </header>
 
@@ -47,8 +46,45 @@
             <button id="mode-hero" type="button" data-mode="hero" aria-pressed="true">Prototype</button>
             <button id="mode-current" type="button" data-mode="current" aria-pressed="false">Current player</button>
             <button id="mode-side" type="button" data-mode="side" aria-pressed="false">Side by side</button>
+            <button id="mode-game" type="button" data-mode="game" aria-pressed="false">Game model</button>
           </div>
-          <p class="hint">Side by side puts the prototype on <b>+X</b> and the current player on <b>&minus;X</b>, 1.9&nbsp;m apart.</p>
+          <p class="hint">Side by side puts the prototype on <b>+X</b> and the current player on <b>&minus;X</b>, 1.9&nbsp;m apart.
+            Game model builds the loaded file through the live <code>buildPlayerCharacter</code> renderer (weapons, IK,
+            glider, clips) next to the procedural pirate, both driven by the Pose controls.</p>
+        </section>
+
+        <section class="group" aria-labelledby="label-pose">
+          <h2 id="label-pose">Pose (game model)</h2>
+          <div class="button-row" id="weapon-buttons" role="group" aria-label="Weapon">
+            <button type="button" data-weapon="flintlock" aria-pressed="true">Flintlock</button>
+            <button type="button" data-weapon="scatter" aria-pressed="false">Scatter</button>
+            <button type="button" data-weapon="repeater" aria-pressed="false">Repeater</button>
+            <button type="button" data-weapon="burst" aria-pressed="false">Burst</button>
+            <button type="button" data-weapon="longshot" aria-pressed="false">Longshot</button>
+          </div>
+          <div class="button-row" id="state-buttons" role="group" aria-label="Player state">
+            <button type="button" data-state="ground" aria-pressed="true">Ground</button>
+            <button type="button" data-state="gliding" aria-pressed="false">Gliding</button>
+            <button type="button" data-state="aboard" aria-pressed="false">Aboard (gun)</button>
+          </div>
+          <div class="button-row" id="toggle-buttons" role="group" aria-label="Pose toggles">
+            <button type="button" data-toggle="aiming" aria-pressed="false">Aim</button>
+            <button type="button" data-toggle="reload" aria-pressed="false">Reload</button>
+            <button type="button" data-toggle="knocked" aria-pressed="false">Knocked</button>
+            <button type="button" id="pose-fire">Fire</button>
+          </div>
+          <div class="button-row" id="pitch-buttons" role="group" aria-label="Aim pitch">
+            <button type="button" data-pitch="-0.8" aria-pressed="false">Aim down</button>
+            <button type="button" data-pitch="0" aria-pressed="true">Level</button>
+            <button type="button" data-pitch="0.8" aria-pressed="false">Aim up</button>
+          </div>
+          <div class="button-row" id="speed-buttons" role="group" aria-label="Movement speed">
+            <button type="button" data-speed="0" aria-pressed="true">Still</button>
+            <button type="button" data-speed="3.5" aria-pressed="false">Walk</button>
+            <button type="button" data-speed="9" aria-pressed="false">Sprint</button>
+          </div>
+          <p class="hint">Only the Game model view reads these. Reload replays the equipped gun's real reload stroke;
+            Fire adds one recoil kick.</p>
         </section>
 
         <section class="group" aria-labelledby="label-camera">
@@ -81,27 +117,30 @@
           <div class="button-row" id="clip-buttons" role="group" aria-labelledby="label-animation">
             <button id="clip-idle" type="button" data-clip="idle" aria-pressed="true">Idle</button>
             <button id="clip-walk" type="button" data-clip="walk" aria-pressed="false">Walk</button>
-            <button id="clip-rig-check" type="button" data-clip="rig_check" aria-pressed="false">Rig check</button>
+            <button id="clip-run" type="button" data-clip="run" aria-pressed="false">Run</button>
           </div>
           <div class="button-row">
             <button id="play-toggle" type="button" aria-pressed="false">Play</button>
           </div>
-          <p class="hint">Clips drive the prototype only; the current player holds its neutral ground stance with the
-            flintlock drawn. Playback starts paused when the system asks for reduced motion.</p>
+          <p class="hint">Clips drive the Prototype view only; the Game model blends them by the Pose speed, and the
+            current player holds its neutral ground stance with the flintlock drawn. Playback starts paused when the
+            system asks for reduced motion.</p>
         </section>
 
         <section class="group" aria-labelledby="label-crew">
           <h2 id="label-crew">Crew accent</h2>
           <div class="button-row" id="crew-buttons" role="group" aria-labelledby="label-crew">
-            <button id="crew-authored" class="swatch" type="button" data-crew="#429f9a" aria-pressed="true"><i style="background:#429f9a"></i>Authored teal</button>
+            <button id="crew-authored" class="swatch" type="button" data-crew="#eb785d" aria-pressed="true"><i style="background:#eb785d"></i>Baked coral</button>
+            <button id="crew-teal" class="swatch" type="button" data-crew="#429f9a" aria-pressed="false"><i style="background:#429f9a"></i>Teal</button>
             <button id="crew-sand" class="swatch" type="button" data-crew="#f4a261" aria-pressed="false"><i style="background:#f4a261"></i>Sand</button>
             <button id="crew-tide" class="swatch" type="button" data-crew="#55c9ba" aria-pressed="false"><i style="background:#55c9ba"></i>Tide</button>
             <button id="crew-lilac" class="swatch" type="button" data-crew="#b19cff" aria-pressed="false"><i style="background:#b19cff"></i>Lilac</button>
             <button id="crew-rose" class="swatch" type="button" data-crew="#f58faf" aria-pressed="false"><i style="background:#f58faf"></i>Rose</button>
             <button id="crew-gold" class="swatch" type="button" data-crew="#ffdb70" aria-pressed="false"><i style="background:#ffdb70"></i>Gold</button>
           </div>
-          <p class="hint">Tints only the prototype's <code>crew_accent</code> material and rebuilds the current player in
-            the same colour. The five crew colours mirror the in-game list.</p>
+          <p class="hint">Recolours the lapels, cuffs, collar, sash and coat lining through the atlas's alpha-channel
+            crew mask (the Blender prototype's <code>crew_accent</code> material is tinted the old way if that file is
+            loaded), and rebuilds the current player in the same colour. Coral is what the atlas ships with.</p>
         </section>
 
         <section class="group" aria-labelledby="label-surface">
@@ -138,17 +177,18 @@
             <dt>Current player</dt><dd id="report-baseline">&mdash;</dd>
           </dl>
           <p class="hint">Measured from the GLB loaded in this page over the normal asset route
-            (<code>/assets/player-character/hero.glb</code>); nothing is read from the manifest. Counts and bounds cover
-            the visible parts of each model. No frame-rate or performance claim is made here.</p>
+            (<code>/assets/player-character/navigator-meshy.glb</code>, or the <code>?glb=</code> override); nothing is
+            read from the manifest. Counts and bounds cover the visible parts of each model. No frame-rate or performance
+            claim is made here.</p>
         </section>
 
         <section class="group" aria-labelledby="label-limits">
           <h2 id="label-limits">Honest limits</h2>
           <ul class="limits">
-            <li>Rough visual prototype, not accepted production quality.</li>
-            <li>Known artefacts: shoulder seam tabs, solid facial hair, coat-skirt penetration in a deep crouch.</li>
-            <li>No gameplay integration: no weapons, no glider, no session, no player swap.</li>
-            <li>Walk is a rig proof, not final locomotion.</li>
+            <li>No finger bones: the hands are posed as rigid wrists by the runtime IK, so grips read at gameplay distance, not in close-up.</li>
+            <li>The coat-back vent, lining and belt tab are painted from the back concept plate, not modelled; the vent lining is thin.</li>
+            <li>Meshy's atlas is soft in places (beard, hair, hat brim), with a few light seam flecks along the coat edge.</li>
+            <li>The mounted-cannon and knockback poses are IK/lean approximations; there are no dedicated clips for them.</li>
             <li>Bounds are measured in the rest pose, before a clip is applied.</li>
           </ul>
         </section>

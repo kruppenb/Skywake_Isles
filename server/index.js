@@ -12,7 +12,7 @@ import { MAX_PLAYERS } from '../shared/world.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = '1.0.0';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary' };
-const THREE_ADDONS = new Set(['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js']);
+const THREE_ADDONS = new Set(['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js', 'utils/SkeletonUtils.js']);
 const json = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 
 export async function createGameServer({ port = Number(process.env.PORT || 3400), host = '0.0.0.0', dataDir = process.env.DATA_DIR || path.join(ROOT, 'data') } = {}) {

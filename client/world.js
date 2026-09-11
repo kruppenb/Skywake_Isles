@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBSTACLES, BEACON, SPAWN, SEED } from '../shared/world.js';
 import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
-import { makePalette, GeoBatch, buildGalleon, buildPirate, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { makePalette, GeoBatch, buildGalleon, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
+import { buildPlayerCharacter } from './player-character.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
@@ -485,13 +486,15 @@ function buildSky(palette, random) {
   } };
 }
 
+// Resources flagged userData.shared (the player-character GLB's geometry and
+// texture, reused by every pirate on screen) outlive any one object.
 function disposeObject(object, preserveMaterials = new Set()) {
   const geometries = new Set(), materials = new Set();
   object.traverse(child => {
-    if (child.geometry) geometries.add(child.geometry);
-    if (child.material) for (const material of Array.isArray(child.material) ? child.material : [child.material]) if (!preserveMaterials.has(material)) materials.add(material);
+    if (child.geometry && !child.geometry.userData.shared) geometries.add(child.geometry);
+    if (child.material) for (const material of Array.isArray(child.material) ? child.material : [child.material]) if (!preserveMaterials.has(material) && !material.userData.shared) materials.add(material);
   });
-  geometries.forEach(g => g.dispose()); materials.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+  geometries.forEach(g => g.dispose()); materials.forEach(m => { if (m.map && !m.map.userData.shared) m.map.dispose(); m.dispose(); });
   object.removeFromParent();
 }
 
@@ -825,7 +828,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       seen.add(player.id);
       let model = players.get(player.id);
       if (!model) {
-        model = { ...buildPirate(palette, player.color), flashUntil: 0 };
+        model = { ...buildPlayerCharacter(palette, player.color), flashUntil: 0 };
         model.group.userData.playerId = player.id;
         model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
         scene.add(model.group); players.set(player.id, model);
