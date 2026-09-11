@@ -1,12 +1,12 @@
 import { WORLD_RADIUS, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
 import { resolveWorldCollision } from './collision.js';
-import { SHIP_DECK, SHIP_GUNS, gunAim, gunOperator } from './airship.js';
+import { SHIP_DECK, SHIP_GUNS, LAUNCH_CARRY_DECAY, gunAim, gunOperator } from './airship.js';
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const finite = (x, fallback = 0) => Number.isFinite(x) ? x : fallback;
 export function makePlayerPosition() {
   const ship = shipAt(0);
-  return { x: ship.x, y: ship.y, z: ship.z, yaw: 0, pitch: 0, vy: 0,
+  return { x: ship.x, y: ship.y, z: ship.z, yaw: 0, pitch: 0, vy: 0, launchVx: 0, launchVz: 0,
     mode: 'aboard', jumpHeld: false, grounded: true, deckX: 0, deckZ: 0, gunId: null, shipReturned: false };
 }
 
@@ -25,6 +25,8 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
 
   if (p.mode === 'aboard') {
     const ship = shipAt(elapsed);
+    // A shove belongs to the glide it started; nothing carries over a lift.
+    p.launchVx = 0; p.launchVz = 0;
     const gun = SHIP_GUNS.find(station => station.id === p.gunId);
     if (gun) {
       const operator = gunOperator(gun);
@@ -76,14 +78,22 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
     return p;
   }
 
-  p.x = finite(p.x, SPAWN.x) + dx * speed * dt;
-  p.z = finite(p.z, SPAWN.z) + dz * speed * dt;
+  // A gate's launch shove is carried only while gliding, on top of steering,
+  // and fades with LAUNCH_CARRY_DECAY. Both the authority and local prediction
+  // step it with the same fixed dt, so the two stay in agreement.
+  const carryX = p.mode === 'gliding' ? finite(p.launchVx) : 0;
+  const carryZ = p.mode === 'gliding' ? finite(p.launchVz) : 0;
+  const fade = Math.exp(-dt / LAUNCH_CARRY_DECAY);
+  p.launchVx = Math.abs(carryX) > 0.05 ? carryX * fade : 0;
+  p.launchVz = Math.abs(carryZ) > 0.05 ? carryZ * fade : 0;
+  p.x = finite(p.x, SPAWN.x) + (dx * speed + carryX) * dt;
+  p.z = finite(p.z, SPAWN.z) + (dz * speed + carryZ) * dt;
   p.y = finite(p.y, heightAt(p.x, p.z));
   resolveWorldCollision(p);
   const ground = heightAt(p.x, p.z);
   if (Math.hypot(p.x, p.z) > WORLD_RADIUS || (ground < 0.3 && p.y < 2.5) || p.y < -4) {
     p.x = SPAWN.x; p.z = SPAWN.z; p.y = heightAt(SPAWN.x, SPAWN.z);
-    p.mode = 'ground'; p.vy = 0; p.grounded = true;
+    p.mode = 'ground'; p.vy = 0; p.grounded = true; p.launchVx = 0; p.launchVz = 0;
     return p;
   }
   if (p.mode === 'gliding') {
@@ -99,6 +109,6 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
       p.y += p.vy * dt;
     }
   }
-  if (p.y <= ground) { p.y = ground; p.vy = 0; p.mode = 'ground'; p.grounded = true; }
+  if (p.y <= ground) { p.y = ground; p.vy = 0; p.mode = 'ground'; p.grounded = true; p.launchVx = 0; p.launchVz = 0; }
   return p;
 }

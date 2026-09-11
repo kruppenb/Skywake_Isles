@@ -12,7 +12,7 @@ import { SKY_STAGE_KIND, skyStageCleared } from '../shared/sky-finale.js';
 import { startSkyStage, tickSkyStage, settleSkyStage, skyCounts, skyStageNumber, publicSkyState, cancelSkyActivity, clearSkyStage, livingSkyBosses, damageSkyBoss } from './sky-finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
-const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
 const PUBLIC_FLYING_TARGET = ['id', 'type', 'x', 'y', 'z', 'yaw', 'radius', 'hp', 'maxHp'];
 const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'scale', 'attackRadius'];
 const PUBLIC_SIDE_EVENT = ['id', 'status', 'wave', 'remaining', 'integrity', 'maxIntegrity', 'startedAt', 'endsAt', 'finishedAt'];

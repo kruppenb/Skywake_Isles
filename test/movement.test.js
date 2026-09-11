@@ -88,6 +88,40 @@ test('a gate launch offset glides down to safe island ground at every departure 
   }
 });
 
+test('a launch shove is carried only while gliding, fades, and is dropped on landing or aboard', () => {
+  const gate = SHIP_JUMP_POINTS[0], start = SHIP_DURATION + 30, ship = shipAt(start);
+  const depart = () => ({ ...makePlayerPosition(), ...jumpLaunchPose(gate, ship), mode: 'gliding', grounded: false, vy: -6 });
+  const p = depart();
+  assert.equal(p.launchVz, gate.launch.vz); assert.equal(p.launchVx, gate.launch.vx);
+  const before = { ...p };
+  movePlayer(p, { yaw: 0 }, 0.05, start + 0.05);
+  assert.ok(Math.abs(p.z - before.z - gate.launch.vz * 0.05) < 1e-9, 'the first step carries the whole shove');
+  assert.ok(Math.abs(p.launchVz) < Math.abs(gate.launch.vz) && Math.abs(p.launchVz) > Math.abs(gate.launch.vz) * 0.9, 'the shove fades gradually');
+  // Steering adds to the shove instead of replacing it.
+  const q = depart();
+  movePlayer(q, { yaw: 0, forward: 1 }, 0.05, start + 0.05);
+  assert.ok(q.z < p.z, 'pushing forward still gains on the shove');
+  // Three seconds out, almost nothing of the shove remains; the glide is ordinary.
+  let elapsed = start + 0.05;
+  for (let i = 0; i < 60; i++) movePlayer(p, { yaw: 0 }, 0.05, elapsed += 0.05);
+  assert.ok(Math.abs(p.launchVz) < Math.abs(gate.launch.vz) * 0.15, `faded to ${p.launchVz}`);
+  assert.equal(p.mode, 'gliding');
+  let steps = 0;
+  while (p.mode === 'gliding' && steps++ < 400) movePlayer(p, { yaw: 0 }, 0.05, elapsed += 0.05);
+  assert.equal(p.mode, 'ground'); assert.equal(p.launchVx, 0); assert.equal(p.launchVz, 0);
+  // A stale shove never moves a pirate on the ground or on the deck.
+  const g = { ...ground(), launchVx: 4, launchVz: -18 };
+  movePlayer(g, { yaw: 0 }, 0.05, 1);
+  assert.equal(g.x, SPAWN.x); assert.equal(g.z, SPAWN.z); assert.equal(g.launchVx, 0); assert.equal(g.launchVz, 0);
+  const aboard = { ...makePlayerPosition(), launchVx: 4, launchVz: -18 };
+  movePlayer(aboard, { yaw: 0 }, 0.05, 1);
+  assert.equal(aboard.deckX, 0); assert.equal(aboard.deckZ, 0); assert.equal(aboard.launchVx, 0); assert.equal(aboard.launchVz, 0);
+  // The authority and a predicting client step the same shove identically.
+  const server = depart(), client = depart();
+  for (let i = 1; i <= 40; i++) { movePlayer(server, { yaw: 0.3, forward: 1 }, 0.05, start + i * 0.05); movePlayer(client, { yaw: 0.3, forward: 1 }, 0.05, start + i * 0.05); }
+  assert.deepEqual({ x: client.x, y: client.y, z: client.z, launchVz: client.launchVz }, { x: server.x, y: server.y, z: server.z, launchVz: server.launchVz });
+});
+
 test('jump is edge triggered, obstacles collide, and water returns pirates safely', () => {
   const p = ground();
   for (let i = 0; i < 50; i++) movePlayer(p, { jump: true }, 0.05, i * 0.05);

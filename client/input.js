@@ -69,6 +69,13 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
       if (enabled && !event.repeat && !isEditable(event.target)) { event.preventDefault(); reset(); callbacks.onMap?.(); }
       return;
     }
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+      // Clicking the world to look around locks the pointer, which leaves no
+      // way to click the lobby's button. A focused button or field keeps its
+      // own Enter; from the world it confirms the primary action instead.
+      if (canUse(event) && !event.repeat) { event.preventDefault(); callbacks.onConfirm?.(); }
+      return;
+    }
     if (!canUse(event)) return;
     if (MOVEMENT_KEYS.has(event.code)) {
       event.preventDefault();

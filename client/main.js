@@ -86,6 +86,12 @@ input = createInput(canvas, {
     else ui.setPaused(!ui.paused);
   },
   onMap() { if (!ui.paused && state.phase !== 'lobby' && state.phase !== 'victory') ui.setMap(!ui.mapOpen); },
+  // Enter stands in for the lobby's one button: Set sail for the captain,
+  // Ready for everyone else. The pointer is usually locked by then.
+  onConfirm() {
+    if (ui.menuOpen || state.phase !== 'lobby' || !simulationPlayer) return;
+    performAction(state.hostId === net.id ? 'launch' : 'ready');
+  },
   onGesture() { audio.unlock(); },
   onNotice(message) { ui.toast(message); },
   onBlur() { ui.clearWeaponPresentation(); sendNeutralInput(); },

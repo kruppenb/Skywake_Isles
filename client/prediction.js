@@ -11,7 +11,7 @@ const distance = (a, b) => {
   const from = point(a), to = point(b);
   return Math.hypot(from.x - to.x, from.y - to.y, from.z - to.z);
 };
-const MOVEMENT_FIELDS = new Set(['x', 'y', 'z', 'deckX', 'deckZ', 'yaw', 'pitch', 'vy', 'mode', 'jumpHeld', 'grounded', 'gunId', 'shipReturned']);
+const MOVEMENT_FIELDS = new Set(['x', 'y', 'z', 'deckX', 'deckZ', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'jumpHeld', 'grounded', 'gunId', 'shipReturned']);
 const gunChanged = (a, b) => (a?.gunId || null) !== (b?.gunId || null);
 const TIME_EPSILON = 1e-7;
 

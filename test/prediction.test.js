@@ -236,8 +236,11 @@ test('an acknowledged gate departure lands the glide without snapping back onto 
   assert.equal(prediction.current.mode, 'gliding');
   assert.equal(prediction.pending.length, 0); assert.equal(prediction.history.length, 0);
   xyzNear(prediction.sample(.5, .3), launch);
+  assert.equal(prediction.current.launchVz, launch.launchVz, 'the gate shove arrives with the authoritative launch');
   // A late snapshot from before the departure cannot pull the pirate back aboard.
   prediction.step(6, controls({ forward: 1 }), .35, 'voyage');
+  assert.ok(prediction.current.z < launch.z + launch.launchVz * .05 + 1e-9, 'the predicted glide carries the shove');
+  assert.ok(Math.abs(prediction.current.launchVz) < Math.abs(launch.launchVz), 'and fades it locally');
   prediction.reconcile({ ...departed, lastInputSeq: 5 }, { phase: 'voyage', elapsed: .3, simulationTime: .3, renderElapsed: .35, alpha: .5 });
   assert.equal(prediction.current.mode, 'gliding');
   assert.equal(prediction.current.gunId, null);

@@ -22,13 +22,21 @@ export const RETURN_RANGE = 3.2;
 // convention, so the outward direction is (-sin yaw, 0, -cos yaw). `launch` is
 // the ship-relative pose a departing pirate is placed at: authored to clear the
 // rail, the rendered hull, the bowsprit and the lanterns, never supplied by a
-// client. The stern centre is the cabin, so the pair is bow plus starboard rail
-// rather than fore-and-aft symmetry, and both stay outside every gun's E range.
+// client. `vx`/`vz` is the outward shove the gate gives on top of that: the ship
+// is still under way at 5.8 m/s for the opening voyage, so a pirate merely
+// dropped ahead of the bow is overtaken by the hull while the chase camera is
+// still pinned against it. The bow ramp flings its pirate well clear; the rail
+// gate only needs to open the camera some room beside the hull. The stern
+// centre is the cabin, so the pair is bow plus starboard rail rather than
+// fore-and-aft symmetry, and both stay outside every gun's E range.
 export const SHIP_JUMP_POINTS = [
-  { id: 'jump-gate-bow', name: 'Bow launch gate', x: 0, z: -11, yaw: 0, launch: { x: 0, y: -0.8, z: -25.8 } },
-  { id: 'jump-gate-starboard', name: 'Starboard rail gate', x: 5.2, z: 5, yaw: -Math.PI / 2, launch: { x: 10.2, y: -0.6, z: 5 } },
+  { id: 'jump-gate-bow', name: 'Bow launch gate', x: 0, z: -11, yaw: 0, launch: { x: 0, y: -0.8, z: -27, vx: 0, vz: -18 } },
+  { id: 'jump-gate-starboard', name: 'Starboard rail gate', x: 5.2, z: 5, yaw: -Math.PI / 2, launch: { x: 10.2, y: -0.6, z: 5, vx: 9, vz: 0 } },
 ];
 export const JUMP_INTERACTION_RANGE = 2.2;
+// Time constant, in seconds, of the launch shove while gliding. Movement fades
+// it exponentially so the ordinary glide speed is all that remains soon after.
+export const LAUNCH_CARRY_DECAY = 1.4;
 // Painted approach lanes are guidance, never a trigger. They route the walk
 // around the fore-mast, which stands on the centreline between the opening
 // spawn and the bow gate, so the sign is never the only cue a new pirate has.
@@ -82,8 +90,12 @@ export function jumpPointFor(deck, obstacles = [], target = null) {
     .sort((a, b) => Math.hypot(deck.x - a.x, deck.z - a.z) - Math.hypot(deck.x - b.x, deck.z - b.z))[0] || null;
 }
 
+// The full departure: where the pirate appears and the shove it leaves with.
+// The ship never yaws, so the authored ship-relative shove is already in world
+// axes.
 export function jumpLaunchPose(point, ship) {
-  return { x: ship.x + point.launch.x, y: ship.y + point.launch.y, z: ship.z + point.launch.z };
+  return { x: ship.x + point.launch.x, y: ship.y + point.launch.y, z: ship.z + point.launch.z,
+    launchVx: point.launch.vx || 0, launchVz: point.launch.vz || 0 };
 }
 
 export function gunAim(gun, yaw = gun.yaw, pitch = 0.1) {

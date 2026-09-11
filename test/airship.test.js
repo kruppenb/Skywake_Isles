@@ -171,7 +171,8 @@ test('every spawn slot and gun stance can walk to both gates and depart with a s
       assert.ok(jumpPointFor({ x: p.deckX, z: p.deckZ }, SHIP_OBSTACLES), `${JSON.stringify(start)} reaches ${gate.id}`);
       assert.equal(game.action(p.id, 'interact').ok, true);
       assert.equal(p.mode, 'gliding');
-      assert.deepEqual({ x: p.x, y: p.y, z: p.z }, jumpLaunchPose(gate, shipAt(game.elapsed)));
+      assert.deepEqual({ x: p.x, y: p.y, z: p.z, launchVx: p.launchVx, launchVz: p.launchVz }, jumpLaunchPose(gate, shipAt(game.elapsed)));
+      assert.ok(Math.hypot(p.launchVx, p.launchVz) >= 9, `${gate.id} shoves the pirate away from the hull`);
     }
   }
 });

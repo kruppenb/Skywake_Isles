@@ -940,7 +940,7 @@ export function createUI(callbacks = {}) {
         const host = state.hostId === player.id;
         show(refs['launch-button'], host); show(refs['ready-button'], !host);
         text(refs['ready-button'], player.ready ? 'Ready ✓' : 'Ready for adventure');
-        text(refs['lobby-hint'], host ? 'Sail solo or wait for friends. You’re the captain.' : 'Your captain will set sail when the crew is aboard.');
+        text(refs['lobby-hint'], host ? 'Sail solo or wait for friends. You’re the captain: Enter sets sail.' : 'Your captain will set sail when the crew is aboard. Enter marks you ready.');
       }
       if (won) { victory(state, player); return; }
       if (!playing) return;

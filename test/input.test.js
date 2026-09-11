@@ -5,7 +5,7 @@ import { createInput } from '../client/input.js';
 function fixture(t) {
   const window = new EventTarget(), document = new EventTarget(), canvas = new EventTarget();
   const actions = [], lockChanges = [];
-  let lockRequests = 0;
+  let lockRequests = 0, confirms = 0;
   document.activeElement = canvas; document.pointerLockElement = null; document.hidden = false;
   canvas.closest = () => null;
   canvas.focus = () => { document.activeElement = canvas; };
@@ -19,7 +19,7 @@ function fixture(t) {
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: window });
   Object.defineProperty(globalThis, 'document', { configurable: true, value: document });
-  const input = createInput(canvas, { onAction: action => actions.push(action), onLockChange: locked => lockChanges.push(locked) });
+  const input = createInput(canvas, { onAction: action => actions.push(action), onLockChange: locked => lockChanges.push(locked), onConfirm: () => confirms++ });
   input.setEnabled(true); input.setSuspended(false);
   t.after(() => {
     input.dispose();
@@ -52,8 +52,25 @@ function fixture(t) {
       if (!suppressMouse) emit(window, 'mousemove', event);
     },
   };
-  return { input, window, document, canvas, actions, lockChanges, mouse, emit, lockRequests: () => lockRequests };
+  return { input, window, document, canvas, actions, lockChanges, mouse, emit, lockRequests: () => lockRequests, confirms: () => confirms };
 }
+
+test('Enter confirms from the world once per press, never from a focused control, a repeat, or behind a menu', t => {
+  const { input, window, document, canvas, emit, confirms } = fixture(t);
+  const press = (code, repeat = false) => emit(window, 'keydown', { code, repeat });
+  // With the pointer locked the canvas holds focus, so this is the only way to
+  // reach the lobby's button without a click.
+  assert.equal(press('Enter').defaultPrevented, true); assert.equal(confirms(), 1);
+  press('Enter', true); assert.equal(confirms(), 1);
+  assert.equal(press('NumpadEnter').defaultPrevented, true); assert.equal(confirms(), 2);
+  // A focused button already fires its own click on Enter; confirming as well would act twice.
+  document.activeElement = { closest: () => ({}) };
+  assert.equal(press('Enter').defaultPrevented, false); assert.equal(confirms(), 2);
+  document.activeElement = canvas;
+  input.setSuspended(true); press('Enter'); assert.equal(confirms(), 2);
+  input.setSuspended(false); input.setEnabled(false); press('Enter'); assert.equal(confirms(), 2);
+  input.setEnabled(true); press('Enter'); assert.equal(confirms(), 3);
+});
 
 test('normal right drag preserves mouse movement and ends on right release', t => {
   const { input, mouse, lockRequests } = fixture(t);

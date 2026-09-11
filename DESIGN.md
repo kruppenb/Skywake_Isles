@@ -216,8 +216,14 @@ JUMP_INTERACTION_RANGE and a clear deck route past SHIP_OBSTACLES (no
 replicated in-zone flag). Both branches require phase voyage or finale. The
 server, never the client, supplies the launch pose: shipAt(elapsed) plus the
 gate's authored launch offset, which clears the rail, rendered hull, gunwale
-and bowsprit at every flight time and while parked, then mode='gliding' with
-vy=-6 and an airship-jump event. Three shrine quests any order:
+and bowsprit at every flight time and while parked, plus the gate's outward
+shove (launch vx/vz, replicated as launchVx/launchVz): the ship is under way
+at 5.8 m/s for the opening voyage, so a pirate merely dropped ahead of the bow
+was overtaken by the hull while the camera box still pinned the chase view to
+their head. Shared movement carries the shove only while gliding, on top of
+steering, fading it with LAUNCH_CARRY_DECAY, and drops it on landing or
+aboard, so prediction and authority agree. Then mode='gliding' with vy=-6 and
+an airship-jump event. Three shrine quests any order:
 E within 4m starts a shrine, spawning 3–11 guards scaled with the crew size.
 Defeating its last living guard captures it immediately, with no proximity or
 charging requirement. Cleared shrine grants shared shard, 25 pearls and checkpoint;
@@ -424,7 +430,10 @@ Pointer lock on click; normal keyboard/mouse and right drag fallback supported
 on LAN HTTP, Escape shows pause/help menu and releases input. Left click fire,
 mouse look, WASD/arrows move, Shift sprint, Space jump on land and leave a
 deck gun (never leaves the ship), F cutlass, E interact/revive/jump gate,
-Q heal, R reload, 1/2 weapons, G ping, M large map, Esc menu.
+Q heal, R reload, 1/2 weapons, G ping, M large map, Esc menu. Enter from the
+world confirms the lobby's one button (Set sail for the captain, Ready for the
+rest): clicking the deck to look around locks the pointer, which leaves no way
+to click it. A focused button or field keeps its own Enter.
 Jump gates are persistent deck signage, not a tutorial notice: a dark pad with
 gold chevrons, a gold-framed board reading JUMP in block capitals, and a cyan
 cone pointing outward, plus painted approach lanes routing past the fore-mast.
