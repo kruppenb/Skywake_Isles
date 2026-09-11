@@ -145,8 +145,11 @@ Run with `node --test test/player-character.test.js`; it is part of `npm test`.
 - Locomotion: an `AnimationMixer` blends idle / walk / run by speed (walk in by 4.5 m/s, run
   cross-fades over 3–6.5 m/s). Walk and run are parked and stepped by a distance-driven cycle
   (2.2 m per walk cycle, 3.2 m per run cycle) so feet plant at any speed and the cross-fade keeps
-  one footfall; idle runs on the clock. Remote players get their speed from the interpolation
-  layer exactly as before.
+  one footfall; idle runs on the clock. Meshy's library idle is a look-around that turns the hips
+  54° and the head 56°, so it plays at a quarter of its motion against a hold pose built from its
+  own first frame: the pirate keeps facing its aim with breathing and small glances (measured
+  head travel 16 cm, shoulder travel 15 cm per loop, down from about 54 cm). Remote players get
+  their speed from the interpolation layer exactly as before.
 - Every hand target is `buildPirate`'s: the `WEAPON_HANDLING` stances, `sampleReloadAnimation`
   strokes, recoil, the glider grips at (±.70, 2.29, −.17) and the mounted cannon rails. The
   weapon rig lives in a "torso" group placed so the navigator's shoulders sit at the procedural
@@ -228,7 +231,8 @@ Tests: `node --test test/player-character.test.js` (12/12) and the full `npm tes
 - The stowed gun while gliding sits behind the shoulder blades from a fixed rest offset; it does
   not follow spine motion.
 - Knockback and the mounted-cannon pose are lean-and-IK approximations with no dedicated clip.
-- The idle clip is a Meshy library weight-shift; the character never fully stands square.
+- The idle is Meshy's look-around damped to a quarter; the small glances that remain are the
+  intended amount, and the raw clip still plays undamped in the studio's Prototype view.
 - The remaining hue-mask edge cases: a few coral texels on the collar's underside tint with the
   crew colour (intended) and the headband stays coral (intended); both are choices, not bugs.
 

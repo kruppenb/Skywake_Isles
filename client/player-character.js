@@ -128,6 +128,10 @@ const SUPPORT_HAND_OFFSET = new THREE.Vector3(-.03, -.02, .05);
 const STANCE_DEPTH_KEEP = .9;   // stances keep most of their forward reach; the reach clamp does the rest
 const WALK_CYCLE = 2.2, RUN_CYCLE = 3.2;      // metres of travel per stride cycle
 const SPRINT_FROM = 3.0, SPRINT_TO = 6.5;     // m/s band that cross-fades walk into run
+// Meshy's library idle is a look-around that turns the hips 54° and the head 56°; in gameplay the
+// pirate should face where it aims. The idle plays at this fraction of its motion against its
+// own first frame, which keeps the breathing and small glances and drops the body turn.
+const IDLE_MOTION = .25;
 const BONE_NAMES = {
   hips: 'Hips', spine: 'Spine', head: 'Head', stow: 'stow_back',
   shoulder: { L: 'LeftShoulder', R: 'RightShoulder' }, upper: { L: 'LeftArm', R: 'RightArm' },
@@ -257,17 +261,22 @@ function buildNavigator(asset, palette, color, group) {
     color: '#183c46', transparent: true, opacity: .20, depthWrite: false }));
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);
 
-  // Clips: idle runs on the clock; walk and run are parked (timeScale 0) and stepped by distance.
+  // Clips: idle runs on the clock, damped against a hold pose built from its first frame; walk
+  // and run are parked (timeScale 0) and stepped by distance.
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
   for (const clip of asset.animations) {
     if (!['idle', 'walk', 'run'].includes(clip.name)) continue;
     const action = mixer.clipAction(clip);
-    action.setLoop(THREE.LoopRepeat, Infinity); action.enabled = true; action.setEffectiveWeight(clip.name === 'idle' ? 1 : 0); action.play();
+    action.setLoop(THREE.LoopRepeat, Infinity); action.enabled = true; action.setEffectiveWeight(clip.name === 'idle' ? IDLE_MOTION : 0); action.play();
     if (clip.name !== 'idle') action.timeScale = 0;
     actions[clip.name] = action;
   }
   if (!actions.idle) throw new Error('navigator asset has no idle clip');
+  const holdTracks = actions.idle.getClip().tracks.map(track =>
+    new track.constructor(track.name, [0], Array.from(track.values.subarray(0, track.getValueSize()))));
+  actions.hold = mixer.clipAction(new THREE.AnimationClip('idle_hold', 1, holdTracks));
+  actions.hold.setLoop(THREE.LoopRepeat, Infinity); actions.hold.enabled = true; actions.hold.setEffectiveWeight(1 - IDLE_MOTION); actions.hold.play();
 
   let phase = 0, cycle = 0, locomotion = 0, sprint = 0, aiming = 0, glideBlend = 0, knockBlend = 0, recoil = 0;
   let equipped = 'flintlock', stowed = false;
@@ -338,7 +347,8 @@ function buildNavigator(asset, palette, color, group) {
     // Locomotion clips. The stride cycle advances with distance travelled so feet plant instead of
     // sliding at any speed; walk and run share the cycle so the cross-fade keeps the same footfall.
     cycle = (cycle + motion * dt / THREE.MathUtils.lerp(WALK_CYCLE, RUN_CYCLE, sprint)) % 1;
-    actions.idle.setEffectiveWeight(1 - locomotion);
+    actions.idle.setEffectiveWeight((1 - locomotion) * IDLE_MOTION);
+    actions.hold.setEffectiveWeight((1 - locomotion) * (1 - IDLE_MOTION));
     if (actions.walk) { actions.walk.setEffectiveWeight(locomotion * (1 - sprint)); actions.walk.time = cycle * actions.walk.getClip().duration; }
     if (actions.run) { actions.run.setEffectiveWeight(locomotion * sprint); actions.run.time = cycle * actions.run.getClip().duration; }
     mixer.update(dt);
