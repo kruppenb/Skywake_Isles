@@ -1,6 +1,7 @@
 // Minimal Meshy REST client for the pirate pipeline. Reads MESHY_API_KEY from env, or falls
 // back to the key registered for the Meshy MCP server in ~/.claude.json (never printed).
 // node meshy.mjs m2m <front.jpg> <back.jpg> <left.jpg> <right.jpg>   -> multi-image-to-3d task id
+// node meshy.mjs prop <side.jpg> [left.jpg] [top.jpg]                   -> multi-image-to-3d task id for a static prop (weapons)
 // node meshy.mjs get <kind> <id>                                        -> print task json (kind: m2m|rig|anim|remesh|retex)
 // node meshy.mjs wait <kind> <id>                                       -> poll until done, print json
 // node meshy.mjs download <kind> <id> <dir>                             -> save every result url
@@ -44,6 +45,19 @@ if (cmd === 'm2m') {
     should_remesh: true, topology: 'triangle', target_polycount: 40000, save_pre_remeshed_model: true,
     pose_mode: 'a-pose', auto_size: true, origin_at: 'bottom',
     target_formats: ['glb', 'fbx'], multi_view_thumbnails: true, image_enhancement: true, remove_lighting: true,
+  };
+  const r = await api('POST', PATHS.m2m, body);
+  console.log(r.result);
+} else if (cmd === 'prop') {
+  // Static prop (the weapon plates): no pose, no FBX, a game-sized triangle budget and one 2K
+  // albedo. Same endpoint and task kind as m2m, so wait/download m2m <id> work unchanged.
+  // 30 credits per submit.
+  const image_urls = await Promise.all(a.slice(0, 4).map(dataUri));
+  const body = {
+    image_urls, ai_model: 'meshy-7',
+    should_texture: true, texture_resolution: '2k', enable_pbr: false,
+    should_remesh: true, topology: 'triangle', target_polycount: 8000,
+    target_formats: ['glb'], image_enhancement: true, remove_lighting: true,
   };
   const r = await api('POST', PATHS.m2m, body);
   console.log(r.result);

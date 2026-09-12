@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "weapons": {
+    "flintlock": {
+      "glb": "flintlock.glb",
+      "sha256": "06d021550636ef8e35f859ce057c829bdc2fb1fe40d20522961c423a734c2470",
+      "bytes": 639728,
+      "triangles": {
+        "body": 7200,
+        "action": 1057
+      },
+      "rootNode": "flintlock",
+      "nodes": {
+        "body": "body",
+        "action": "action",
+        "muzzle": "muzzle"
+      },
+      "muzzle": [
+        0,
+        0.13,
+        -1
+      ],
+      "hingePivot": [
+        0.118,
+        0.285,
+        -0.09
+      ],
+      "hingeAxis": [
+        -1,
+        0,
+        0
+      ],
+      "bounds": {
+        "min": [
+          -0.12371,
+          -0.26985,
+          -1
+        ],
+        "max": [
+          0.18163,
+          0.41105,
+          0.3
+        ]
+      },
+      "images": [
+        {
+          "name": "flintlock-albedo",
+          "mimeType": "image/jpeg",
+          "width": 1024,
+          "height": 1024,
+          "embeddedBytes": 292953
+        }
+      ],
+      "materialNames": [
+        "flintlock",
+        "fill"
+      ],
+      "meshyTasks": {
+        "m2m": "01a092d5-6e56-73cf-95f6-def4c7d721a3"
+      },
+      "plates": [
+        "side",
+        "left"
+      ],
+      "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
+    }
+  }
+}

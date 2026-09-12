@@ -1,0 +1,16 @@
+{
+  "model": "gemini-3-pro-image",
+  "imageSize": "2K",
+  "aspectRatio": "4:3",
+  "framing": {
+    "side": "Product reference render of the single pistol, straight-on side view from the gun's right side so the lock plate and hammer face the camera, the muzzle pointing to the left of the frame, the barrel exactly horizontal, the grip hanging down, orthographic-style with no perspective distortion, the whole pistol centered with clear margin on all sides. Plain flat light grey studio background, soft even diffuse lighting, no cast shadow, no rim light, no environment reflections, no hands, no other objects, no text, no labels, no watermark. Painterly hand-painted texture with soft gradients and crisp edge highlights, gentle wear on the wood and brass.",
+    "left": "The attached image is the right-side reference of one stylized pistol. Render exactly the same pistol seen from its left side (mirror view: the muzzle now points to the right of the frame; the left side of the stock shows a plain side plate with a screw or two instead of the hammer, which is only partly visible above the stock). Keep everything identical: same colours, same proportions, same painterly style, same scale and framing, same flat light grey background, no shadow, no hands, no text.",
+    "top": "The attached image is the right-side reference of one stylized pistol. Render exactly the same pistol seen from directly above (top-down view, the barrel horizontal with the muzzle pointing to the left of the frame, the hammer and lock plate on the lower edge of the frame, the grip foreshortened beneath the lock). Keep everything identical: same colours, same proportions, same painterly style, same scale and framing, same flat light grey background, no shadow, no hands, no text."
+  },
+  "weapons": {
+    "flintlock": {
+      "title": "Flintlock",
+      "description": "A chunky stylized sky-pirate flintlock pistol, a hand-painted adventure-game prop. A long thick steel barrel in blue-grey steel (#334b5a), octagonal at the breech and round toward the muzzle, with two brass barrel bands and a brass muzzle ring; a dark walnut stock (#825635) whose thick grip drops nearly straight down from the lock, with only a slight backward curve, and ends in a rounded brass butt cap (#e9b855); a large brass trigger guard; a brass lock plate on the right side carrying a big oversized steel hammer holding a flint, and a brass priming pan; a brass ramrod pipe under the barrel with a pale wooden ramrod. Exaggerated, toy-like, readable proportions: thick barrel, big hammer, big trigger guard, a clean unbroken silhouette, no thin fragile parts, no straps, cords, tassels or chains, no engraved lettering."
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBS
 import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
 import { makePalette, GeoBatch, buildGalleon, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { buildPlayerCharacter } from './player-character.js';
+import { upgradeWeapon } from './weapon-models.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
@@ -882,7 +883,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
         const color = RARITIES[drop.rarity]?.color || '#aebbc5';
         const group = new THREE.Group(); group.name = 'loot-' + drop.id;
         group.userData = { kind: 'loot', weapon: drop.weapon, rarity: drop.rarity, id: drop.id };
-        const gun = buildWeapon(palette, drop.weapon).group;
+        const gun = upgradeWeapon(buildWeapon(palette, drop.weapon), drop.weapon).group;
         gun.name = 'floating-' + drop.weapon; gun.rotation.z = -.14; gun.scale.setScalar(.92);
         const ring = meshRing(.68, .065, color, .75);
         ring.position.y = .075;

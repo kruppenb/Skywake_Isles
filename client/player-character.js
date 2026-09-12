@@ -30,6 +30,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { buildPirate, buildWeapon, buildGlider, WEAPON_HANDLING } from './models.js';
+import { upgradeWeapon } from './weapon-models.js';
 import { sampleReloadAnimation } from './reload-animation.js';
 
 export const NAVIGATOR_URL = '/assets/player-character/navigator-meshy.glb';
@@ -169,6 +170,8 @@ export function buildPlayerCharacter(palette, color = '#eb785d', { url = NAVIGAT
     fire(weapon) { (navigator || fallback).fire(weapon); },
     getMuzzle(target) { return (navigator || fallback).getMuzzle(target); },
     setCrewColor(hex) { if (navigator) navigator.setCrewColor(hex); },
+    // The rig's innards, for the character studio only: null until the GLB has built a navigator.
+    get debug() { return navigator ? navigator.debug : null; },
     dispose() { disposed = true; if (navigator) navigator.dispose(); },
   };
 }
@@ -245,7 +248,7 @@ function buildNavigator(asset, palette, color, group) {
   const stowRig = new THREE.Group(); stowRig.name = 'weapon-back-stow-rig';
   stowRig.position.set(stowRest.x + .10, stowRest.y - torso.position.y + .05, stowRest.z + .18);
   stowRig.rotation.set(-Math.PI / 2, 0, Math.PI / 2 + .12); torso.add(stowRig);
-  const weapons = Object.fromEntries(WEAPON_ORDER.map(kind => [kind, buildWeapon(palette, kind)]));
+  const weapons = Object.fromEntries(WEAPON_ORDER.map(kind => [kind, upgradeWeapon(buildWeapon(palette, kind), kind)]));
   const weaponEntries = Object.entries(weapons);
   for (const [, weapon] of weaponEntries) {
     weapon.group.scale.setScalar(WEAPON_SCALE); weapon.stowed.scale.setScalar(WEAPON_SCALE);
@@ -332,7 +335,12 @@ function buildNavigator(asset, palette, color, group) {
     previousReloadUntil = reloadUntil;
     equipped = nextWeapon; stowed = falling;
     const handling = WEAPON_HANDLING[equipped];
-    const reload = sampleReloadAnimation(equipped, reloadUntil, elapsed, handling.left,
+    // Wrist anchors only: a gun drawing a GLB carries its own pair (client/weapon-models.js's
+    // WEAPON_ASSET_HANDLING), tuned against this character's hands and that mesh's grip. Stance,
+    // support roll and everything else stay WEAPON_HANDLING's, and a procedural gun has no
+    // override at all, so the lookup is a property read per frame and allocates nothing.
+    const anchors = (weapons[equipped] && weapons[equipped].handling) || handling;
+    const reload = sampleReloadAnimation(equipped, reloadUntil, elapsed, anchors.left,
       canReload && reloadUntil !== cancelledReloadUntil);
     // Distance-driven phase never changes frequency discontinuously at sprint.
     phase = (phase + motion * dt * 1.22) % (Math.PI * 2);
@@ -381,7 +389,7 @@ function buildNavigator(asset, palette, color, group) {
     weaponRig.position.sub(PROCEDURAL_SHOULDER).multiply(stanceScale).add(PROCEDURAL_SHOULDER);
     weaponRig.rotation.set(pitch + recoil * .055 * (1 - reload.work) - knockBlend * .05, .30 * reload.work, reload.roll * reload.work);
     for (const arm of arms) {
-      arm.anchor.position.fromArray(arm.side < 0 ? reload.hand : handling.right);
+      arm.anchor.position.fromArray(arm.side < 0 ? reload.hand : anchors.right);
       arm.anchor.position.add(arm.side > 0 ? FIRING_HAND_OFFSET : SUPPORT_HAND_OFFSET);
       arm.anchor.position.multiplyScalar(WEAPON_SCALE);
       arm.anchor.rotation.set(0, arm.side < 0 ? -.12 * reload.release : 0,
@@ -475,6 +483,6 @@ function buildNavigator(asset, palette, color, group) {
     },
     setCrewColor(hex) { for (const material of materials) setCrewTint(material, hex); },
     dispose() { mixer.stopAllAction(); mixer.uncacheRoot(root); },
-    debug: { root, bones, arms, legs, torso, weaponRig, stowRig, mixer, actions, reachScale, shoulderHeight },
+    debug: { root, bones, arms, legs, torso, weaponRig, stowRig, weapons, mixer, actions, reachScale, shoulderHeight },
   };
 }
