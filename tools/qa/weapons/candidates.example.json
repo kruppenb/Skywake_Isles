@@ -1,0 +1,6 @@
+[
+  { "label": "procedural", "right": [0.055, -0.145, 0.21], "left": [-0.24, -0.17, 0.075],
+    "note": "WEAPON_HANDLING.flintlock as shipped, tuned for the procedural gun" },
+  { "label": "chosen", "right": [0.055, -0.025, 0.375], "left": [-0.20, -0.085, 0.28],
+    "note": "the flintlock GLB's shipped WEAPON_ASSET_HANDLING anchor" }
+]

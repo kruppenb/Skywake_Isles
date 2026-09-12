@@ -4,7 +4,9 @@ Status: **gun 1, the flintlock, is built** (`client/assets/weapons/flintlock.glb
 `01a092d5-6e56-73cf-95f6-def4c7d721a3`); the other four guns are still `buildWeapon`'s procedural
 meshes. This document describes the pipeline that turns a concept plate into
 `client/assets/weapons/<kind>.glb`, the gun-space contract that GLB must satisfy, and how to add
-the next gun. It is the weapon counterpart of `docs/PLAYER_CHARACTER.md`, and it follows the same
+the next gun. The end-to-end workflow (who does what, the gates, the per-gun landmark table and
+the QA scripts in `tools/qa/weapons/`) is the `/gun-update <kind>` skill in
+`.claude/skills/gun-update/SKILL.md`. It is the weapon counterpart of `docs/PLAYER_CHARACTER.md`, and it follows the same
 rule: every step is a script, nothing in a shipped asset is hand-edited, and every number in the
 manifest is measured from the bytes the game loads.
 
