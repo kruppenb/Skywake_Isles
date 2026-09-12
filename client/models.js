@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { sampleReloadAnimation } from './reload-animation.js';
-import { SHIP_SCALE, SHIP_GUNS, SHIP_JUMP_POINTS, SHIP_JUMP_APPROACHES, gunAim, GUN_PIVOT_HEIGHT, GUN_MUZZLE_LENGTH } from '../shared/airship.js';
+import { buildGalleon as buildShipModel, buildDeckCannon as buildShipDeckCannon } from './ship-model.js';
 
 // Original, compact geometry for Skywake Isles. A part is baked into a colored
 // batch whenever it does not need to articulate; the island is not a forest of
@@ -174,188 +174,15 @@ export function addHut(batch, x, y, z, size = 1, angle = 0) {
   roof.dispose(); pyramid.dispose(); mesh.geometry.dispose();
 }
 
+// Ship visuals live in a focused module; the dependency injection keeps that
+// module independent of this general scenery file while preserving this public
+// API for world.js and existing callers.
 export function buildGalleon(palette) {
-  const group = new THREE.Group(), base = new THREE.Group(), b = new GeoBatch(palette);
-  group.name = 'airship'; base.name = 'airship-scaled-hull';
-  base.scale.set(SHIP_SCALE.x, SHIP_SCALE.y, SHIP_SCALE.z); group.add(base);
-  const sailMaterial = palette.solid.clone();
-  sailMaterial.transparent = true;
-  const sailBatch = new GeoBatch(palette, sailMaterial);
-  const cabinMaterial = palette.solid.clone();
-  cabinMaterial.transparent = true;
-  const cabinBatch = new GeoBatch(palette, cabinMaterial);
-  const rows = [[-15, .12], [-13, 2.0], [-10, 3.75], [-5, 4.55], [1, 4.75], [6, 4.5], [10, 3.8], [12, 2.0]];
-  const hullVertices = [], hullIndices = [];
-  for (const [z, width] of rows) {
-    for (const [sx, yy] of [[-1, .2], [-.98, -1.3], [-.73, -3.05], [0, -4.2], [.73, -3.05], [.98, -1.3], [1, .2]]) hullVertices.push(sx * width, yy * Math.min(1, width / 2), z);
-  }
-  for (let j = 0; j < rows.length - 1; j++) for (let k = 0; k < 6; k++) {
-    const a = j * 7 + k, c = a + 7;
-    hullIndices.push(a, a + 1, c, a + 1, c + 1, c);
-  }
-  const hull = surface(hullVertices, hullIndices);
-  b.add(hull, [0, 0, 0], [1, 1, 1], [0, 0, 0], '#193f59'); hull.dispose();
-  const outline = rows.map(([z, w]) => [-w, z]).concat(rows.slice().reverse().map(([z, w]) => [w, z]));
-  const deck = flatShape(outline, .12);
-  b.add(deck, [0, -.12, 0], [1, 1, 1], [0, 0, 0], '#b97946'); deck.dispose();
-  for (let z = -12; z <= 10; z += 1.15) {
-    const rowIndex = rows.findIndex(r => r[0] >= z), a = rows[Math.max(0, rowIndex - 1)], c = rows[Math.max(1, rowIndex)];
-    const w = THREE.MathUtils.lerp(a[1], c[1], (z - a[0]) / (c[0] - a[0]));
-    b.add('box', [0, .025, z], [w * 1.9, .045, .95], [0, 0, 0], Math.round(z) % 2 ? '#d5a161' : '#ca9258');
-  }
-  for (let side of [-1, 1]) {
-    for (let j = 0; j < rows.length - 1; j++) {
-      const [az, aw] = rows[j], [bz, bw] = rows[j + 1];
-      b.line([side * aw, .2, az], [side * bw, .2, bz], .2, '#684733');
-      // Broad gun ports give the full swivel arc an unobstructed rail opening.
-      const ports = SHIP_GUNS.filter(gun => Math.sign(gun.x) === side).map(gun => [(gun.z - 3.6) / SHIP_SCALE.z, (gun.z + 3.6) / SHIP_SCALE.z]);
-      const cuts = [az, bz, ...ports.flat().filter(z => z > az && z < bz)].sort((a, c) => a - c);
-      const insidePort = z => ports.some(([low, high]) => z >= low && z <= high);
-      const railWidth = z => THREE.MathUtils.lerp(aw, bw, (z - az) / (bz - az));
-      for (let k = 0; k < cuts.length - 1; k++) {
-        const start = cuts[k], end = cuts[k + 1];
-        if (!insidePort((start + end) / 2)) b.line([side * railWidth(start), 1.05, start], [side * railWidth(end), 1.05, end], .13, '#f0c05d');
-      }
-      b.line([side * aw * .99, -1.1, az], [side * bw * .99, -1.1, bz], .11, '#e8b655');
-      b.line([side * aw * .77, -2.9, az], [side * bw * .77, -2.9, bz], .08, '#34718a');
-      if (!insidePort(az)) b.line([side * aw, .1, az], [side * aw, 1.04, az], .09, '#7c5636');
-    }
-    for (let z of [-7, -2, 3, 7]) {
-      b.add('sphere', [side * 4.43, -1.8, z], [.13, .34, .40], [0, 0, 0], '#e5b04e');
-      b.add('sphere', [side * 4.53, -1.8, z], [.10, .22, .28], [0, 0, 0], '#4fc0cc');
-    }
-  }
-  cabinBatch.add('box', [0, 1.25, 8.45], [6.4, 2.5, 4.0], [0, 0, 0], '#24495f');
-  cabinBatch.add('box', [0, 2.65, 8.35], [7, .30, 4.55], [0, 0, 0], '#a96a42');
-  for (const x of [-2.2, 0, 2.2]) {
-    cabinBatch.add('box', [x, 1.5, 10.48], [1.4, 1.3, .12], [0, 0, 0], '#e8b44f');
-    cabinBatch.add('box', [x, 1.5, 10.56], [1.12, 1.04, .08], [0, 0, 0], '#a6e7d2');
-    cabinBatch.add('box', [x, 1.5, 10.62], [.09, 1.1, .08], [0, 0, 0], '#896441');
-  }
-  b.add('box', [0, -.9, 12.2], [.45, 4.8, 1.7], [.15, 0, 0], '#915d3c');
-  b.line([0, .15, -12], [0, 2.2, -19], .21, '#886043');
-  b.add('pebble', [0, .85, -15], [.70, .85, 1.25], [.35, 0, 0], '#f4c261');
-  for (const [z, h, width] of [[-4.8, 18.8, 12], [4.4, 15.4, 10.2]]) {
-    b.add('cylinder', [0, h / 2, z], [.20, h, .20], [0, 0, 0], '#755337');
-    b.line([-width / 2, h - 2.0, z], [width / 2, h - 2.0, z], .13, '#926441');
-    const vertices = [], indices = [], colors = [];
-    for (let yy = 0; yy <= 8; yy++) for (let xx = 0; xx <= 10; xx++) {
-      const u = xx / 10, v = yy / 8;
-      const x = (u - .5) * width * (.8 + .2 * v);
-      const y = h - 9.6 + v * 7.5 + .40 * Math.sin(u * Math.PI);
-      const zz = z - .1 - 1.65 * Math.sin(u * Math.PI) * Math.sin(v * Math.PI);
-      vertices.push(x, y, zz);
-      const tint = new THREE.Color(xx >= 4 && xx <= 6 && yy > 1 && yy < 7 ? '#f5d18a' : '#fff0cb');
-      colors.push(tint.r, tint.g, tint.b);
-      if (yy < 8 && xx < 10) { const n = yy * 11 + xx; indices.push(n, n + 1, n + 11, n + 1, n + 12, n + 11); }
-    }
-    const sail = surface(vertices, indices);
-    sail.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    sailBatch.add(sail); sail.dispose();
-    b.line([-width / 2, h - 2, z], [-3.9, .2, z + 2], .032, '#9d865d');
-    b.line([width / 2, h - 2, z], [3.9, .2, z + 2], .032, '#9d865d');
-    b.line([0, h - .2, z], [0, .5, -14.2], .037, '#917a51');
-    b.add('sphere', [0, h + .05, z], [.26, .26, .26], [0, 0, 0], '#efbf5c');
-  }
-  // A little gold compass crest in front of the main billowing sail.
-  b.add('pebble', [0, 12.3, -6.65], [.85, 1.23, .13], [0, 0, 0], '#1c647a');
-  b.add('pebble', [0, 12.3, -6.83], [.34, .68, .08], [0, 0, 0], '#ffc85a');
-  for (const side of [-1, 1]) for (const z of [-7, 3, 9]) {
-    b.line([side * 4.2, .9, z], [side * 5.0, 1.6, z], .065, '#cfac61');
-    b.add('cylinder', [side * 5, 1.1, z], [.22, .7, .22], [0, 0, 0], '#b47d38');
-    b.add('sphere', [side * 5, 1.1, z], [.18, .27, .18], [0, 0, 0], '#ffe9a2');
-  }
-  for (const [x, z] of [[-3, 4], [3, 5], [-3, -8]]) {
-    b.add('cylinder', [x, .6, z], [.55, 1.2, .55], [0, 0, 0], '#956136');
-    for (const y of [.22, .95]) b.add('cylinder', [x, y, z], [.57, .10, .57], [0, 0, 0], '#384a56');
-  }
-  b.add('box', [0, 2.85, 7], [.22, 1.0, .22], [0, 0, 0], '#6f4d35');
-  b.add('ring', [0, 3.35, 7], [.70, .70, .7], [.15, 0, 0], '#efbd5a');
-  for (let k = 0; k < 6; k++) {
-    const a = k * Math.PI / 3;
-    b.line([0, 3.35, 7], [Math.sin(a) * .83, 3.35 + Math.cos(a) * .83, 7], .06, '#c48b46');
-  }
-  const sails = sailBatch.mesh();
-  const cabin = cabinBatch.mesh();
-  const hullMesh = b.mesh(); hullMesh.name = 'airship-hull-and-deck';
-  sails.name = 'airship-sails'; cabin.name = 'airship-cabin';
-  base.add(hullMesh, sails, cabin);
-  const pennantBatch = new GeoBatch(palette);
-  const flag = surface([0, 0, 0, 3.2, -.2, 0, 2.4, -.95, 0, 0, -1.3, 0], [0, 1, 2, 0, 2, 3]);
-  pennantBatch.add(flag, [0, 0, 0], [1, 1, 1], [0, 0, 0], '#ed8366'); flag.dispose();
-  const pennant = pennantBatch.mesh(); pennant.position.set(0, 18.4, -4.8); base.add(pennant);
-  // Stations use shared, already enlarged deck coordinates, outside the scaled hull.
-  const guns = new Map(SHIP_GUNS.map(gun => {
-    const model = buildDeckCannon(palette, gun); group.add(model.group); return [gun.id, model];
-  }));
-  const gates = new Map(SHIP_JUMP_POINTS.map(point => {
-    const model = buildJumpGate(palette, point); group.add(model.group); return [point.id, model];
-  }));
-  // Outlined chevrons walk the authored approach lanes in already-enlarged deck
-  // coordinates, so the route past the fore-mast is painted on the planks.
-  const laneBatch = new GeoBatch(palette);
-  for (const lanes of Object.values(SHIP_JUMP_APPROACHES)) for (const lane of lanes) {
-    for (let i = 0; i < lane.length - 1; i++) {
-      const from = lane[i], to = lane[i + 1];
-      const span = Math.hypot(to.x - from.x, to.z - from.z), heading = Math.atan2(to.x - from.x, to.z - from.z);
-      for (let step = 0; step < Math.max(1, Math.round(span / 1.15)); step++) {
-        const t = (step + .5) / Math.max(1, Math.round(span / 1.15));
-        const x = from.x + (to.x - from.x) * t, z = from.z + (to.z - from.z) * t;
-        addDeckChevron(laneBatch, x, z, heading, .45, .5, .1, .22, '#24404f');
-        addDeckChevron(laneBatch, x, z, heading, .43, .47, .115, .12, '#f7c559');
-      }
-    }
-  }
-  const lanes = laneBatch.mesh(); lanes.name = 'jump-gate-approach-lanes'; group.add(lanes);
-  return { group, base, sails, cabin, guns, gates, animate(time, reducedMotion = false) {
-    pennant.rotation.y = -.3 + Math.sin(time * 2) * .18;
-    for (const gate of gates.values()) gate.animate(time, reducedMotion);
-  } };
+  return buildShipModel(palette, { buildJumpGate, addDeckChevron });
 }
 
 export function buildDeckCannon(palette, gun) {
-  const group = new THREE.Group(), swivel = new THREE.Group(), elevation = new THREE.Group(), barrel = new THREE.Group();
-  group.name = gun.id; group.userData.gunId = gun.id; group.position.set(gun.x, 0, gun.z);
-  swivel.name = 'cannon-swivel'; elevation.name = 'cannon-elevation'; barrel.name = 'cannon-recoil-barrel';
-  const port = gun.x < 0, fore = gun.z < -4;
-  const wood = port ? '#956445' : '#ac7649', steel = port ? '#294b60' : '#364858', brass = fore ? '#e9b95e' : '#d49a49';
-  const base = new GeoBatch(palette);
-  base.add('cylinder', [0, .11, 0], [.58, .22, .58], [0, 0, 0], '#405967');
-  base.add('cylinder', [0, .12 + (GUN_PIVOT_HEIGHT - .5) / 2, 0], [.42, GUN_PIVOT_HEIGHT - .5, .42], [0, 0, 0], wood);
-  for (const y of [.3, GUN_PIVOT_HEIGHT - .47]) base.add('cylinder', [0, y, 0], [.45, .12, .45], [0, 0, 0], brass);
-  base.add('cylinder', [0, GUN_PIVOT_HEIGHT - .32, 0], [.5, .2, .5], [0, 0, 0], steel);
-  const pedestal = base.mesh(); pedestal.name = 'cannon-pedestal'; group.add(pedestal, swivel);
-  swivel.position.y = GUN_PIVOT_HEIGHT;
-  const fork = new GeoBatch(palette);
-  for (const side of [-1, 1]) {
-    fork.add('box', [side * .42, -.12, 0], [.16, .57, .62], [0, 0, side * -.13], steel);
-    fork.add('cylinder', [side * .49, 0, 0], [.17, .15, .17], [0, 0, Math.PI / 2], brass);
-  }
-  swivel.add(fork.mesh(), elevation); elevation.add(barrel);
-  const tube = new GeoBatch(palette);
-  tube.add('sphere', [0, 0, .15], [.34, .34, .45], [0, 0, 0], steel);
-  tube.line([0, 0, .1], [0, 0, -GUN_MUZZLE_LENGTH + .08], .28, steel, .88);
-  for (const z of [-.12, -.75, -1.7, -GUN_MUZZLE_LENGTH + .1]) {
-    tube.add('cylinder', [0, 0, z], [.315, .13, .315], [Math.PI / 2, 0, 0], brass);
-  }
-  tube.add('cylinder', [0, 0, -GUN_MUZZLE_LENGTH + .009], [.232, .018, .232], [Math.PI / 2, 0, 0], '#102c3a');
-  tube.add('box', [0, .32, -1.4], [.07, .13, .12], [0, 0, 0], brass);
-  tube.line([0, -.1, .4], [0, -.24, .84], .075, wood);
-  tube.line([-.32, -.24, .84], [.32, -.24, .84], .07, wood);
-  barrel.add(tube.mesh());
-  const muzzle = new THREE.Object3D(); muzzle.name = 'cannon-muzzle'; muzzle.position.z = -GUN_MUZZLE_LENGTH; elevation.add(muzzle);
-  let recoil = 0;
-  function animate(dt, yaw = gun.yaw, pitch = .1, occupantId = null) {
-    const aim = gunAim(gun, yaw, pitch);
-    swivel.rotation.y = aim.yaw; elevation.rotation.x = aim.pitch;
-    recoil *= Math.exp(-16 * Math.max(0, dt)); barrel.position.z = recoil * .36;
-    group.userData.occupantId = occupantId;
-  }
-  animate(0);
-  return { group, swivel, elevation, barrel, muzzle, animate,
-    fire() { recoil = 1; barrel.position.z = .36; },
-    getMuzzle(target = new THREE.Vector3()) { muzzle.updateWorldMatrix(true, false); return muzzle.getWorldPosition(target); },
-  };
+  return buildShipDeckCannon(palette, gun);
 }
 
 export function buildFlyingCrab(palette) {
