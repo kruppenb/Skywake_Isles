@@ -1,0 +1,5 @@
+{
+  "meshyTasks": { "m2m": "01a093f7-8504-73a2-8436-be4019fcef3c" },
+  "plates": ["side", "left"],
+  "promptsFile": "tools/meshy/weapon-prompts.json"
+}

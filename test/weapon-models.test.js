@@ -49,9 +49,9 @@ function syntheticAsset(kind = KIND, { hingeAxis = [-1, 0, 0], omit = '', split 
 }
 
 const palette = makePalette();
-function upgraded(options) {
-  const weapon = buildWeapon(palette, KIND);
-  assert.equal(applyWeaponAsset(weapon, KIND, syntheticAsset(KIND, options)), true, 'the synthetic asset should apply');
+function upgraded(options, kind = KIND) {
+  const weapon = buildWeapon(palette, kind);
+  assert.equal(applyWeaponAsset(weapon, kind, syntheticAsset(kind, options)), true, 'the synthetic asset should apply');
   return weapon;
 }
 // The exact three lines client/player-character.js and the studio run on the action every frame.
@@ -65,8 +65,9 @@ function frame(weapon, open) {
 
 test('every shipped kind has a frozen asset URL and unknown kinds never start a load', () => {
   assert.equal(WEAPON_ASSET_URLS.flintlock, '/assets/weapons/flintlock.glb');
+  assert.equal(WEAPON_ASSET_URLS.scatter, '/assets/weapons/scatter.glb');
   assert.ok(Object.isFrozen(WEAPON_ASSET_URLS));
-  assert.equal(loadWeaponAsset('scatter'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
+  assert.equal(loadWeaponAsset('repeater'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
   assert.equal(loadWeaponAsset('flintlock', ''), null);
 });
 
@@ -266,7 +267,7 @@ test('upgradeWeapon applies a supplied asset, and in Node without one it is a no
   assert.equal(body.geometry, snapshot.geometry);
   assert.equal(procedural.action, snapshot.action);
   closeTo(procedural.socket.position, snapshot.socket, 'muzzle socket');
-  assert.equal(upgradeWeapon(procedural, 'scatter'), procedural, 'a kind with no asset is a no-op');
+  assert.equal(upgradeWeapon(procedural, 'repeater'), procedural, 'a kind with no asset is a no-op');
   assert.equal(upgradeWeapon(null, KIND), null);
 });
 
@@ -296,11 +297,51 @@ test('upgrading hands the gun its own wrist anchors, and a kind with no entry ge
   }
   // The renderers read `weapon.handling || WEAPON_HANDLING[kind]`, so a gun whose kind is not in
   // the table has to fall through rather than take a half-filled object.
-  const other = buildWeapon(palette, 'scatter');
-  assert.equal(WEAPON_ASSET_HANDLING.scatter, undefined, 'this case needs a kind with no tuned anchors');
-  assert.equal(applyWeaponAsset(other, 'scatter', syntheticAsset('scatter')), true);
+  const other = buildWeapon(palette, 'repeater');
+  assert.equal(WEAPON_ASSET_HANDLING.repeater, undefined, 'this case needs a kind with no tuned anchors');
+  assert.equal(applyWeaponAsset(other, 'repeater', syntheticAsset('repeater')), true);
   assert.equal(other.handling, null, 'an untuned kind must fall back to WEAPON_HANDLING');
   assert.ok(!other.handling, 'and must be falsy so the || in the renderers picks the procedural pair');
+});
+
+test('the scatter upgrades to its own GLB and its own wrist anchors', () => {
+  assert.equal(WEAPON_ASSET_URLS.scatter, '/assets/weapons/scatter.glb', "the blunderbuss's asset URL is frozen in");
+  const weapon = upgraded({}, 'scatter');
+  assert.equal(weapon.asset, 'scatter');
+  assert.equal(weapon.handling, WEAPON_ASSET_HANDLING.scatter, 'the upgraded scatter must carry its own anchors');
+  for (const side of ['right', 'left']) {
+    assert.equal(weapon.handling[side].length, 3, `${side} anchor must be an [x, y, z] triple`);
+    assert.ok(weapon.handling[side].every(Number.isFinite), `${side} anchor must be finite`);
+  }
+  // Tuned in the character studio against the shipped GLB, whose grip is raked back to z .19 .. .43
+  // and whose fore-end is a tube fused to the barrel rather than a block hanging to y -.18: both
+  // wrists ride up and back, so neither anchor may be the procedural pair any more.
+  assert.notDeepEqual([...weapon.handling.right], WEAPON_HANDLING.scatter.right,
+    'the firing override exists because the GLB grip is not the procedural slab');
+  assert.notDeepEqual([...weapon.handling.left], WEAPON_HANDLING.scatter.left,
+    'the support override exists because the GLB fore-end is not the procedural block');
+  closeTo(weapon.socket.position, MUZZLE, 'the scatter muzzle socket moves to the asset node');
+});
+
+test("the scatter's loading gate swings about the asset hinge axis through the asset pivot", () => {
+  const weapon = upgraded({}, 'scatter');
+  const carrier = weapon.group.getObjectByName('reload-action-mesh-scatter');
+  assert.ok(carrier, 'the scatter must get the same hinge -> action -> mesh carrier chain');
+  // buildWeapon gives the scatter the flintlock's loading gate, so the frame code parks the action
+  // at its own procedural actionOrigin and the chain still has to cancel that translation.
+  near(weapon.actionOrigin.x, -.115, "actionOrigin is buildWeapon's scatter gate, untouched");
+  const axis = new THREE.Vector3(-1, 0, 0);
+  frame(weapon, 0);
+  closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'at rest the scatter gate must sit exactly where the GLB placed it');
+  for (const open of [0, .17, .5, .83, 1]) {
+    frame(weapon, open);
+    closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld),
+      PIVOT.clone().add(CARRIER_POINT.clone().applyAxisAngle(axis, -1.15 * open)), `scatter open ${open}`);
+  }
+  const stowedCarrier = weapon.stowed.getObjectByName('stowed-reload-action-mesh-scatter');
+  closeTo(CARRIER_POINT.clone().applyMatrix4(stowedCarrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'the stowed scatter never animates');
 });
 
 test('a gun that never upgraded keeps the procedural fit and carries no anchors of its own', () => {

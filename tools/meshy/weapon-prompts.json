@@ -11,6 +11,10 @@
     "flintlock": {
       "title": "Flintlock",
       "description": "A chunky stylized sky-pirate flintlock pistol, a hand-painted adventure-game prop. A long thick steel barrel in blue-grey steel (#334b5a), octagonal at the breech and round toward the muzzle, with two brass barrel bands and a brass muzzle ring; a dark walnut stock (#825635) whose thick grip drops nearly straight down from the lock, with only a slight backward curve, and ends in a rounded brass butt cap (#e9b855); a large brass trigger guard; a brass lock plate on the right side carrying a big oversized steel hammer holding a flint, and a brass priming pan; a brass ramrod pipe under the barrel with a pale wooden ramrod. Exaggerated, toy-like, readable proportions: thick barrel, big hammer, big trigger guard, a clean unbroken silhouette, no thin fragile parts, no straps, cords, tassels or chains, no engraved lettering."
+    },
+    "scatter": {
+      "title": "Scatter",
+      "description": "A chunky stylized sky-pirate blunderbuss pistol, a hand-painted adventure-game prop. A short thick barrel in blue-grey steel (#334b5a), octagonal at the breech and round in the middle, that swells forward into a big wide trumpet-flared brass muzzle (#e9b855) with a thick rolled brass rim, the mouth of the flare nearly as tall as the lock; one brass barrel band where the steel meets the flare; a dark walnut stock (#825635) with a fat rounded wooden fore-end running forward under the barrel to just behind the flare, and a thick grip that drops nearly straight down from the lock with only a slight backward curve and ends in a rounded brass butt cap; a large brass trigger guard; a brass lock plate on the right side carrying a big oversized steel hammer holding a flint, and a brass priming pan; no ramrod. The flared barrel is a little over half the gun's length. Exaggerated, toy-like, readable proportions: fat barrel, huge flared muzzle, big hammer, big trigger guard, a clean unbroken silhouette, no thin fragile parts, no straps, cords, tassels or chains, no engraved lettering."
     }
   }
 }

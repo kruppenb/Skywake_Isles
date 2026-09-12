@@ -5,6 +5,7 @@ Usage:
       --in <meshy.glb> --kind flintlock --out client/assets/weapons/flintlock.glb \
       [--length 1.30] [--bore-y .13] [--muzzle-z -1.0] \
       [--forward auto|+X|-X|+Y|-Y|+Z|-Z] [--up auto|...] [--lock-side auto|+X|-X] \
+      [--muzzle-end thinner|wider] [--level-band .02 .35] \
       [--action-box x0 y0 z0 x1 y1 z1] [--hinge x y z] [--hinge-axis -1 0 0] \
       [--bore-from muzzle-face|band] [--texture-size 1024] [--texture-format auto|png|jpeg] \
       [--report <json>] [--allow-misfit]
@@ -13,6 +14,13 @@ Gun space (the runtime contract, glTF axes): -Z is the muzzle direction, +Y is u
 right side -- the lock plate / hammer side. The shipped GLB is a root node named <kind> (identity
 TRS) with children `body` (mesh, identity TRS), optional `action` (mesh whose node position is the
 hinge pivot and whose extras carry `hingeAxis`) and the empty `muzzle`.
+
+`--kind` also selects the landmark table the export is verified against (CONTRACTS below, one
+entry per shipped gun; an unknown kind is an error, never a silent flintlock).
+
+`--muzzle-end wider` flips the auto muzzle-end vote for a gun whose muzzle is the *fatter* end (a
+blunderbuss flare); `--level-band lo hi` moves the bore-levelling window off the flare onto the
+straight barrel behind it. Both default to the flintlock's behaviour.
 
 Axis bookkeeping: Blender's glTF importer maps glTF +Y-up/-Z-forward onto Blender Z-up/-Y-forward
 (blender = (gx, -gz, gy)) and the exporter maps back with export_yup=True. Every decision below is
@@ -26,16 +34,17 @@ What it does:
   * clears Meshy's custom split normals (shade-auto-smooth instead) so a mirror stays sane
   * rebuilds the material: one Principled BSDF with the albedo in Base Color, metallic 0,
     roughness .7, no emission (Meshy wires the albedo into emission, which renders unlit)
-  * orients: PCA longest axis = barrel; the thinner end is the muzzle; the half with the most
-    vertices far from the bore is the grip; the lock plate goes to +X (mirroring if it is on -X)
+  * orients: PCA longest axis = barrel; the thinner end is the muzzle (--muzzle-end wider for a
+    flared one); the half with the most vertices far from the bore is the grip; the lock plate
+    goes to +X (mirroring if it is on -X)
   * scales so the length along gun Z is --length, then translates the barrel-span bore centroid to
     x 0 / y --bore-y and the front-most z to --muzzle-z
   * splits the faces whose centroid is inside --action-box into `action`, fills the holes left in
     both halves with the flat `fill` material (#1c2a33), moves the action origin to --hinge
   * adds the `muzzle` empty at the measured bore end, parents everything to the root
   * downscales the albedo to --texture-size and packs it, then exports the GLB
-  * re-reads the exported bytes, measures the landmarks from them, prints the table and writes
-    --report; exits 1 on a landmark miss unless --allow-misfit
+  * re-reads the exported bytes, measures the landmarks from them against CONTRACTS[--kind],
+    prints the table and writes --report; exits 1 on a landmark miss unless --allow-misfit
 """
 import bpy, bmesh, json, math, os, struct, sys, tempfile
 import numpy as np
@@ -44,7 +53,7 @@ from mathutils import Matrix, Vector
 # ----------------------------------------------------------------------------- arguments
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 FLAGS = {'allow-misfit'}
-ARITY = {'action-box': 6, 'hinge': 3, 'hinge-axis': 3}
+ARITY = {'action-box': 6, 'hinge': 3, 'hinge-axis': 3, 'level-band': 2}
 opts = {}
 i = 0
 while i < len(argv):
@@ -65,6 +74,8 @@ MUZZLE_Z = float(opts.get('muzzle-z', -1.0))
 FORWARD = opts.get('forward', 'auto')
 UP = opts.get('up', 'auto')
 LOCK = opts.get('lock-side', 'auto')
+MUZZLE_END = opts.get('muzzle-end', 'thinner')
+LEVEL_BAND = tuple(float(v) for v in opts.get('level-band', [.02, .35]))
 ACTION_BOX = opts.get('action-box')
 HINGE = opts.get('hinge')
 HINGE_AXIS = opts.get('hinge-axis', [-1.0, 0.0, 0.0])
@@ -85,6 +96,51 @@ FILL_COLOR = (0x1c, 0x2a, 0x33)
 
 AXES = {'+X': (1., 0., 0.), '-X': (-1., 0., 0.), '+Y': (0., 1., 0.),
         '-Y': (0., -1., 0.), '+Z': (0., 0., 1.), '-Z': (0., 0., -1.)}
+
+if MUZZLE_END not in ('thinner', 'wider'):
+    raise SystemExit(f'--muzzle-end must be thinner or wider, not {MUZZLE_END!r}')
+if not (0.0 <= LEVEL_BAND[0] < LEVEL_BAND[1] <= 1.0):
+    raise SystemExit(f'--level-band wants two increasing fractions of the length in [0, 1], '
+                     f'got {LEVEL_BAND[0]} {LEVEL_BAND[1]}')
+
+# ----------------------------------------------------------------------------- contracts
+# The gun-space landmark table the exported bytes are verified against, one entry per shipped gun.
+# These are the same numbers test/weapon-assets.test.js checks independently against the shipped
+# GLB, and docs/WEAPON_MODELS.md quotes for the flintlock; a new gun gets its own entry here rather
+# than widening someone else's. Every range is [lo, hi]; a bare number is an upper bound.
+#   grip.zFrom (optional) -- only body vertices at or behind this z count as grip, so a fore-end
+#   hanging under the barrel cannot drag the grip centroid forward. The flintlock has none.
+CONTRACTS = {
+    'flintlock': {
+        'bounds': {'zMin': (-1.12, -.92), 'zMax': .50, 'yMin': (-.60, -.22), 'yMax': .50, 'absX': .22},
+        'muzzle': {'zBelowMin': -.02, 'zAboveMin': .06, 'y': (.08, .18), 'absX': .03},
+        'grip': {'band': (-.24, -.14), 'absCentroidX': .05, 'centroidZ': (-.02, .30),
+                 'extentX': .30, 'extentZ': .36},
+        'barrel': {'band': (-.90, -.60), 'centroidY': (.05, .20), 'absCentroidX': .03,
+                   'extentX': .22, 'extentY': .34},
+        'action': {'reach': .30, 'y': (.10, .55)},
+    },
+    # The blunderbuss: the flare is the wide part, so the envelope, the barrel band (behind the
+    # flare) and the action floor all move; the fore-end under the barrel is why grip.zFrom exists.
+    # Its grip band also catches the trigger-guard bow at z -.05..+.02, a good .24 ahead of the raked
+    # grip (measured z .19 .. .43 on the Meshy mesh), so the depth guard is .48 instead of the pistol's
+    # .36; a band that had swallowed the barrel would still read near 1.0.
+    'scatter': {
+        'bounds': {'zMin': (-1.08, -.88), 'zMax': .60, 'yMin': (-.60, -.20), 'yMax': .55, 'absX': .30},
+        'muzzle': {'zBelowMin': -.02, 'zAboveMin': .06, 'y': (.07, .17), 'absX': .03},
+        'grip': {'band': (-.24, -.14), 'zFrom': -.10, 'absCentroidX': .05, 'centroidZ': (-.02, .30),
+                 'extentX': .30, 'extentZ': .48},
+        'barrel': {'band': (-.60, -.35), 'centroidY': (-.05, .20), 'absCentroidX': .03,
+                   'extentX': .30, 'extentY': .45},
+        'action': {'reach': .30, 'y': (.05, .55)},
+    },
+}
+if KIND not in CONTRACTS:
+    raise SystemExit(f'no landmark contract for --kind {KIND!r}; known kinds are '
+                     f'{", ".join(sorted(CONTRACTS))}. Add {KIND}\'s table to CONTRACTS in '
+                     f'tools/meshy/build_weapon.py (and to CONTRACTS in test/weapon-assets.test.js) '
+                     f'before fitting it.')
+CONTRACT = CONTRACTS[KIND]
 
 
 def log(*args):
@@ -312,7 +368,10 @@ else:
         e = perp[mask].max(axis=0) - perp[mask].min(axis=0)
         return float(e[0] * e[1])
     area_hi, area_lo = cross_area(t >= t.max() - cut), cross_area(t <= t.min() + cut)
-    forward = pca_axis if area_hi < area_lo else -pca_axis
+    # Default: the thinner end is the muzzle. A trumpet-flared blunderbuss is the exception --
+    # its muzzle is the fattest cross-section on the gun -- so --muzzle-end wider flips the vote.
+    thinner_is_muzzle = MUZZLE_END == 'thinner'
+    forward = pca_axis if (area_hi < area_lo) == thinner_is_muzzle else -pca_axis
     coarse = axis_name(forward)
     # The whole-model PCA axis is pulled off the bore by the grip's mass, which is enough to put
     # the butt within 30 % of the length of the "bore axis". Re-run the PCA on the front 40 % --
@@ -335,11 +394,14 @@ else:
                             'coarsePcaAxis': coarse, 'refinedFromCoarseDegrees': tilt,
                             'pcaEigenvalues': [float(v) for v in eigvals],
                             'lengthAlongAxis': span,
+                            'muzzleEnd': MUZZLE_END,
+                            'muzzleEndSource': 'flag' if 'muzzle-end' in opts else 'default',
                             'endCrossSection': {'positive': area_hi, 'negative': area_lo}}
     log(f'forward: {axis_name(forward)} (auto; PCA eigenvalues '
         f'{[round(float(v), 5) for v in eigvals]}, length {span:.4f}; outer {END_FRACTION:.0%} '
-        f'cross-section +{area_hi:.4f} vs -{area_lo:.4f}, the thinner end is the muzzle; '
-        f'barrel-slice refinement moved the axis {tilt:.2f} deg off the whole-model PCA axis)')
+        f'cross-section +{area_hi:.4f} vs -{area_lo:.4f}, the {MUZZLE_END} end is the muzzle '
+        f'(--muzzle-end {MUZZLE_END}); barrel-slice refinement moved the axis {tilt:.2f} deg off '
+        f'the whole-model PCA axis)')
 
 t = V @ forward
 span = float(t.max() - t.min())
@@ -421,9 +483,11 @@ if FORWARD == 'auto':
         r0 = float(np.max(np.linalg.norm(Gl[s0, :2] - c0, axis=1)))
         near = np.linalg.norm(Gl[:, :2] - c0, axis=1) <= r0 * 1.6
         # The barrel's top and its two sides run parallel to the bore and, unlike its underside,
-        # are not shared with a ramrod, a ramrod pipe or a stock fore-end. Track them across the
-        # front third of the gun and take the median slope.
-        edges = np.linspace(z_lo + reach * .02, z_lo + reach * .35, 9)
+        # are not shared with a ramrod, a ramrod pipe or a stock fore-end. Track them across
+        # --level-band (fractions of the length, the front third by default) and take the median
+        # slope. A gun whose front third is a trumpet flare needs a band behind the flare instead:
+        # the flare's silhouette is not parallel to the bore and would tip the whole frame.
+        edges = np.linspace(z_lo + reach * LEVEL_BAND[0], z_lo + reach * LEVEL_BAND[1], 9)
         zs, tops, mids = [], [], []
         for a_, b_ in zip(edges[:-1], edges[1:]):
             m = near & (Gl[:, 2] >= a_) & (Gl[:, 2] < b_)
@@ -440,9 +504,11 @@ if FORWARD == 'auto':
         level_deg += step
         if step < 1e-3:
             break
-    decisions['boreLevelling'] = {'totalDegrees': level_deg}
+    decisions['boreLevelling'] = {'totalDegrees': level_deg, 'band': [float(v) for v in LEVEL_BAND],
+                                  'bandSource': 'flag' if 'level-band' in opts else 'default'}
     log(f'bore levelling: rotated the frame {level_deg:.2f} deg so the barrel\'s top and side '
-        f'silhouettes run parallel to gun Z')
+        f'silhouettes run parallel to gun Z (--level-band {LEVEL_BAND[0]:g} {LEVEL_BAND[1]:g}, '
+        f'the {LEVEL_BAND[0]:.0%}..{LEVEL_BAND[1]:.0%} slice of the length behind the muzzle)')
 
 # ----------------------------------------------------------------------------- fit
 G = V @ A.T
@@ -773,36 +839,56 @@ def record(name, measured, expected, ok, fmt='{:.4f}'):
     checks.append({'name': name, 'measured': text, 'expected': expected, 'ok': bool(ok)})
 
 
-record('bounds z_min', lo[2], '-1.12 .. -0.92', -1.12 <= lo[2] <= -.92)
-record('bounds z_max', hi[2], '<= 0.50', hi[2] <= .50)
-record('bounds y_min', lo[1], '-0.60 .. -0.22', -.60 <= lo[1] <= -.22)
-record('bounds y_max', hi[1], '<= 0.50', hi[1] <= .50)
-record('bounds |x|', max(abs(lo[0]), abs(hi[0])), '<= 0.22', max(abs(lo[0]), abs(hi[0])) <= .22)
-record('muzzle z', muzzle_v[2], f'{lo[2] - .02:.3f} .. {lo[2] + .06:.3f}', lo[2] - .02 <= muzzle_v[2] <= lo[2] + .06)
-record('muzzle y', muzzle_v[1], '0.08 .. 0.18', .08 <= muzzle_v[1] <= .18)
-record('muzzle |x|', abs(muzzle_v[0]), '<= 0.03', abs(muzzle_v[0]) <= .03)
+# Every bound below comes from CONTRACTS[KIND], not from the flintlock: the blunderbuss is wider
+# and its barrel band sits behind the flare. The "expected" column prints that kind's own numbers.
+c_bounds, c_muzzle = CONTRACT['bounds'], CONTRACT['muzzle']
+c_grip, c_barrel, c_action = CONTRACT['grip'], CONTRACT['barrel'], CONTRACT['action']
+record('bounds z_min', lo[2], f'{c_bounds["zMin"][0]:.2f} .. {c_bounds["zMin"][1]:.2f}',
+       c_bounds['zMin'][0] <= lo[2] <= c_bounds['zMin'][1])
+record('bounds z_max', hi[2], f'<= {c_bounds["zMax"]:.2f}', hi[2] <= c_bounds['zMax'])
+record('bounds y_min', lo[1], f'{c_bounds["yMin"][0]:.2f} .. {c_bounds["yMin"][1]:.2f}',
+       c_bounds['yMin'][0] <= lo[1] <= c_bounds['yMin'][1])
+record('bounds y_max', hi[1], f'<= {c_bounds["yMax"]:.2f}', hi[1] <= c_bounds['yMax'])
+record('bounds |x|', max(abs(lo[0]), abs(hi[0])), f'<= {c_bounds["absX"]:.2f}',
+       max(abs(lo[0]), abs(hi[0])) <= c_bounds['absX'])
+record('muzzle z', muzzle_v[2],
+       f'{lo[2] + c_muzzle["zBelowMin"]:.3f} .. {lo[2] + c_muzzle["zAboveMin"]:.3f}',
+       lo[2] + c_muzzle['zBelowMin'] <= muzzle_v[2] <= lo[2] + c_muzzle['zAboveMin'])
+record('muzzle y', muzzle_v[1], f'{c_muzzle["y"][0]:.2f} .. {c_muzzle["y"][1]:.2f}',
+       c_muzzle['y'][0] <= muzzle_v[1] <= c_muzzle['y'][1])
+record('muzzle |x|', abs(muzzle_v[0]), f'<= {c_muzzle["absX"]:.2f}', abs(muzzle_v[0]) <= c_muzzle['absX'])
 
-grip = body_v[(body_v[:, 1] >= -.24) & (body_v[:, 1] <= -.14)]
+# grip.zFrom, where a kind has one, keeps a fore-end hanging under the barrel out of the grip band.
+grip_mask = (body_v[:, 1] >= c_grip['band'][0]) & (body_v[:, 1] <= c_grip['band'][1])
+grip_from = c_grip.get('zFrom')
+if grip_from is not None:
+    grip_mask &= body_v[:, 2] >= grip_from
+grip = body_v[grip_mask]
+grip_label = (f'grip band y {c_grip["band"][0]:.2f}..{c_grip["band"][1]:.2f}'
+              + ('' if grip_from is None else f', z >= {grip_from:.2f}'))
 if len(grip):
     gc = grip.mean(axis=0)
     gx, gz = grip[:, 0].max() - grip[:, 0].min(), grip[:, 2].max() - grip[:, 2].min()
-    record('grip centroid |x|', abs(gc[0]), '<= 0.05', abs(gc[0]) <= .05)
-    record('grip centroid z', gc[2], '-0.02 .. 0.30', -.02 <= gc[2] <= .30)
-    record('grip x-extent', gx, '<= 0.30', gx <= .30)
-    record('grip z-extent', gz, '<= 0.36', gz <= .36)
+    record('grip centroid |x|', abs(gc[0]), f'<= {c_grip["absCentroidX"]:.2f}', abs(gc[0]) <= c_grip['absCentroidX'])
+    record('grip centroid z', gc[2], f'{c_grip["centroidZ"][0]:.2f} .. {c_grip["centroidZ"][1]:.2f}',
+           c_grip['centroidZ'][0] <= gc[2] <= c_grip['centroidZ'][1])
+    record('grip x-extent', gx, f'<= {c_grip["extentX"]:.2f}', gx <= c_grip['extentX'])
+    record('grip z-extent', gz, f'<= {c_grip["extentZ"]:.2f}', gz <= c_grip['extentZ'])
 else:
-    record('grip band y -0.24..-0.14', 'no vertices', 'non-empty', False)
+    record(grip_label, 'no vertices', 'non-empty', False)
 
-barrel = body_v[(body_v[:, 2] >= -.90) & (body_v[:, 2] <= -.60)]
+barrel = body_v[(body_v[:, 2] >= c_barrel['band'][0]) & (body_v[:, 2] <= c_barrel['band'][1])]
 if len(barrel):
     bc = barrel.mean(axis=0)
     bx, by = barrel[:, 0].max() - barrel[:, 0].min(), barrel[:, 1].max() - barrel[:, 1].min()
-    record('barrel centroid y', bc[1], '0.05 .. 0.20', .05 <= bc[1] <= .20)
-    record('barrel centroid |x|', abs(bc[0]), '<= 0.03', abs(bc[0]) <= .03)
-    record('barrel x-extent', bx, '<= 0.22', bx <= .22)
-    record('barrel y-extent', by, '<= 0.34', by <= .34)
+    record('barrel centroid y', bc[1], f'{c_barrel["centroidY"][0]:.2f} .. {c_barrel["centroidY"][1]:.2f}',
+           c_barrel['centroidY'][0] <= bc[1] <= c_barrel['centroidY'][1])
+    record('barrel centroid |x|', abs(bc[0]), f'<= {c_barrel["absCentroidX"]:.2f}',
+           abs(bc[0]) <= c_barrel['absCentroidX'])
+    record('barrel x-extent', bx, f'<= {c_barrel["extentX"]:.2f}', bx <= c_barrel['extentX'])
+    record('barrel y-extent', by, f'<= {c_barrel["extentY"]:.2f}', by <= c_barrel['extentY'])
 else:
-    record('barrel band z -0.90..-0.60', 'no vertices', 'non-empty', False)
+    record(f'barrel band z {c_barrel["band"][0]:.2f}..{c_barrel["band"][1]:.2f}', 'no vertices', 'non-empty', False)
 
 hinge_axis_out = None
 pivot_out = None
@@ -814,9 +900,10 @@ if action_v is not None:
     record('action pivot in body bounds', pivot_out, 'inside the body bounds',
            bool(np.all(pivot_out >= body_lo - 1e-6) and np.all(pivot_out <= body_hi + 1e-6)))
     reach = float(np.linalg.norm(action_v - pivot_out, axis=1).max())
-    record('action reach from pivot', reach, '<= 0.30', reach <= .30)
-    record('action y range', [action_v[:, 1].min(), action_v[:, 1].max()], '0.10 .. 0.55',
-           action_v[:, 1].min() >= .10 and action_v[:, 1].max() <= .55)
+    record('action reach from pivot', reach, f'<= {c_action["reach"]:.2f}', reach <= c_action['reach'])
+    record('action y range', [action_v[:, 1].min(), action_v[:, 1].max()],
+           f'{c_action["y"][0]:.2f} .. {c_action["y"][1]:.2f}',
+           action_v[:, 1].min() >= c_action['y'][0] and action_v[:, 1].max() <= c_action['y'][1])
     ok_axis = bool(hinge_axis_out) and abs(float(np.linalg.norm(hinge_axis_out)) - 1) < 1e-4
     record('hingeAxis (extras, unit)', str(hinge_axis_out), 'unit vector', ok_axis)
     record('action triangles', action_tris, '<= 1500', action_tris <= 1500, '{:.0f}')
@@ -845,6 +932,7 @@ report = {
     'generator': 'tools/meshy/build_weapon.py (Blender %s)' % bpy.app.version_string.split()[0],
     'gunSpace': {'forward': '-Z', 'up': '+Y', 'lockSide': '+X', 'length': LENGTH,
                  'boreY': BORE_Y, 'muzzleZ': MUZZLE_Z},
+    'contract': CONTRACT,
     'orientation': decisions,
     'fit': {'scale': fit_scale, 'translate': [float(v) for v in offset],
             'boreFrom': BORE_FROM, 'boreCentre': [float(v) for v in bore_centre],

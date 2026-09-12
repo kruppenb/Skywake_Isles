@@ -8,9 +8,11 @@
 //   node tools/qa/weapons/game-check.mjs [--kind flintlock] [--origin http://localhost:3401]
 //     [--out .qa/weapons/game/]
 //
-// `--kind` only labels the report's fields and picks the held-gun probe's node names to look for;
-// the server always starts a fresh player on the flintlock (see server/game.js), so this only
-// needs to change if the check runs after picking up a different gun.
+// `--kind` labels the report's fields and picks the held-gun probe's node names to look for. The
+// server always starts a fresh player on the flintlock (see server/game.js); every pirate also
+// spawns with the scatter in slot 2, so `--kind scatter` presses Digit2 once the pirate is on the
+// ground and waits for a visible `held-scatter` before it shoots. Any other kind has to be picked
+// up in the world first, so it is still only a label.
 //
 // This script starts NOTHING. Bring the isolated server up first (never port 3400):
 //   PowerShell:  $env:PORT=3401; node server/index.js
@@ -120,6 +122,33 @@ console.log(`departure: ${JSON.stringify(departure)}`);
 await page.waitForFunction(`(${self.toString()})()?.mode === 'ground'`, null, { timeout: 120000 });
 await wait(2500);
 
+// Slot keys. Every pirate spawns holding the flintlock with the scatter in slot 2 (server/game.js),
+// and client/input.js maps Digit1..Digit5 onto the five kinds, so anything but the flintlock has to
+// be equipped before the shots are worth taking -- and only once the renderer has actually built
+// and shown it. A held-<kind> group under a weapon-aim-recoil-rig is a gun in a pirate's hands
+// (buildWeapon names ground loot the same way), and this lobby holds no pirate but ours.
+const equipped = KIND === 'flintlock' ? null : await (async () => {
+  await page.evaluate(async code => {
+    const key = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true }));
+    key('keydown', code);
+    await new Promise(resolve => setTimeout(resolve, 90));
+    key('keyup', code);
+  }, `Digit${KINDS.indexOf(KIND) + 1}`);
+  await page.waitForFunction(kind => {
+    const scene = window.SKY.world && window.SKY.world.scene ? window.SKY.world.scene : null;
+    if (!scene) return false;
+    let held = false;
+    scene.traverse(node => {
+      if (node.name !== `held-${kind}` || !node.visible) return;
+      for (let at = node.parent; at; at = at.parent) if (at.name === 'weapon-aim-recoil-rig') held = true;
+    });
+    return held;
+  }, KIND, { timeout: 30000 });
+  await wait(1200);
+  return page.evaluate(`(() => { const p = (${self.toString()})(); return { key: 'Digit${KINDS.indexOf(KIND) + 1}', weapon: p ? p.weapon : null }; })()`);
+})();
+if (equipped) console.log(`equipped: ${JSON.stringify(equipped)}`);
+
 const landed = await page.evaluate(`(() => { const p = (${self.toString()})();
   return { mode: p.mode, weapon: p.weapon, x: Math.round(p.x), z: Math.round(p.z), hp: p.hp }; })()`);
 
@@ -166,7 +195,7 @@ const heldGun = await page.evaluate(kind => {
 const errors = consoleLog.filter(entry => entry.type === 'error');
 const warnings = consoleLog.filter(entry => entry.type === 'warning' || entry.type === 'warn');
 writeFileSync(path.join(OUT, 'game-report.json'), `${JSON.stringify({
-  generatedAt: new Date().toISOString(), url: `${ORIGIN}/?test=1`, kind: KIND, landed, heldGun, shots,
+  generatedAt: new Date().toISOString(), url: `${ORIGIN}/?test=1`, kind: KIND, equipped, landed, heldGun, shots,
   console: { errors: errors.length, warnings: warnings.length, messages: consoleLog }, pageErrors,
 }, null, 2)}\n`, 'utf8');
 

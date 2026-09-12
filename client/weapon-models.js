@@ -42,7 +42,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-export const WEAPON_ASSET_URLS = Object.freeze({ flintlock: '/assets/weapons/flintlock.glb' });
+export const WEAPON_ASSET_URLS = Object.freeze({
+  flintlock: '/assets/weapons/flintlock.glb',
+  scatter: '/assets/weapons/scatter.glb',
+});
 
 // Where the navigator's wrists go once a GLB is drawing instead of the procedural gun. Same gun
 // space, same meaning and same units as WEAPON_HANDLING.<kind>.right / .left in client/models.js
@@ -62,6 +65,19 @@ export const WEAPON_ASSET_HANDLING = Object.freeze({
   flintlock: Object.freeze({
     right: Object.freeze([.055, -.025, .375]),
     left: Object.freeze([-.20, -.085, .28]),
+  }),
+  // The scatter GLB moves both wrists up and back, for two different reasons. Its grip is the
+  // flintlock's rake, not the procedural slab at z ~ 0: below y = -.15 the grip column runs
+  // z .19 .. .43, so the firing wrist goes up .095, back .19 and .035 inboard. Its fore-end is a
+  // round wooden tube fused to the barrel whose underside is only y = -.01 at z = -.45, where the
+  // procedural block hung down to y = -.18, so the support wrist goes up .114 and back .04 instead
+  // of reaching for wood that is not there any more. Measured in the character studio against the
+  // shipped GLB: the firing palm -- the RightHand bone plus .25 gun units along the frame code's
+  // finger basis -- sits .040 off the nearest grip vertex and the support palm .023 under the
+  // fore-end, against .212 and .165 with the procedural anchors.
+  scatter: Object.freeze({
+    right: Object.freeze([.02, -.05, .40]),
+    left: Object.freeze([-.228, -.086, -.28]),
   }),
 });
 

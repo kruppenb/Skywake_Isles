@@ -12,24 +12,45 @@ import { createHash } from 'node:crypto';
 //
 // Gun space (client/models.js buildWeapon, and the table in the weapon spec): -Z is forward, the
 // muzzle direction; +Y is up; +X is the gun's right side, the lock-plate/hammer side. Units are
-// the procedural pirate's, so the numbers below are the procedural flintlock's own landmarks.
+// the procedural pirate's, so the numbers below are each kind's own procedural landmarks.
 
 const WEAPONS_DIR = new URL('../client/assets/weapons/', import.meta.url);
 const MANIFEST_URL = new URL('manifest.json', WEAPONS_DIR);
 const MANIFEST_PATH = 'client/assets/weapons/manifest.json';
+const CONTRACTS_PATH = 'test/weapon-assets.test.js';
 
 const BUDGETS = {
   maxGlbBytes: 3 * 1024 * 1024, maxBodyTriangles: 9000, maxActionTriangles: 1500,
   maxImageDimension: 1024, maxEmbeddedImageBytes: 2 * 1024 * 1024, maxMetallicFactor: .05,
 };
-// Gun-space envelope and landmarks, from the approved concept: a raked grip about half the
-// procedural grip's height, the bore running to a muzzle at z = -1.0.
-const CONTRACT = {
-  bounds: { zMin: [-1.12, -.92], zMax: .50, yMin: [-.60, -.22], yMax: .50, absX: .22 },
-  muzzle: { zBelowMin: -.02, zAboveMin: .06, y: [.08, .18], absX: .03 },
-  grip: { band: [-.24, -.14], absCentroidX: .05, centroidZ: [-.02, .30], extentX: .30, extentZ: .36 },
-  barrel: { band: [-.90, -.60], centroidY: [.05, .20], absCentroidX: .03, extentX: .22, extentY: .34 },
-  action: { reach: .30, y: [.10, .55] },
+// Gun-space envelope and landmarks, one table per shipped kind, from that gun's approved concept.
+// These are the same numbers CONTRACTS in tools/meshy/build_weapon.py verifies at build time; this
+// file measures them again, independently, from the shipped bytes. A gun gets its own entry rather
+// than widening another's, and a manifest kind with no entry here is a failure, not a free pass.
+//   grip.zFrom (optional) -- only body vertices at or behind this z count as grip, so a fore-end
+//   hanging under the barrel cannot drag the grip centroid forward. The flintlock has none.
+const CONTRACTS = {
+  // A raked grip about half the procedural grip's height, the bore running to a muzzle at z = -1.0.
+  flintlock: {
+    bounds: { zMin: [-1.12, -.92], zMax: .50, yMin: [-.60, -.22], yMax: .50, absX: .22 },
+    muzzle: { zBelowMin: -.02, zAboveMin: .06, y: [.08, .18], absX: .03 },
+    grip: { band: [-.24, -.14], absCentroidX: .05, centroidZ: [-.02, .30], extentX: .30, extentZ: .36 },
+    barrel: { band: [-.90, -.60], centroidY: [.05, .20], absCentroidX: .03, extentX: .22, extentY: .34 },
+    action: { reach: .30, y: [.10, .55] },
+  },
+  // The blunderbuss: a short fat barrel swelling into a brass trumpet flare (so the envelope is
+  // wider and the barrel band sits behind the flare), a fat fore-end under it, the muzzle at
+  // z = -.967 and the bore at y .12. Its grip band also catches the trigger-guard bow at
+  // z -.05..+.02, a good .24 ahead of the raked grip (z .19 .. .43 on the shipped mesh), so the depth
+  // guard is .48 rather than the pistol's .36; a band that had swallowed the barrel would still
+  // read near 1.0.
+  scatter: {
+    bounds: { zMin: [-1.08, -.88], zMax: .60, yMin: [-.60, -.20], yMax: .55, absX: .30 },
+    muzzle: { zBelowMin: -.02, zAboveMin: .06, y: [.07, .17], absX: .03 },
+    grip: { band: [-.24, -.14], zFrom: -.10, absCentroidX: .05, centroidZ: [-.02, .30], extentX: .30, extentZ: .48 },
+    barrel: { band: [-.60, -.35], centroidY: [-.05, .20], absCentroidX: .03, extentX: .30, extentY: .45 },
+    action: { reach: .30, y: [.05, .55] },
+  },
 };
 const ALLOWED_EXTENSIONS = ['KHR_materials_specular', 'KHR_materials_ior'];
 const COMPONENT_TYPES = { 5120: ['readInt8', 1], 5121: ['readUInt8', 1], 5122: ['readInt16LE', 2], 5123: ['readUInt16LE', 2], 5125: ['readUInt32LE', 4], 5126: ['readFloatLE', 4] };
@@ -198,6 +219,17 @@ function describeKind(kind) {
   }
   const label = `${kind}.glb`;
   const glb = () => parseGlb(bytes, label);
+  // Every kind the manifest ships must bring its own landmark table; falling back to another gun's
+  // would let a mis-fitted mesh pass on numbers that were never meant for it.
+  const contract = CONTRACTS[kind];
+  const contractMissing = `no gun-space landmark table for "${kind}": the manifest ships it but `
+    + `CONTRACTS in ${CONTRACTS_PATH} has entries only for ${Object.keys(CONTRACTS).join(', ')}. `
+    + `Add ${kind}'s table there (and the matching one to CONTRACTS in tools/meshy/build_weapon.py) `
+    + 'before shipping the GLB.';
+
+  test(`${kind}: this contract file carries a landmark table for the kind`, () => {
+    assert.ok(contract, contractMissing);
+  });
 
   test(`${kind}: the GLB is a well-formed binary glTF whose size and hash the manifest pins`, () => {
     glb();
@@ -327,7 +359,8 @@ function describeKind(kind) {
     const bodyPoints = gunSpaceVertices(parsed, bodyNode);
     const all = [...bodyPoints, ...gunSpaceVertices(parsed, actionNode)];
     const { min, max } = extentsOf(all);
-    const { bounds, muzzle: muzzleRule, grip, barrel } = CONTRACT;
+    assert.ok(contract, contractMissing);
+    const { bounds, muzzle: muzzleRule, grip, barrel } = contract;
     assert.ok(inRange(min[2], bounds.zMin), `z_min ${show(min[2])} is outside ${bounds.zMin.join('..')}: the muzzle is not at the bore end`);
     assert.ok(max[2] <= bounds.zMax, `z_max ${show(max[2])} runs past ${bounds.zMax} behind the grip`);
     assert.ok(inRange(min[1], bounds.yMin), `y_min ${show(min[1])} is outside ${bounds.yMin.join('..')}: the grip is the wrong depth`);
@@ -342,8 +375,11 @@ function describeKind(kind) {
     assert.ok(inRange(muzzle[1], muzzleRule.y), `muzzle y ${show(muzzle[1])} is off the bore axis`);
     assert.ok(Math.abs(muzzle[0]) <= muzzleRule.absX, `muzzle x ${show(muzzle[0])} is off centre`);
 
-    const gripPoints = bodyPoints.filter(([, y]) => y >= grip.band[0] && y <= grip.band[1]);
-    assert.ok(gripPoints.length > 0, `no body vertices in the grip band y ${grip.band.join('..')}`);
+    // grip.zFrom, where the kind has one, keeps a fore-end hanging under the barrel out of the band.
+    const gripBand = `y ${grip.band.join('..')}${grip.zFrom === undefined ? '' : `, z >= ${grip.zFrom}`}`;
+    const gripPoints = bodyPoints.filter(([, y, z]) => y >= grip.band[0] && y <= grip.band[1]
+      && (grip.zFrom === undefined || z >= grip.zFrom));
+    assert.ok(gripPoints.length > 0, `no body vertices in the grip band ${gripBand}`);
     const gripBox = extentsOf(gripPoints);
     assert.ok(Math.abs(gripBox.centroid[0]) <= grip.absCentroidX, `grip centroid x ${show(gripBox.centroid[0])} is off centre`);
     assert.ok(inRange(gripBox.centroid[2], grip.centroidZ), `grip centroid z ${show(gripBox.centroid[2])} is outside ${grip.centroidZ.join('..')}`);
@@ -380,6 +416,7 @@ function describeKind(kind) {
       assert.equal(entry.triangles?.action ?? 0, 0, `${kind} has no action node but the manifest counts action triangles`);
       return;
     }
+    assert.ok(contract, contractMissing);
     const actionNode = json.nodes[actionIndex];
     const pivot = actionNode.translation || [0, 0, 0];
     const bodyBox = extentsOf(gunSpaceVertices(parsed, json.nodes[nodeIndexByName(json, 'body')]));
@@ -394,9 +431,9 @@ function describeKind(kind) {
         minY = Math.min(minY, y + pivot[1]); maxY = Math.max(maxY, y + pivot[1]);
       }
     }
-    assert.ok(reach <= CONTRACT.action.reach, `an action vertex is ${show(reach)} from the pivot, past ${CONTRACT.action.reach}: the split caught barrel or stock faces`);
-    assert.ok(inRange(minY, CONTRACT.action.y) && inRange(maxY, CONTRACT.action.y),
-      `action spans y ${show(minY)}..${show(maxY)} in gun space, outside ${CONTRACT.action.y.join('..')}`);
+    assert.ok(reach <= contract.action.reach, `an action vertex is ${show(reach)} from the pivot, past ${contract.action.reach}: the split caught barrel or stock faces`);
+    assert.ok(inRange(minY, contract.action.y) && inRange(maxY, contract.action.y),
+      `action spans y ${show(minY)}..${show(maxY)} in gun space, outside ${contract.action.y.join('..')}`);
     const axis = actionNode.extras?.hingeAxis;
     assert.ok(Array.isArray(axis) && axis.length === 3 && axis.every(Number.isFinite),
       'the action node must carry extras.hingeAxis as three finite numbers');

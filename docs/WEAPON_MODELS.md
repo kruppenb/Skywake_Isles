@@ -1,8 +1,9 @@
 # Skywake weapons — GLB models
 
-Status: **gun 1, the flintlock, is built** (`client/assets/weapons/flintlock.glb`, Meshy task
-`01a092d5-6e56-73cf-95f6-def4c7d721a3`); the other four guns are still `buildWeapon`'s procedural
-meshes. This document describes the pipeline that turns a concept plate into
+Status: **guns 1 and 2 are built** — the flintlock (`client/assets/weapons/flintlock.glb`, Meshy
+task `01a092d5-6e56-73cf-95f6-def4c7d721a3`) and the scatter (`client/assets/weapons/scatter.glb`,
+Meshy task `01a093f7-8504-73a2-8436-be4019fcef3c`); the repeater, burst and longshot are still
+`buildWeapon`'s procedural meshes. This document describes the pipeline that turns a concept plate into
 `client/assets/weapons/<kind>.glb`, the gun-space contract that GLB must satisfy, and how to add
 the next gun. The end-to-end workflow (who does what, the gates, the per-gun landmark table and
 the QA scripts in `tools/qa/weapons/`) is the `/gun-update <kind>` skill in
@@ -47,6 +48,15 @@ along z of about 1.30, and a grip whose mid-point (where the firing palm sits) i
   z ∈ [−.02, .30], x-extent ≤ .30, z-extent ≤ .36. Barrel: body vertices with z ∈ [−.90, −.60] have
   centroid y ∈ [.05, .20] and |x| ≤ .03, x-extent ≤ .22, y-extent ≤ .34. Action: pivot inside the
   body bounds, every action vertex within .30 of the pivot and y ∈ [.10, .55], `hingeAxis` unit.
+
+Those ranges are the flintlock's. Every shipped kind has its own row in the `CONTRACTS` tables of
+`tools/meshy/build_weapon.py` and `test/weapon-assets.test.js` (kept identical; a `--kind` or a
+manifest kind with no row fails both rather than borrowing another gun's numbers). The scatter's
+row: z_min ∈ [−1.08, −.88], z_max ≤ .60, y_min ∈ [−.60, −.20], y_max ≤ .55, |x| ≤ .30 (the
+flare); muzzle y ∈ [.07, .17]; grip band y ∈ [−.24, −.14] restricted to z ≥ −.10 (`zFrom`, so the
+fore-end under the barrel is not counted as grip) with z-extent ≤ .48 (the trigger-guard bow
+shares the band with the raked grip, .24 behind it); barrel band z ∈ [−.60, −.35] (behind the
+flare) with centroid y ∈ [−.05, .20], x-extent ≤ .30, y-extent ≤ .45; action y ∈ [.05, .55].
 
 `build_weapon.py` checks every one of those against the exported bytes and exits non-zero on a miss;
 `test/weapon-assets.test.js` checks them again independently.
@@ -110,6 +120,77 @@ box's front face is set there and the frizzen stays on the body where it belongs
 y 0.285 cuts the cock at its neck, just above the lock plate, and the hinge sits on that plane at
 the centre of the cock's foot.
 
+### Gun 2 — the scatter
+
+The scatter is drawn as a blunderbuss pistol: the flintlock's lock and raked grip behind a short
+fat barrel that swells into a brass trumpet muzzle, with a fat wooden fore-end under the barrel
+for the support hand. Same two plates (side and left; the top plate came back as a side view
+again and was dropped), same 30-credit prop task, 95 s to reconstruct. **The exact commands that
+produced the shipped scatter:**
+
+```
+node tools/meshy/weapon-plates.mjs scatter
+node tools/meshy/meshy.mjs prop meshy_output/plates/scatter/scatter-side.jpg \
+    meshy_output/plates/scatter/scatter-left.jpg      # 30 credits -> 01a093f7-8504-73a2-8436-be4019fcef3c
+node tools/meshy/meshy.mjs wait m2m 01a093f7-8504-73a2-8436-be4019fcef3c
+node tools/meshy/meshy.mjs download m2m 01a093f7-8504-73a2-8436-be4019fcef3c meshy_output/scatter
+
+# pass 1: orientation only, the levelling band on the straight barrel behind the flare
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/scatter/model_urls.glb.glb --kind scatter \
+    --length 1.40 --muzzle-z -0.967 --bore-y 0.12 --level-band .22 .52 --lock-side +X \
+    --out $SCRATCH/scatter/pass1.glb --report $SCRATCH/scatter/pass1.json --allow-misfit
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/render_glb.py -- $SCRATCH/scatter/pass1.glb \
+    $SCRATCH/scatter/renders-pass1 --wide
+
+# pass 2: the real build
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/scatter/model_urls.glb.glb --kind scatter \
+    --out client/assets/weapons/scatter.glb \
+    --length 1.40 --muzzle-z -0.967 --bore-y 0.12 --level-band .22 .52 --lock-side +X \
+    --action-box -0.03 0.23 -0.105 0.10 0.40 0.075 --hinge 0.035 0.23 -0.015 \
+    --hinge-axis -1 0 0 --texture-size 1024 --report $SCRATCH/scatter/scatter.json
+node tools/meshy/weapon-manifest.mjs
+node --test test/weapon-assets.test.js
+```
+
+What the blunderbuss needed that the pistol did not:
+
+- **`--level-band .22 .52`.** Bore levelling tracks the barrel's silhouettes across a slice of the
+  length (the front 2–35 % by default). On a blunderbuss that slice is mostly flare, whose
+  silhouette is not parallel to the bore, so the band was moved onto the straight barrel behind
+  the flare and ahead of the pan. Levelling came out at 5.35° and the barrel top then runs flat to
+  within .01 over z −.60 … −.40.
+- **`--lock-side +X`.** The auto vote (the larger |x| reach above the bore near the breech) lost by
+  .004 because this mesh carries a brass side plate on both flanks; the mirror it triggered put
+  the cock on the gun's left. When the two numbers in the `lock side` log line are that close,
+  decide from the pass-1 render and pass the flag.
+- **`--muzzle-end wider`** exists for the same family of problem (a flare can be the fatter end)
+  but was not needed here: the outer-25 % cross-sections were .157 at the flare against .193 at
+  the grip end, so the default vote was right.
+- **Grip auto-detect** found nothing beyond 30 % or 25 % of the length from the bore and settled
+  at 20 % (271 vertices toward −Y): the raked grip is as shallow as the flintlock's.
+- **The action box is the cock only**, as on the flintlock. The frizzen sits at z −.178 … −.11,
+  the cock at z −.10 … +.058, with an eight-vertex trough between them at z ≈ −.105 where the
+  box's front face goes; the cock's neck is at y ≈ .23, just above the lock plate, which is the
+  box floor and the hinge height. 906 of 8,090 faces split off. The script's `hammerHint` box
+  reached back to z −.19 and would have swallowed the frizzen — scan the pass-1 body yourself.
+
+The fit read the barrel as the model's −X and scaled by .73511. Result: body 7,205 triangles,
+action 929, one 1024² JPEG albedo of 272,453 bytes, 600,788 bytes of GLB, and no visible `fill` at
+all — the cut hides between the cock's foot and its socket.
+
+Hands (`WEAPON_ASSET_HANDLING.scatter`, tuned with `tools/qa/weapons/tune.mjs`): right
+(.02, −.05, .40), left (−.228, −.086, −.28). Both wrists moved up and back from the procedural
+anchors — the grip is raked to z .19 … .43 like the flintlock's, and the fore-end is a tube fused
+to the barrel whose underside is at y −.01 where the procedural block hung to y −.18. Firing palm
+.040 off the grip, support palm .023 under the fore-end, against .212 and .165 procedural. The tune
+script's support-hand finger basis is now per kind, matching `client/player-character.js`: the
+pistol's off hand wraps the firing hand, every other kind cups a fore-end from below.
+
 `meshy.mjs` reads `MESHY_API_KEY` from the environment or, failing that, the key registered for the
 Meshy MCP server in `~/.claude.json`; it never prints it. Meshy downloads expire after a few days,
 so re-download from the task id recorded in `tools/meshy/weapons/<kind>.tasks.json` before a rebuild.
@@ -118,9 +199,11 @@ so re-download from the task id recorded in `tools/meshy/weapons/<kind>.tasks.js
 
 `build_weapon.py` takes a Meshy prop straight out of `download` and does everything the export
 leaves undone. Its flags are `--in --kind --out [--length 1.30] [--bore-y .13] [--muzzle-z -1.0]
-[--forward auto|±X|±Y|±Z] [--up auto|…] [--lock-side auto|+X|-X] [--action-box x0 y0 z0 x1 y1 z1]
-[--hinge x y z] [--hinge-axis -1 0 0] [--bore-from muzzle-face|band] [--texture-size 1024]
-[--texture-format auto|png|jpeg] [--report <json>] [--allow-misfit]`.
+[--forward auto|±X|±Y|±Z] [--up auto|…] [--lock-side auto|+X|-X] [--muzzle-end thinner|wider]
+[--level-band .02 .35] [--action-box x0 y0 z0 x1 y1 z1] [--hinge x y z] [--hinge-axis -1 0 0]
+[--bore-from muzzle-face|band] [--texture-size 1024] [--texture-format auto|png|jpeg]
+[--report <json>] [--allow-misfit]`. `--kind` also selects the `CONTRACTS` row the export is
+verified against; a kind with no row refuses to build.
 
 **Axes.** Blender's glTF importer maps glTF +Y-up/−Z-forward onto Blender Z-up/−Y-forward
 (`blender = (gx, −gz, gy)`) and the exporter maps back with `export_yup=True`. Every decision in the
@@ -137,17 +220,21 @@ script is reasoned in glTF axes and converted in one place. `--forward` and `--u
    unlit in three.js), single-sided. Plus a flat `fill` material, `#1c2a33`, for cut faces.
 3. **Orientation, all printed and all overridable.**
    - *Barrel*: the longest PCA axis, refined on the front 40 % of the model.
-   - *Muzzle end*: whichever end has the smaller cross-section over the outer 25 % of the length.
+   - *Muzzle end*: whichever end has the smaller cross-section over the outer 25 % of the length
+     (`--muzzle-end wider` flips that for a gun whose muzzle is the fatter end; the log prints both
+     areas).
    - *Grip*: the half, perpendicular to the barrel, holding the vertices further than 30 % of the
      length from the bore axis — that half becomes −Y. The bore axis for that test runs through the
      centre of the barrel's cross-section at the muzzle face, not through the centroid of the front
      slice: the fore-end, ramrod and trigger guard drag a centroid far enough below the bore to hide
      the butt from the test. A gun whose grip is shallow enough that 30 % still finds nothing (the
-     flintlock is one) drops the threshold in 5 % steps and says so.
+     flintlock and the scatter both are) drops the threshold in 5 % steps and says so.
    - *Bore levelling*: a PCA axis is pulled off the bore by anything parallel but offset (a ramrod,
      a fore-end), which leaves the gun a degree or two nose-up and the muzzle socket off the barrel.
-     The barrel's top and side silhouettes are tracked across the front third and the frame is
-     rotated (median slope, so one odd slab cannot swing it) until they run parallel to gun Z.
+     The barrel's top and side silhouettes are tracked across `--level-band` (fractions of the
+     length, the front 2–35 % by default) and the frame is rotated (median slope, so one odd slab
+     cannot swing it) until they run parallel to gun Z. A flared muzzle needs the band moved behind
+     the flare, whose silhouette is not parallel to the bore.
    - *Lock side*: the sign of x with the larger |x| extent among the vertices above the bore within
      z ∈ [−.35, .10]. **Forward and up already fix the frame completely, so when the lock comes out
      on the gun's left the only way to move it to +X is to mirror the mesh across x = 0** (winding
@@ -168,9 +255,9 @@ script is reasoned in glTF axes and converted in one place. `--forward` and `--u
    JPEG when the PNG would be over about 1.5 MiB and the image has no alpha.
 8. **Export and verify.** `export_yup=True, export_apply=True, export_extras=True`, no animations,
    cameras, lights or skins. The script then **re-reads its own output** with a small glTF parser
-   and measures every contract landmark from those bytes — the printed table and the `--report`
-   JSON are measurements of the shipped file, not of the Blender scene. A miss exits 1 unless
-   `--allow-misfit`.
+   and measures every landmark of the kind's `CONTRACTS` row from those bytes — the printed table
+   and the `--report` JSON are measurements of the shipped file, not of the Blender scene. A miss
+   exits 1 unless `--allow-misfit`.
 
 ### Choosing `--action-box` and `--hinge`
 
@@ -259,18 +346,23 @@ The stand-in's output is a throwaway — **build it to a scratch path, not over 
 `node tools/meshy/weapon-manifest.mjs` afterwards if you did overwrite the real asset, and rebuild
 it from the Meshy task above.
 
-## Adding the next gun (scatter, repeater, burst, longshot)
+## Adding the next gun (repeater, burst, longshot)
+
+The end-to-end workflow with its gates and the per-gun landmark table is the `/gun-update <kind>`
+skill; in outline:
 
 1. Add the kind's description to `tools/meshy/weapon-prompts.json` and generate its plates.
 2. `node tools/meshy/meshy.mjs prop …`, `wait`, `download` — 30 credits each.
-3. Fit it. The defaults are the flintlock's; the others are longer, so pass their own
-   `--length`/`--bore-y`/`--muzzle-z` taken from `buildWeapon`'s muzzle vector for that kind
-   (e.g. the scatter's muzzle is (0, .12, −.967)). The contract ranges in this document are the
-   flintlock's and will need the same treatment as the procedural landmarks for a long gun.
-4. Only the scatter has a moving action in the frame code (`action.rotation.z = -1.15 * open`); the
-   repeater, burst and longshot move a magazine or a bolt, so pick the `--action-box` around that
-   part and set `--hinge-axis` to whatever makes −1.15 rad open it.
+3. Add the kind's row to both `CONTRACTS` tables first (an unknown `--kind` refuses to build),
+   then fit it with its own `--length`/`--bore-y`/`--muzzle-z` taken from `buildWeapon`'s muzzle
+   vector. The long guns need a stock-wrist band in place of the pistol grip band and a fore-end
+   where the support hand cups at z ≈ −.32 … −.35.
+4. The flintlock and the scatter rotate a hammer (`action.rotation.z = -1.15 * open`); the
+   repeater, burst and longshot **translate** a magazine or a bolt (`position += … * open`). Box
+   that part, put `--hinge` at its attachment centre and pass `--hinge-axis 0 0 1` — an identity
+   hinge frame — so the frame code's translation applies unchanged in gun space through the
+   carrier chain in `client/weapon-models.js`.
 5. Record the task id in `tools/meshy/weapons/<kind>.tasks.json`, re-run
-   `node tools/meshy/weapon-manifest.mjs`, add the URL to `WEAPON_ASSET_URLS` in
-   `client/weapon-models.js`. `test/weapon-assets.test.js` iterates the manifest, so it picks the
-   new gun up without an edit.
+   `node tools/meshy/weapon-manifest.mjs`, add the URL to `WEAPON_ASSET_URLS` and a starting
+   `WEAPON_ASSET_HANDLING` entry in `client/weapon-models.js`, then tune the anchors with
+   `tools/qa/weapons/tune.mjs`.

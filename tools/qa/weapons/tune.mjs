@@ -182,7 +182,12 @@ const measure = () => page.evaluate(kind => {
     return { wrist, fingers, palm: wrist.clone().addScaledVector(fingers, .25) };
   };
   const firing = palmOf(armOf(1), [-.20, -.62, -.76]);
-  const support = palmOf(armOf(-1), [.70, -.25, -.67]);
+  // The support hand's finger basis is per kind in client/player-character.js (~line 442): the
+  // flintlock's off hand wraps the firing hand at (.70, -.25, -.67); every other kind cups a
+  // fore-end from below at (.62, .55, -.56), which is .20 gun units higher at .25 along the
+  // fingers. Measuring one of those with the pistol's basis would put the palm .20 below the one
+  // the renderer actually draws -- more than three times the .06 fit this rig is tuned against.
+  const support = palmOf(armOf(-1), kind === 'flintlock' ? [.70, -.25, -.67] : [.62, .55, -.56]);
 
   // Body vertices in gun space, banded by height.
   const body = held.children.find(child => child.isMesh);

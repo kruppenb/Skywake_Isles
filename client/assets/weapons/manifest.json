@@ -63,6 +63,69 @@
         "left"
       ],
       "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
+    },
+    "scatter": {
+      "glb": "scatter.glb",
+      "sha256": "57b1a11ab15224c0d4655ba76520216de185e8ec5112a0e30cdd35987013f768",
+      "bytes": 600788,
+      "triangles": {
+        "body": 7205,
+        "action": 929
+      },
+      "rootNode": "scatter",
+      "nodes": {
+        "body": "body",
+        "action": "action",
+        "muzzle": "muzzle"
+      },
+      "muzzle": [
+        0,
+        0.12,
+        -0.967
+      ],
+      "hingePivot": [
+        0.035,
+        0.23,
+        -0.015
+      ],
+      "hingeAxis": [
+        -1,
+        0,
+        0
+      ],
+      "bounds": {
+        "min": [
+          -0.14799,
+          -0.32775,
+          -0.967
+        ],
+        "max": [
+          0.14799,
+          0.35065,
+          0.433
+        ]
+      },
+      "images": [
+        {
+          "name": "scatter-albedo",
+          "mimeType": "image/jpeg",
+          "width": 1024,
+          "height": 1024,
+          "embeddedBytes": 272453
+        }
+      ],
+      "materialNames": [
+        "scatter",
+        "fill"
+      ],
+      "meshyTasks": {
+        "m2m": "01a093f7-8504-73a2-8436-be4019fcef3c"
+      },
+      "plates": [
+        "side",
+        "left"
+      ],
+      "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
     }
   }
 }
