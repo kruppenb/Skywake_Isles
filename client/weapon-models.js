@@ -56,6 +56,7 @@ export const WEAPON_ASSET_URLS = Object.freeze({
   flintlock: '/assets/weapons/flintlock.glb',
   scatter: '/assets/weapons/scatter.glb',
   repeater: '/assets/weapons/repeater.glb',
+  burst: '/assets/weapons/burst.glb',
 });
 
 // Where the navigator's wrists go once a GLB is drawing instead of the procedural gun. Same gun
@@ -101,12 +102,35 @@ export const WEAPON_ASSET_HANDLING = Object.freeze({
   // z -.51 .. -.64. Measured in the character studio against the shipped GLB: the firing palm -- the
   // RightHand bone plus .25 gun units along the frame code's finger basis -- sits .034 off the
   // nearest grip vertex and the support palm .030 under the fore-end, against .224 and .217 with the
-  // procedural anchors. (tools/qa/weapons/tune.mjs reports the support distance against a y band of
-  // [-.30, .05], which cannot see this carbine's fore-end underside at all; .030 is the distance to
-  // the nearest body vertex with the band lifted.)
+  // procedural anchors. (When these were tuned, tools/qa/weapons/tune.mjs measured the support
+  // distance against a flat y [-.30, .05] band that could not see this carbine's fore-end underside
+  // at all, so .030 was measured with the band lifted; the script's per-kind SUPPORT_TARGET band
+  // now sees it and reads .031 for this pair.)
   repeater: Object.freeze({
     right: Object.freeze([-.010, .033, .261]),
     left: Object.freeze([-.242, -.011, -.353]),
+  }),
+  // The burst GLB is a straight-stocked carbine with no pistol grip at all: what the firing hand
+  // has to hold is the stock wrist behind the trigger guard, a belly bottoming out at y -.030 over
+  // z .05 .. .08 where the procedural grip sphere hung to y -.34 (the body's lowest vertex anywhere
+  // is the butt toe at y -.035), so the firing wrist rides up .251, .081 inboard and .030 back onto
+  // that belly. Its fore-end is a fat wooden tube under the barrel -- underside y .105 .. .119 over
+  // z -.60 .. -.45 and y .078 .. .086 in the finger groove further forward -- where the procedural
+  // block hung to y -.135, and the procedural support anchor put the off hand not on wood at all
+  // but under the magazine well (.252 from the fore-end), right inside the magazine's own reload
+  // stroke: the box passes .048 from that palm at open .30. So the support wrist goes up .192, .052
+  // inboard and .042 forward, onto the rear of the fore-end just behind the first brass band.
+  // Measured in the character studio against the shipped GLB: the firing palm -- the RightHand bone
+  // plus .25 gun units along the frame code's finger basis -- sits .007 off the nearest belly vertex
+  // and the support palm .028 under the fore-end, against .305 and .252 with the procedural anchors,
+  // and the magazine stays .133 clear of the support palm at rest and never comes closer anywhere in
+  // its (-.26, -.12, +.04) stroke. (tools/qa/weapons/tune.mjs measures both against per-kind
+  // bands: SUPPORT_TARGET.burst is the fore-end, and FIRING_TARGET.burst is the stock wrist behind
+  // the trigger, y [-.10, .12] and z >= -.02, because the flat y [-.27, -.05] grip band the other
+  // guns use finds no vertex at all on a stock this shallow. Both numbers are the script's own.)
+  burst: Object.freeze({
+    right: Object.freeze([-.026, .106, .240]),
+    left: Object.freeze([-.218, .012, -.377]),
   }),
 });
 

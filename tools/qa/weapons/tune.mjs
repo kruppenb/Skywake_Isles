@@ -14,10 +14,14 @@
 //   fit.firing.grip.distance                    gun-space distance from the firing palm centre
 //                                               (the RightHand bone plus .25 gun units along the
 //                                               finger basis the frame code builds) to the nearest
-//                                               body vertex with y in [-.27, -.05] -- the grip.
-//                                               Under ~.06 means the grip is inside the palm.
-//   fit.support.grip.distance                   the equivalent support-hand distance to the body
-//                                               (fore-end / off-hand grip band).
+//                                               body vertex in the kind's FIRING_TARGET band
+//                                               (below) -- the grip or stock wrist. Under ~.06
+//                                               means the grip is inside the palm.
+//   fit.support.grip.distance                   the equivalent support-hand distance to the kind's
+//                                               SUPPORT_TARGET band (below): the fore-end under the
+//                                               barrel on the long guns and the blunderbuss, the
+//                                               grip on the pistol, whose off hand wraps the firing
+//                                               hand. fit.support.target echoes the band searched.
 //
 // Usage:
 //   node tools/qa/weapons/tune.mjs --kind <flintlock|scatter|repeater|burst|longshot>
@@ -34,6 +38,54 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const KINDS = ['flintlock', 'scatter', 'repeater', 'burst', 'longshot'];
+
+// Where each kind's support palm has to land, in gun space: the body vertices the support metric
+// searches. A band that cannot see the target is worse than none -- it reports the distance to
+// whatever else is in it and reads the same for every candidate. Measured from z-slices of the
+// shipped GLBs (2026-09-12):
+//   flintlock  the off hand wraps the firing hand around the grip, so the target is the grip band
+//              (y -.30 .. .05 anywhere along the gun), as the firing metric's is.
+//   scatter    the fore-end is a wooden tube fused under the barrel whose underside runs y -.03 ..
+//              +.03 over z -.75 .. -.30; the flare starts at z -.85 and the trigger-guard bow at
+//              z -.20. Ceiling .10 is just under the bore (.12).
+//   repeater   the fore-end is a thin tube under the barrel with its underside at y .049 .. .075
+//              over z -.80 .. -.45 (nothing below y .10 at z -.45 .. -.40, the front brass band),
+//              which the old flat [-.30, .05] band could not see at all: every correct candidate
+//              read ~.17, the distance to the receiver lip behind the magazine well. Ceiling .15 is
+//              just under the bore (.17); the window stops at z -.40 so the magazine well, the
+//              trigger guard and the receiver stay out.
+//   burst      re-measured from the shipped GLB (2026-09-12) and kept as drawn: the fore-end is a
+//              fat wooden tube under the barrel whose underside runs y .105 .. .119 over
+//              z -.60 .. -.45 and y .078 .. .086 over z -.85 .. -.65 (the finger groove between the
+//              brass bands). The window's back edge at z -.45 keeps out the magazine well, which
+//              drops to y ~ 0 over z -.45 .. -.30, and the trigger guard behind it; ceiling .15 is
+//              just under the bore (.17). 656 vertices, and the tuned support palm reads .028.
+//   longshot   PROVISIONAL, from the procedural fore-end (z -.77 .. -.20, underside y -.135) and
+//              the .17 bore; re-measure from the shipped GLB's slices before trusting it.
+// `z` is optional (omit it for a target anywhere along the gun); page.evaluate serialises the
+// band as JSON, so never use Infinity here.
+const SUPPORT_TARGET = {
+  flintlock: { y: [-.30, .05] },
+  scatter: { y: [-.30, .10], z: [-.85, -.25] },
+  repeater: { y: [-.30, .15], z: [-.80, -.40] },
+  burst: { y: [-.30, .15], z: [-1.05, -.45] },
+  longshot: { y: [-.40, .15], z: [-1.20, -.30] },
+};
+
+// The same for the firing palm: the grip (pistols) or the pistol grip / stock wrist behind the
+// trigger (long guns). The flat y [-.27, -.05] band fits the flintlock's raked grip (bottom
+// y -.27), the scatter's (-.33) and the repeater's pistol grip (bottom -.146), but the burst's
+// whole stock is shallow -- grip belly y -.030 at z .05 .. .08, stock wrist +.02, butt toe -.035 --
+// so that band is empty there and the distance read null for every candidate; its band is the
+// stock-wrist band behind the trigger (z >= -.02), y -.10 .. .12, measured from the shipped GLB.
+//   longshot   PROVISIONAL (the pistol-grip band); re-measure from the shipped GLB's slices.
+const FIRING_TARGET = {
+  flintlock: { y: [-.27, -.05] },
+  scatter: { y: [-.27, -.05] },
+  repeater: { y: [-.27, -.05] },
+  burst: { y: [-.10, .12], z: [-.02, .60] },
+  longshot: { y: [-.27, -.05] },
+};
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
@@ -164,9 +216,11 @@ const applyCandidate = candidate => page.evaluate(({ candidate, kind }) => {
 //         builds that basis as (-.20, -.62, -.76) normalised, rotated by weaponRig * anchor; the
 //         gun group is weaponRig's child at identity rotation, so in gun space only the anchor's
 //         own rotation applies.
-// grip  = every body vertex with y in [-.27, -.05]: the GLB's raked grip between its butt and the
-//         tang, which is what the palm has to close around.
-const measure = () => page.evaluate(kind => {
+// grip  = the body vertices in the kind's FIRING_TARGET band (y, and z when given): the GLB's
+//         raked grip between its butt and the tang, or a long gun's stock wrist, which is what the
+//         palm has to close around.
+// support target = the kind's SUPPORT_TARGET band (y, and z when given) of body vertices.
+const measure = () => page.evaluate(({ kind, firingTarget, supportTarget }) => {
   const api = window.characterStudio, THREE = api.refs.THREE;
   const debug = api.refs.gameModel.debug;
   const held = api.refs.gameModel.group.getObjectByName(`held-${kind}`);
@@ -194,31 +248,34 @@ const measure = () => page.evaluate(kind => {
   const local = new THREE.Matrix4().multiplyMatrices(toGun, body.matrixWorld);
   const positions = body.geometry.attributes.position;
   const vertex = new THREE.Vector3();
-  const nearest = (point, loY, hiY) => {
+  const nearest = (point, band) => {
     let best = Infinity, at = null, count = 0;
     for (let i = 0; i < positions.count; i++) {
       vertex.fromBufferAttribute(positions, i).applyMatrix4(local);
-      if (vertex.y < loY || vertex.y > hiY) continue;
+      if (vertex.y < band.y[0] || vertex.y > band.y[1]) continue;
+      if (band.z && (vertex.z < band.z[0] || vertex.z > band.z[1])) continue;
       count++;
       const distance = vertex.distanceTo(point);
       if (distance < best) { best = distance; at = vertex.toArray().map(round); }
     }
-    return { distance: round(best), at, candidates: count };
+    return { distance: count ? round(best) : null, at, candidates: count };
   };
 
   return {
     firing: {
       wrist: firing.wrist.toArray().map(round), palm: firing.palm.toArray().map(round),
       fingers: firing.fingers.toArray().map(round),
-      grip: nearest(firing.palm, -.27, -.05),
+      target: firingTarget,
+      grip: nearest(firing.palm, firingTarget),
     },
     support: {
       wrist: support.wrist.toArray().map(round), palm: support.palm.toArray().map(round),
-      grip: nearest(support.palm, -.30, .05),
+      target: supportTarget,
+      grip: nearest(support.palm, supportTarget),
       toFiringPalm: round(support.palm.distanceTo(firing.palm)),
     },
   };
-}, KIND);
+}, { kind: KIND, firingTarget: FIRING_TARGET[KIND], supportTarget: SUPPORT_TARGET[KIND] });
 
 const results = [];
 for (const candidate of candidates) {
@@ -256,8 +313,8 @@ for (const candidate of candidates) {
 
   results.push({ ...candidate, applied, fit, shots });
   console.log(`${candidate.label}  right=[${candidate.right}] left=[${candidate.left}]`);
-  console.log(`   firing palm ${JSON.stringify(fit.firing.palm)} -> grip ${fit.firing.grip.distance} (at ${JSON.stringify(fit.firing.grip.at)}, ${fit.firing.grip.candidates} grip verts)`);
-  console.log(`   support palm ${JSON.stringify(fit.support.palm)} -> body ${fit.support.grip.distance}, to firing palm ${fit.support.toFiringPalm}`);
+  console.log(`   firing palm ${JSON.stringify(fit.firing.palm)} -> grip ${fit.firing.grip.distance} (at ${JSON.stringify(fit.firing.grip.at)}, ${fit.firing.grip.candidates} verts in y ${JSON.stringify(fit.firing.target.y)}${fit.firing.target.z ? ` z ${JSON.stringify(fit.firing.target.z)}` : ''})`);
+  console.log(`   support palm ${JSON.stringify(fit.support.palm)} -> target ${fit.support.grip.distance} (at ${JSON.stringify(fit.support.grip.at)}, ${fit.support.grip.candidates} verts in y ${JSON.stringify(fit.support.target.y)}${fit.support.target.z ? ` z ${JSON.stringify(fit.support.target.z)}` : ''}), to firing palm ${fit.support.toFiringPalm}`);
 }
 
 const errors = consoleLog.filter(entry => entry.type === 'error');

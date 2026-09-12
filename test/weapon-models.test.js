@@ -73,13 +73,26 @@ function frameTranslate(weapon, open) {
   weapon.group.updateMatrixWorld(true);
   weapon.stowed.updateMatrixWorld(true);
 }
+// The burst's lines: the repeater's translation plus the extra z the carbine does not have
+// (client/player-character.js 416-424 and client/models.js 995-1003, the `kind === 'burst'` line
+// inside the same else branch).
+function frameTranslateBurst(weapon, open) {
+  weapon.action.position.copy(weapon.actionOrigin);
+  weapon.action.rotation.set(0, 0, 0);
+  weapon.action.position.x -= .26 * open;
+  weapon.action.position.y -= .12 * open;
+  weapon.action.position.z += .04 * open;
+  weapon.group.updateMatrixWorld(true);
+  weapon.stowed.updateMatrixWorld(true);
+}
 
 test('every shipped kind has a frozen asset URL and unknown kinds never start a load', () => {
   assert.equal(WEAPON_ASSET_URLS.flintlock, '/assets/weapons/flintlock.glb');
   assert.equal(WEAPON_ASSET_URLS.scatter, '/assets/weapons/scatter.glb');
   assert.equal(WEAPON_ASSET_URLS.repeater, '/assets/weapons/repeater.glb');
+  assert.equal(WEAPON_ASSET_URLS.burst, '/assets/weapons/burst.glb');
   assert.ok(Object.isFrozen(WEAPON_ASSET_URLS));
-  assert.equal(loadWeaponAsset('burst'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
+  assert.equal(loadWeaponAsset('longshot'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
   assert.equal(loadWeaponAsset('flintlock', ''), null);
 });
 
@@ -279,7 +292,7 @@ test('upgradeWeapon applies a supplied asset, and in Node without one it is a no
   assert.equal(body.geometry, snapshot.geometry);
   assert.equal(procedural.action, snapshot.action);
   closeTo(procedural.socket.position, snapshot.socket, 'muzzle socket');
-  assert.equal(upgradeWeapon(procedural, 'burst'), procedural, 'a kind with no asset is a no-op');
+  assert.equal(upgradeWeapon(procedural, 'longshot'), procedural, 'a kind with no asset is a no-op');
   assert.equal(upgradeWeapon(null, KIND), null);
 });
 
@@ -309,9 +322,9 @@ test('upgrading hands the gun its own wrist anchors, and a kind with no entry ge
   }
   // The renderers read `weapon.handling || WEAPON_HANDLING[kind]`, so a gun whose kind is not in
   // the table has to fall through rather than take a half-filled object.
-  const other = buildWeapon(palette, 'burst');
-  assert.equal(WEAPON_ASSET_HANDLING.burst, undefined, 'this case needs a kind with no tuned anchors');
-  assert.equal(applyWeaponAsset(other, 'burst', syntheticAsset('burst')), true);
+  const other = buildWeapon(palette, 'longshot');
+  assert.equal(WEAPON_ASSET_HANDLING.longshot, undefined, 'this case needs a kind with no tuned anchors');
+  assert.equal(applyWeaponAsset(other, 'longshot', syntheticAsset('longshot')), true);
   assert.equal(other.handling, null, 'an untuned kind must fall back to WEAPON_HANDLING');
   assert.ok(!other.handling, 'and must be falsy so the || in the renderers picks the procedural pair');
 });
@@ -400,6 +413,58 @@ test("the repeater's magazine translates in gun space, unrotated, through an ide
     closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld),
       PIVOT.clone().add(CARRIER_POINT).add(new THREE.Vector3(-.26 * open, -.12 * open, 0)),
       `repeater open ${open}`);
+    const turn = new THREE.Quaternion().setFromRotationMatrix(carrier.matrixWorld);
+    near(turn.angleTo(new THREE.Quaternion()), 0, `the magazine must translate, not rotate, at open ${open}`);
+    assert.deepEqual(stowedCarrier.matrixWorld.elements, stowedRest.elements,
+      'the stowed magazine must never animate');
+  }
+});
+
+test('the burst upgrades to its own GLB and its own wrist anchors', () => {
+  assert.equal(WEAPON_ASSET_URLS.burst, '/assets/weapons/burst.glb', "the long carbine's asset URL is frozen in");
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'burst');
+  assert.equal(weapon.asset, 'burst');
+  assert.equal(weapon.handling, WEAPON_ASSET_HANDLING.burst, 'the upgraded burst must carry its own anchors');
+  for (const side of ['right', 'left']) {
+    assert.equal(weapon.handling[side].length, 3, `${side} anchor must be an [x, y, z] triple`);
+    assert.ok(weapon.handling[side].every(Number.isFinite), `${side} anchor must be finite`);
+  }
+  // Tuned in the character studio against the shipped GLB, which has no pistol grip at all: the
+  // firing hand holds a stock wrist whose belly bottoms out at y -.030 rather than a sphere hanging
+  // to y -.34, and the procedural support anchor sat under the magazine well instead of the
+  // fore-end, inside the magazine's own reload stroke. Both wrists ride up and inboard, so neither
+  // anchor may be the procedural pair any more.
+  assert.notDeepEqual([...weapon.handling.right], WEAPON_HANDLING.burst.right,
+    'the firing override exists because the GLB has a stock wrist, not the procedural grip sphere');
+  assert.notDeepEqual([...weapon.handling.left], WEAPON_HANDLING.burst.left,
+    'the support override exists because the procedural support anchor is in the magazine stroke');
+  closeTo(weapon.socket.position, MUZZLE, 'the burst muzzle socket moves to the asset node');
+});
+
+test("the burst's magazine translates in gun space, unrotated, through an identity hinge frame, including its +z", () => {
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'burst');
+  const carrier = weapon.group.getObjectByName('reload-action-mesh-burst');
+  const stowedCarrier = weapon.stowed.getObjectByName('stowed-reload-action-mesh-burst');
+  assert.ok(carrier && stowedCarrier, 'the burst must get the same hinge -> action -> mesh carrier chain');
+  // buildWeapon gives the burst no hinged loading gate either, so its actionOrigin stays at the
+  // origin and the frame code's translation is the whole motion.
+  closeTo(weapon.actionOrigin, new THREE.Vector3(), "actionOrigin is buildWeapon's (0, 0, 0), untouched");
+
+  frameTranslateBurst(weapon, 0);
+  closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'at rest the magazine must sit exactly where the GLB placed it');
+  closeTo(CARRIER_POINT.clone().applyMatrix4(stowedCarrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'the stowed magazine starts where the GLB placed it too');
+  const stowedRest = stowedCarrier.matrixWorld.clone();
+
+  // Same identity Q as the repeater, so the chain multiplies out to P + d + p -- but the burst's d
+  // has a third component, and the point of this case is that the carrier passes that +z through
+  // untouched rather than dropping it or rotating it onto some other axis.
+  for (const open of [0, .17, .5, .83, 1]) {
+    frameTranslateBurst(weapon, open);
+    closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld),
+      PIVOT.clone().add(CARRIER_POINT).add(new THREE.Vector3(-.26 * open, -.12 * open, .04 * open)),
+      `burst open ${open}`);
     const turn = new THREE.Quaternion().setFromRotationMatrix(carrier.matrixWorld);
     near(turn.angleTo(new THREE.Quaternion()), 0, `the magazine must translate, not rotate, at open ${open}`);
     assert.deepEqual(stowedCarrier.matrixWorld.elements, stowedRest.elements,

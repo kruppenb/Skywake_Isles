@@ -1,6 +1,69 @@
 {
   "schemaVersion": 1,
   "weapons": {
+    "burst": {
+      "glb": "burst.glb",
+      "sha256": "40d079e8b8f9337039879679c4353ba0a83eb88ae18e0d98fa184355877f47e0",
+      "bytes": 625788,
+      "triangles": {
+        "body": 7598,
+        "action": 561
+      },
+      "rootNode": "burst",
+      "nodes": {
+        "body": "body",
+        "action": "action",
+        "muzzle": "muzzle"
+      },
+      "muzzle": [
+        0,
+        0.17,
+        -1.46
+      ],
+      "hingePivot": [
+        0,
+        0.055,
+        -0.374
+      ],
+      "hingeAxis": [
+        0,
+        0,
+        1
+      ],
+      "bounds": {
+        "min": [
+          -0.08391,
+          -0.23962,
+          -1.46
+        ],
+        "max": [
+          0.10595,
+          0.38571,
+          0.45
+        ]
+      },
+      "images": [
+        {
+          "name": "burst-albedo",
+          "mimeType": "image/jpeg",
+          "width": 1024,
+          "height": 1024,
+          "embeddedBytes": 275540
+        }
+      ],
+      "materialNames": [
+        "burst",
+        "fill"
+      ],
+      "meshyTasks": {
+        "m2m": "01a09722-279f-7335-b074-99c5b2e1f5c5"
+      },
+      "plates": [
+        "side",
+        "left"
+      ],
+      "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
+    },
     "flintlock": {
       "glb": "flintlock.glb",
       "sha256": "06d021550636ef8e35f859ce057c829bdc2fb1fe40d20522961c423a734c2470",
