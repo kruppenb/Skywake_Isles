@@ -64,6 +64,69 @@
       ],
       "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
     },
+    "repeater": {
+      "glb": "repeater.glb",
+      "sha256": "55c72064e98e6ed7a6085a6b0571a08b2b6fd2f332634d4a56aafb0b0f7f65a3",
+      "bytes": 659032,
+      "triangles": {
+        "body": 7580,
+        "action": 537
+      },
+      "rootNode": "repeater",
+      "nodes": {
+        "body": "body",
+        "action": "action",
+        "muzzle": "muzzle"
+      },
+      "muzzle": [
+        0,
+        0.17,
+        -1
+      ],
+      "hingePivot": [
+        0,
+        0.045,
+        -0.255
+      ],
+      "hingeAxis": [
+        0,
+        0,
+        1
+      ],
+      "bounds": {
+        "min": [
+          -0.08662,
+          -0.21157,
+          -1
+        ],
+        "max": [
+          0.09467,
+          0.35052,
+          0.45
+        ]
+      },
+      "images": [
+        {
+          "name": "repeater-albedo",
+          "mimeType": "image/jpeg",
+          "width": 1024,
+          "height": 1024,
+          "embeddedBytes": 295295
+        }
+      ],
+      "materialNames": [
+        "repeater",
+        "fill"
+      ],
+      "meshyTasks": {
+        "m2m": "01a09439-b36a-74aa-b327-a9e971ec33b0"
+      },
+      "plates": [
+        "side",
+        "left"
+      ],
+      "generator": "tools/meshy/build_weapon.py (Blender 5.2.1) on a Meshy multi-image-to-3D prop task"
+    },
     "scatter": {
       "glb": "scatter.glb",
       "sha256": "57b1a11ab15224c0d4655ba76520216de185e8ec5112a0e30cdd35987013f768",

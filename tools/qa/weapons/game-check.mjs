@@ -9,10 +9,14 @@
 //     [--out .qa/weapons/game/]
 //
 // `--kind` labels the report's fields and picks the held-gun probe's node names to look for. The
-// server always starts a fresh player on the flintlock (see server/game.js); every pirate also
-// spawns with the scatter in slot 2, so `--kind scatter` presses Digit2 once the pirate is on the
-// ground and waits for a visible `held-scatter` before it shoots. Any other kind has to be picked
-// up in the world first, so it is still only a label.
+// server always starts a fresh player on the flintlock (see server/game.js), so every other kind is
+// pressed in: once the pirate is on the ground this sends that kind's slot key (client/input.js
+// ACTION_KEYS maps Digit1..Digit5 onto flintlock, scatter, repeater, burst, longshot) and waits for
+// a visible `held-<kind>` before it shoots. The starting inventory is flintlock + scatter only and
+// `swap` refuses an unowned kind with NOT_OWNED, so `--kind repeater|burst|longshot` needs a server
+// that has already given this pirate that gun -- point `--origin` at a fixture that seeds the
+// inventory around createGameServer rather than editing gameplay code, or the wait for
+// `held-<kind>` just times out.
 //
 // This script starts NOTHING. Bring the isolated server up first (never port 3400):
 //   PowerShell:  $env:PORT=3401; node server/index.js
@@ -122,10 +126,11 @@ console.log(`departure: ${JSON.stringify(departure)}`);
 await page.waitForFunction(`(${self.toString()})()?.mode === 'ground'`, null, { timeout: 120000 });
 await wait(2500);
 
-// Slot keys. Every pirate spawns holding the flintlock with the scatter in slot 2 (server/game.js),
-// and client/input.js maps Digit1..Digit5 onto the five kinds, so anything but the flintlock has to
-// be equipped before the shots are worth taking -- and only once the renderer has actually built
-// and shown it. A held-<kind> group under a weapon-aim-recoil-rig is a gun in a pirate's hands
+// Slot keys. Every pirate spawns holding the flintlock (server/game.js), and client/input.js maps
+// Digit1..Digit5 onto the five kinds, so anything but the flintlock has to be equipped -- with an
+// ordinary key event, and only if the server says the pirate owns it (see the header) -- before the
+// shots are worth taking, and only once the renderer has actually built and shown it. A
+// held-<kind> group under a weapon-aim-recoil-rig is a gun in a pirate's hands
 // (buildWeapon names ground loot the same way), and this lobby holds no pirate but ours.
 const equipped = KIND === 'flintlock' ? null : await (async () => {
   await page.evaluate(async code => {

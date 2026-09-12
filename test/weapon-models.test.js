@@ -62,12 +62,24 @@ function frame(weapon, open) {
   weapon.group.updateMatrixWorld(true);
   weapon.stowed.updateMatrixWorld(true);
 }
+// The repeater's lines instead: the same reset, then a translation and no rotation at all
+// (client/player-character.js 416-422 and client/models.js 995-1001, the else branch without the
+// burst's extra z).
+function frameTranslate(weapon, open) {
+  weapon.action.position.copy(weapon.actionOrigin);
+  weapon.action.rotation.set(0, 0, 0);
+  weapon.action.position.x -= .26 * open;
+  weapon.action.position.y -= .12 * open;
+  weapon.group.updateMatrixWorld(true);
+  weapon.stowed.updateMatrixWorld(true);
+}
 
 test('every shipped kind has a frozen asset URL and unknown kinds never start a load', () => {
   assert.equal(WEAPON_ASSET_URLS.flintlock, '/assets/weapons/flintlock.glb');
   assert.equal(WEAPON_ASSET_URLS.scatter, '/assets/weapons/scatter.glb');
+  assert.equal(WEAPON_ASSET_URLS.repeater, '/assets/weapons/repeater.glb');
   assert.ok(Object.isFrozen(WEAPON_ASSET_URLS));
-  assert.equal(loadWeaponAsset('repeater'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
+  assert.equal(loadWeaponAsset('burst'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
   assert.equal(loadWeaponAsset('flintlock', ''), null);
 });
 
@@ -267,7 +279,7 @@ test('upgradeWeapon applies a supplied asset, and in Node without one it is a no
   assert.equal(body.geometry, snapshot.geometry);
   assert.equal(procedural.action, snapshot.action);
   closeTo(procedural.socket.position, snapshot.socket, 'muzzle socket');
-  assert.equal(upgradeWeapon(procedural, 'repeater'), procedural, 'a kind with no asset is a no-op');
+  assert.equal(upgradeWeapon(procedural, 'burst'), procedural, 'a kind with no asset is a no-op');
   assert.equal(upgradeWeapon(null, KIND), null);
 });
 
@@ -297,9 +309,9 @@ test('upgrading hands the gun its own wrist anchors, and a kind with no entry ge
   }
   // The renderers read `weapon.handling || WEAPON_HANDLING[kind]`, so a gun whose kind is not in
   // the table has to fall through rather than take a half-filled object.
-  const other = buildWeapon(palette, 'repeater');
-  assert.equal(WEAPON_ASSET_HANDLING.repeater, undefined, 'this case needs a kind with no tuned anchors');
-  assert.equal(applyWeaponAsset(other, 'repeater', syntheticAsset('repeater')), true);
+  const other = buildWeapon(palette, 'burst');
+  assert.equal(WEAPON_ASSET_HANDLING.burst, undefined, 'this case needs a kind with no tuned anchors');
+  assert.equal(applyWeaponAsset(other, 'burst', syntheticAsset('burst')), true);
   assert.equal(other.handling, null, 'an untuned kind must fall back to WEAPON_HANDLING');
   assert.ok(!other.handling, 'and must be falsy so the || in the renderers picks the procedural pair');
 });
@@ -342,6 +354,57 @@ test("the scatter's loading gate swings about the asset hinge axis through the a
   const stowedCarrier = weapon.stowed.getObjectByName('stowed-reload-action-mesh-scatter');
   closeTo(CARRIER_POINT.clone().applyMatrix4(stowedCarrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
     'the stowed scatter never animates');
+});
+
+test('the repeater upgrades to its own GLB and its own wrist anchors', () => {
+  assert.equal(WEAPON_ASSET_URLS.repeater, '/assets/weapons/repeater.glb', "the carbine's asset URL is frozen in");
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'repeater');
+  assert.equal(weapon.asset, 'repeater');
+  assert.equal(weapon.handling, WEAPON_ASSET_HANDLING.repeater, 'the upgraded repeater must carry its own anchors');
+  for (const side of ['right', 'left']) {
+    assert.equal(weapon.handling[side].length, 3, `${side} anchor must be an [x, y, z] triple`);
+    assert.ok(weapon.handling[side].every(Number.isFinite), `${side} anchor must be finite`);
+  }
+  // Tuned in the character studio against the shipped GLB, whose pistol grip is a short column
+  // bottoming out at y -.146 rather than a sphere hanging to y -.34, and whose fore-end is a tube
+  // fused to the barrel with its underside up at y .065 -- close enough to the magazine that the
+  // procedural support anchor cupped the magazine instead of the wood: both wrists ride up and
+  // inboard, so neither anchor may be the procedural pair any more.
+  assert.notDeepEqual([...weapon.handling.right], WEAPON_HANDLING.repeater.right,
+    'the firing override exists because the GLB grip is not the procedural sphere');
+  assert.notDeepEqual([...weapon.handling.left], WEAPON_HANDLING.repeater.left,
+    'the support override exists because the GLB fore-end is not the procedural block');
+  closeTo(weapon.socket.position, MUZZLE, 'the repeater muzzle socket moves to the asset node');
+});
+
+test("the repeater's magazine translates in gun space, unrotated, through an identity hinge frame", () => {
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'repeater');
+  const carrier = weapon.group.getObjectByName('reload-action-mesh-repeater');
+  const stowedCarrier = weapon.stowed.getObjectByName('stowed-reload-action-mesh-repeater');
+  assert.ok(carrier && stowedCarrier, 'the repeater must get the same hinge -> action -> mesh carrier chain');
+  // buildWeapon gives the repeater no hinged loading gate, so its actionOrigin stays at the origin
+  // and the frame code's translation is the whole motion.
+  closeTo(weapon.actionOrigin, new THREE.Vector3(), "actionOrigin is buildWeapon's (0, 0, 0), untouched");
+
+  frameTranslate(weapon, 0);
+  closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'at rest the magazine must sit exactly where the GLB placed it');
+  closeTo(CARRIER_POINT.clone().applyMatrix4(stowedCarrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'the stowed magazine starts where the GLB placed it too');
+  const stowedRest = stowedCarrier.matrixWorld.clone();
+
+  // hingeAxis [0, 0, 1] makes Q the identity, so the carrier chain multiplies out to P + d + p: the
+  // magazine slides by exactly the frame code's d -- down and to the gun's left -- and never turns.
+  for (const open of [0, .17, .5, .83, 1]) {
+    frameTranslate(weapon, open);
+    closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld),
+      PIVOT.clone().add(CARRIER_POINT).add(new THREE.Vector3(-.26 * open, -.12 * open, 0)),
+      `repeater open ${open}`);
+    const turn = new THREE.Quaternion().setFromRotationMatrix(carrier.matrixWorld);
+    near(turn.angleTo(new THREE.Quaternion()), 0, `the magazine must translate, not rotate, at open ${open}`);
+    assert.deepEqual(stowedCarrier.matrixWorld.elements, stowedRest.elements,
+      'the stowed magazine must never animate');
+  }
 });
 
 test('a gun that never upgraded keeps the procedural fit and carries no anchors of its own', () => {

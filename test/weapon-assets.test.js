@@ -51,6 +51,25 @@ const CONTRACTS = {
     barrel: { band: [-.60, -.35], centroidY: [-.05, .20], absCentroidX: .03, extentX: .30, extentY: .45 },
     action: { reach: .30, y: [.05, .55] },
   },
+  // The repeater: a compact carbine, so its grip rule is a stock-wrist band (y -.20..-.08) rather
+  // than a pistol grip band, with zFrom -.02 so neither the box magazine (z -.26..-.03) nor the
+  // trigger-guard bow counts as grip and the centroid has to land on the pistol grip / stock wrist
+  // at z .05 .. .40. The barrel band z -.90..-.66 sits ahead of the fore-end and behind the brass
+  // muzzle ring; the bore runs at y .17 to a muzzle at z = -1.0. Its action is the magazine hanging
+  // *under* the receiver, which the frame code TRANSLATES rather than rotates (hingeAxis [0, 0, 1],
+  // an identity hinge frame), so the action y band is negative; reach .40 covers the magazine's far
+  // bottom corner from a pivot at its top centre. Measured off the approved side plate at length
+  // 1.45 with the bore at y .17: the magazine, not the grip, is the gun's lowest point and its brass
+  // base plate bottoms out near y -.26 (so yMin's upper bound is -.18, not the grip's -.20), and its
+  // top meets the receiver underside near y +.06, which is where the split seam runs (so the action
+  // band reaches y .10).
+  repeater: {
+    bounds: { zMin: [-1.10, -.90], zMax: .60, yMin: [-.65, -.18], yMax: .55, absX: .25 },
+    muzzle: { zBelowMin: -.02, zAboveMin: .06, y: [.12, .22], absX: .03 },
+    grip: { band: [-.20, -.08], zFrom: -.02, absCentroidX: .06, centroidZ: [.05, .40], extentX: .30, extentZ: .50 },
+    barrel: { band: [-.90, -.66], centroidY: [.02, .25], absCentroidX: .03, extentX: .25, extentY: .40 },
+    action: { reach: .40, y: [-.60, .10] },
+  },
 };
 const ALLOWED_EXTENSIONS = ['KHR_materials_specular', 'KHR_materials_ior'];
 const COMPONENT_TYPES = { 5120: ['readInt8', 1], 5121: ['readUInt8', 1], 5122: ['readInt16LE', 2], 5123: ['readUInt16LE', 2], 5125: ['readUInt32LE', 4], 5126: ['readFloatLE', 4] };

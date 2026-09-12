@@ -39,12 +39,23 @@
 // swings by t radians about the GLB's own axis through the GLB's own pivot. Q^-1 on the mesh is
 // what cancels Q at rest: at t = 0 the part sits exactly where the GLB placed it, never born
 // rotated onto the hinge axis. The stowed twin gets the same chain and is never animated.
+//
+// The long guns translate a magazine or a bolt instead of rotating a hammer -- the frame code leaves
+// the rotation at zero and writes `position = actionOrigin + d` (the repeater's d is
+// (-.26, -.12, 0) * open) -- and the same chain carries that unchanged, because
+//
+//   T(P - Q*actionOrigin) * Q * T(actionOrigin + d) * Q^-1 * p = P + Q*d + p
+//
+// So a part whose `hingeAxis` is +Z, giving Q = identity, slides by exactly the frame code's d in
+// gun space; any other axis would slide it along a rotated d instead. That is why the translating
+// kinds' GLBs are built with `--hinge-axis 0 0 1`.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export const WEAPON_ASSET_URLS = Object.freeze({
   flintlock: '/assets/weapons/flintlock.glb',
   scatter: '/assets/weapons/scatter.glb',
+  repeater: '/assets/weapons/repeater.glb',
 });
 
 // Where the navigator's wrists go once a GLB is drawing instead of the procedural gun. Same gun
@@ -78,6 +89,24 @@ export const WEAPON_ASSET_HANDLING = Object.freeze({
   scatter: Object.freeze({
     right: Object.freeze([.02, -.05, .40]),
     left: Object.freeze([-.228, -.086, -.28]),
+  }),
+  // The repeater GLB is a narrow carbine (|x| <= .095 against the procedural slab's .21), so both
+  // wrists ride up and inboard. Its pistol grip is a short wood column at z .04 .. .18 whose bottom
+  // is only y = -.146, where the procedural grip sphere hung to y = -.34 at z .08 .. .30, so the
+  // firing wrist goes up .178, back .051 and .065 inboard. Its fore-end is a thin tube fused to the
+  // barrel, underside y .065 .. .077 at z -.52 .. -.55, where the procedural block hung to y = -.135:
+  // the procedural support anchor left the off hand .217 from that wood and only .151 from the
+  // magazine -- cupping the magazine, which then slides out from under it on every reload -- so the
+  // support wrist goes up .169, .023 inboard and .033 forward, onto the wooden finger groove at
+  // z -.51 .. -.64. Measured in the character studio against the shipped GLB: the firing palm -- the
+  // RightHand bone plus .25 gun units along the frame code's finger basis -- sits .034 off the
+  // nearest grip vertex and the support palm .030 under the fore-end, against .224 and .217 with the
+  // procedural anchors. (tools/qa/weapons/tune.mjs reports the support distance against a y band of
+  // [-.30, .05], which cannot see this carbine's fore-end underside at all; .030 is the distance to
+  // the nearest body vertex with the band lifted.)
+  repeater: Object.freeze({
+    right: Object.freeze([-.010, .033, .261]),
+    left: Object.freeze([-.242, -.011, -.353]),
   }),
 });
 

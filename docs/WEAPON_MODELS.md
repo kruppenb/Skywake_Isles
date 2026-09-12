@@ -1,8 +1,10 @@
 # Skywake weapons — GLB models
 
-Status: **guns 1 and 2 are built** — the flintlock (`client/assets/weapons/flintlock.glb`, Meshy
-task `01a092d5-6e56-73cf-95f6-def4c7d721a3`) and the scatter (`client/assets/weapons/scatter.glb`,
-Meshy task `01a093f7-8504-73a2-8436-be4019fcef3c`); the repeater, burst and longshot are still
+Status: **guns 1, 2 and 3 are built** — the flintlock (`client/assets/weapons/flintlock.glb`, Meshy
+task `01a092d5-6e56-73cf-95f6-def4c7d721a3`), the scatter (`client/assets/weapons/scatter.glb`,
+Meshy task `01a093f7-8504-73a2-8436-be4019fcef3c`) and the repeater
+(`client/assets/weapons/repeater.glb`, Meshy task `01a09439-b36a-74aa-b327-a9e971ec33b0`, the
+first gun whose action translates instead of rotating); the burst and longshot are still
 `buildWeapon`'s procedural meshes. This document describes the pipeline that turns a concept plate into
 `client/assets/weapons/<kind>.glb`, the gun-space contract that GLB must satisfy, and how to add
 the next gun. The end-to-end workflow (who does what, the gates, the per-gun landmark table and
@@ -57,6 +59,14 @@ flare); muzzle y ∈ [.07, .17]; grip band y ∈ [−.24, −.14] restricted to 
 fore-end under the barrel is not counted as grip) with z-extent ≤ .48 (the trigger-guard bow
 shares the band with the raked grip, .24 behind it); barrel band z ∈ [−.60, −.35] (behind the
 flare) with centroid y ∈ [−.05, .20], x-extent ≤ .30, y-extent ≤ .45; action y ∈ [.05, .55].
+The repeater's row, the first long gun's: z_min ∈ [−1.10, −.90] (muzzle at z −1.0), z_max ≤ .60,
+y_min ∈ [−.65, −.18] (the magazine, not the grip, is the lowest point), y_max ≤ .55, |x| ≤ .25;
+muzzle y ∈ [.12, .22] (bore .17); a **stock-wrist band** y ∈ [−.20, −.08] with `zFrom` −.02 (so
+neither the magazine nor the trigger-guard bow counts) whose centroid must land on the pistol
+grip / stock wrist at z ∈ [.05, .40], x-extent ≤ .30, z-extent ≤ .50; barrel band z ∈ [−.90, −.66]
+(ahead of the fore-end, behind the muzzle ring) with centroid y ∈ [.02, .25], x-extent ≤ .25,
+y-extent ≤ .40; action y ∈ [−.60, .10] and reach ≤ .40 — a magazine hanging *under* the receiver,
+so the band is negative.
 
 `build_weapon.py` checks every one of those against the exported bytes and exits non-zero on a miss;
 `test/weapon-assets.test.js` checks them again independently.
@@ -190,6 +200,99 @@ to the barrel whose underside is at y −.01 where the procedural block hung to 
 .040 off the grip, support palm .023 under the fore-end, against .212 and .165 procedural. The tune
 script's support-hand finger basis is now per kind, matching `client/player-character.js`: the
 pistol's off hand wraps the firing hand, every other kind cups a fore-end from below.
+
+### Gun 3 — the repeater
+
+The repeater is drawn as a compact repeating carbine: a short banded barrel, a boxy steel
+receiver carrying the flintlock's lock and hammer on +X, a fat teal box magazine hanging under
+the receiver just ahead of the trigger guard, a wooden fore-end ahead of that, a pistol grip and
+a short brass-capped shoulder stock. Same two plates (side and left; the top came back as a side
+view twice and was dropped), same 30-credit prop task, 76 s to reconstruct. It is the first gun
+whose action **translates**: the frame code slides the magazine by (−.26, −.12, 0) · `open`, so
+the GLB's action carries `hingeAxis [0, 0, 1]` and the carrier chain applies that translation
+unchanged in gun space (the derivation is at the top of `client/weapon-models.js`). **The exact
+commands that produced the shipped repeater:**
+
+```
+node tools/meshy/weapon-plates.mjs repeater
+node tools/meshy/meshy.mjs prop meshy_output/plates/repeater/repeater-side.jpg \
+    meshy_output/plates/repeater/repeater-left.jpg    # 30 credits -> 01a09439-b36a-74aa-b327-a9e971ec33b0
+node tools/meshy/meshy.mjs wait m2m 01a09439-b36a-74aa-b327-a9e971ec33b0
+node tools/meshy/meshy.mjs download m2m 01a09439-b36a-74aa-b327-a9e971ec33b0 meshy_output/repeater
+
+# pass 1: orientation only, to read the landmarks and scan for the magazine
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/repeater/model_urls.glb.glb --kind repeater \
+    --length 1.45 --muzzle-z -1.0 --bore-y .17 \
+    --out $SCRATCH/repeater/pass1.glb --report $SCRATCH/repeater/pass1.json --allow-misfit
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/render_glb.py -- $SCRATCH/repeater/pass1.glb \
+    $SCRATCH/repeater/renders-pass1 --wide
+
+# pass 2: the real build, the magazine boxed and hinged at its top centre
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/repeater/model_urls.glb.glb --kind repeater \
+    --out client/assets/weapons/repeater.glb \
+    --length 1.45 --muzzle-z -1.0 --bore-y .17 --lock-side -X \
+    --action-box -0.10 -0.25 -0.37 0.10 0.045 -0.14 --hinge 0 0.045 -0.255 \
+    --hinge-axis 0 0 1 --texture-size 1024 --report $SCRATCH/repeater/repeater.json
+node tools/meshy/weapon-manifest.mjs
+node --test test/weapon-assets.test.js
+```
+
+What the carbine needed that the pistols did not:
+
+- **`--lock-side -X` means "the lock is on the input's left: mirror it"** — the opposite flag from
+  the scatter's. The auto vote here read +X .0826 against −X .0934, fired the mirror and was right
+  (the pass-1 render shows the hammer on +X), but on a 1 cm margin, so pass 2 pins the same
+  decision rather than re-voting. The flag names the side the lock is *detected* on, not the side
+  you want it to end up on; `+X` would have skipped the mirror and shipped the lock on the left.
+- **The action box is the magazine only, found by scanning the pass-1 body** — the script's
+  `hammerHint` looks for a hammer and points at the lock plate. The magazine is the mass under
+  the receiver at z −.341 … −.147, |x| ≤ .054, from the brass base plate at y −.212 up through a
+  neck (|x| .039 … .047 over y +.02 … +.06) into the receiver above y +.06; behind it, nothing on
+  the body goes below y −.01 over z −.14 … 0, so the box's rear face has air around it. The box
+  top at y .045 cuts across that neck, the hinge is the magazine's top centre, and 491 of 8,023
+  faces split off. Fill: 50 cap faces on each side, visible only as a sliver at the neck through
+  the trigger-guard aperture — and the well *should* show when the magazine slides out.
+- **Levelling came out 4.60° with the default band.** That is above the "move the band" trigger,
+  but the barrel-top silhouette is not a levelling measure on a barrel drawn octagonal at the
+  breech and round at the muzzle (and the shipped scatter's reads worse). The taper-immune check
+  is the tube's cross-section centre at the muzzle station: y .169 against the muzzle empty's
+  .170, so the socket is on the bore to 1 mm and the default band stayed.
+- Grip auto-detect again settled at 20 %; forward was the model's −X, scale .75924. The two-plate
+  reconstruction is narrow — |x| max .095 against the procedural .21 — so the fore-end is a thin
+  wooden tube fused under the barrel rather than the procedural block.
+
+Result: body 7,580 triangles, action 537, one 1024² JPEG albedo of 295,295 bytes, 659,032 bytes of
+GLB; y runs from −.212 (the magazine's base plate) to .351 (the hammer).
+
+Hands (`WEAPON_ASSET_HANDLING.repeater`, tuned with `tools/qa/weapons/tune.mjs` over three
+candidate passes): right (−.010, .033, .261), left (−.242, −.011, −.353). Both wrists ride up and
+inboard, for the same reason on each side: the GLB is shallower than the procedural gun. The pistol
+grip is a short wood column at z .04 … .18 bottoming at y −.146 where the procedural sphere hung to
+y −.34, so the firing wrist goes up .178, back .051 and .065 inboard; the fore-end is a thin tube
+fused under the barrel, underside y .065 … .077, where the procedural block hung to y −.135, so the
+support wrist goes up .169, .023 inboard and .033 forward onto the finger groove at z −.51 … −.64.
+The procedural anchors were not merely loose on this mesh: the firing palm dangled .224 below the
+grip and the support palm was nearer the **magazine** (.151) than the fore-end (.217) — and the
+magazine slides (−.26, −.12, 0) out of the receiver on every reload, straight through where that
+hand was. Tuned: firing palm .034 off the grip, support palm .030 under the fore-end, .211 clear of
+the magazine at rest and .302 at full stroke. The winner was chosen on the images over tighter
+candidates whose palm sat .010 off the grip's lock-side face and read as sunk into the receiver;
+.033 of clearance matches the approved scatter's .034. Caveat for the next long gun:
+`tune.mjs`'s support metric searches body vertices in y ∈ [−.30, .05], and this carbine's fore-end
+underside sits above that band, so its `fit.support.grip.distance` reads ≈ .17 for every correct
+candidate; the .030 above was measured from the shipped GLB's vertices with the band lifted.
+
+The in-game check needs an owned repeater: the starting inventory is flintlock + scatter and
+chests roll random drops, so the QA run used a scratch fixture wrapping `createGameServer` on
+127.0.0.1:3401 that seeds `inventory.repeater` in **both** `addPlayer` and `resetPlayer` (the
+voyage start reassigns the stock inventory, so a join-only seed is gone by landing and `Digit3` is
+refused `NOT_OWNED` without a toast). No gameplay code changed; `game-check.mjs`'s digit path was
+already generic.
 
 `meshy.mjs` reads `MESHY_API_KEY` from the environment or, failing that, the key registered for the
 Meshy MCP server in `~/.claude.json`; it never prints it. Meshy downloads expire after a few days,
@@ -346,7 +449,7 @@ The stand-in's output is a throwaway — **build it to a scratch path, not over 
 `node tools/meshy/weapon-manifest.mjs` afterwards if you did overwrite the real asset, and rebuild
 it from the Meshy task above.
 
-## Adding the next gun (repeater, burst, longshot)
+## Adding the next gun (burst, longshot)
 
 The end-to-end workflow with its gates and the per-gun landmark table is the `/gun-update <kind>`
 skill; in outline:
@@ -361,7 +464,8 @@ skill; in outline:
    repeater, burst and longshot **translate** a magazine or a bolt (`position += … * open`). Box
    that part, put `--hinge` at its attachment centre and pass `--hinge-axis 0 0 1` — an identity
    hinge frame — so the frame code's translation applies unchanged in gun space through the
-   carrier chain in `client/weapon-models.js`.
+   carrier chain in `client/weapon-models.js`. The repeater is the worked example: its section
+   above has the box, the hinge and the scan that found them.
 5. Record the task id in `tools/meshy/weapons/<kind>.tasks.json`, re-run
    `node tools/meshy/weapon-manifest.mjs`, add the URL to `WEAPON_ASSET_URLS` and a starting
    `WEAPON_ASSET_HANDLING` entry in `client/weapon-models.js`, then tune the anchors with
