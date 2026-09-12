@@ -60,8 +60,13 @@ const KINDS = ['flintlock', 'scatter', 'repeater', 'burst', 'longshot'];
 //              brass bands). The window's back edge at z -.45 keeps out the magazine well, which
 //              drops to y ~ 0 over z -.45 .. -.30, and the trigger guard behind it; ceiling .15 is
 //              just under the bore (.17). 656 vertices, and the tuned support palm reads .028.
-//   longshot   PROVISIONAL, from the procedural fore-end (z -.77 .. -.20, underside y -.135) and
-//              the .17 bore; re-measure from the shipped GLB's slices before trusting it.
+//   longshot   measured from the shipped GLB's z-slices (2026-09-12): the fore-end is a fat wooden
+//              tube under the barrel running z -1.34 .. -.60, its centre-line underside y -.004 ..
+//              +.016 over z -1.25 .. -.70 and rising to +.058 at its rear end (z -.60), |x| <= .100.
+//              The window's back edge at z -.60 is where the wood stops: behind it the trigger
+//              guard hangs from z -.51 to -.18 (bottom y -.127) and would answer for every
+//              candidate whose palm fell short of the wood. Ceiling .15 is just under the bore
+//              (.17), as on the repeater and the burst. 1,484 vertices.
 // `z` is optional (omit it for a target anywhere along the gun); page.evaluate serialises the
 // band as JSON, so never use Infinity here.
 const SUPPORT_TARGET = {
@@ -69,7 +74,7 @@ const SUPPORT_TARGET = {
   scatter: { y: [-.30, .10], z: [-.85, -.25] },
   repeater: { y: [-.30, .15], z: [-.80, -.40] },
   burst: { y: [-.30, .15], z: [-1.05, -.45] },
-  longshot: { y: [-.40, .15], z: [-1.20, -.30] },
+  longshot: { y: [-.30, .15], z: [-1.34, -.60] },
 };
 
 // The same for the firing palm: the grip (pistols) or the pistol grip / stock wrist behind the
@@ -78,13 +83,19 @@ const SUPPORT_TARGET = {
 // whole stock is shallow -- grip belly y -.030 at z .05 .. .08, stock wrist +.02, butt toe -.035 --
 // so that band is empty there and the distance read null for every candidate; its band is the
 // stock-wrist band behind the trigger (z >= -.02), y -.10 .. .12, measured from the shipped GLB.
-//   longshot   PROVISIONAL (the pistol-grip band); re-measure from the shipped GLB's slices.
+//   longshot   measured from the shipped GLB's z-slices (2026-09-12): it has a real pistol grip --
+//              a wood column of |x| <= .072 whose belly bottoms at y -.2805 (z -.10 .. -.08) and
+//              stays below -.23 over z -.16 .. +.04 -- so the flat y band the three earlier grips
+//              use fits it unchanged. It gets a z window only to keep two other things out of an
+//              otherwise flat band: the trigger guard (y -.05 .. -.127 over z -.51 .. -.18), which
+//              a palm reaching too far forward would score against, and the butt plate (y down to
+//              -.252 over z .35 .. .45). 393 vertices, all of them grip.
 const FIRING_TARGET = {
   flintlock: { y: [-.27, -.05] },
   scatter: { y: [-.27, -.05] },
   repeater: { y: [-.27, -.05] },
   burst: { y: [-.10, .12], z: [-.02, .60] },
-  longshot: { y: [-.27, -.05] },
+  longshot: { y: [-.27, -.05], z: [-.17, .10] },
 };
 
 const args = process.argv.slice(2);

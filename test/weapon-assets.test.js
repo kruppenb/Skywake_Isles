@@ -97,6 +97,39 @@ const CONTRACTS = {
     barrel: { band: [-1.30, -1.05], centroidY: [.02, .25], absCentroidX: .03, extentX: .25, extentY: .40 },
     action: { reach: .40, y: [-.60, .10] },
   },
+  // The longshot: the longest gun and the only tall one -- 2.35 muzzle-to-butt with the bore still at
+  // y .17, running to a muzzle at z -1.90 -- so every z number stretches again, and the telescopic
+  // sight standing above the receiver is what moves y. Measured off the approved side plate at length
+  // 2.35 with the bore at y .17 (973.2 px per gun unit; the left plate agrees within .01 on every
+  // landmark; procedural numbers in brackets). yMax .75 is the drawn scope top, y .634 (.617), plus
+  // .10: the burst's hammer came out .076 above what its plate drew. There is NO magazine on this
+  // gun, so the lowest point is the pistol grip's brass cap at y -.308 (z +.01), with the butt toe
+  // -.249 (z +.40) and the trigger-guard bow -.157 (z -.22); yMin's ceiling is -.18 -- the drawn
+  // depth plus the .105 the burst's whole lower half came out shallow -- not the grip's own -.22.
+  // The grip rule is the long guns' stock-wrist band with zFrom -.02, which drops the trigger guard
+  // (z -.36 .. -.09, all ahead of it); on the plate the band holds the grip flank and the butt
+  // underside with centroid z .213 and z-extent .462, and it stays non-empty whether the build is
+  // faithful or the burst's .10 shallow. The barrel band z -1.62..-1.36 is bare tube: the brass
+  // muzzle ring ends at z -1.690 and the fore-end's wooden nose is drawn at z -1.216 (the telescope
+  // objective is further back still, its front edge at z -1.071) but Meshy BUILT the wood running
+  // forward to z -1.34, so the band clears the ring by .07 and the built wood by .02; on the plates
+  // it measures centroid y .170 -- exactly the bore -- and on the built mesh .114, the tube's
+  // cross-section centre there. Its action is the bolt handle: a steel rod running rearward out of the lock's rear
+  // face to a brass ball knob at z +.028 .. +.122, y .148 .. .248 (centre z .080, y .212, r .048),
+  // which the frame code TRANSLATES straight back rather than rotates (position.z += .17 * open,
+  // built with hingeAxis [0, 0, 1], an identity hinge frame), so unlike the magazines the action y
+  // band is positive: [.05, .35] is the knob plus .10 either way, and that ceiling also keeps the
+  // hammer (top y .432) out of a split that reached too far. reach .25 covers the knob's far side
+  // from a pivot at the bolt's root (~.18) and refuses one that swallowed the lock plate (.37 long).
+  // Measure the built mesh before calling any of this a bad reconstruction -- the burst's stock-wrist
+  // band moved on the mesh, not the plate.
+  longshot: {
+    bounds: { zMin: [-2.00, -1.80], zMax: .60, yMin: [-.60, -.18], yMax: .75, absX: .30 },
+    muzzle: { zBelowMin: -.02, zAboveMin: .06, y: [.12, .22], absX: .03 },
+    grip: { band: [-.20, -.08], zFrom: -.02, absCentroidX: .06, centroidZ: [.05, .40], extentX: .30, extentZ: .50 },
+    barrel: { band: [-1.62, -1.36], centroidY: [.02, .25], absCentroidX: .03, extentX: .25, extentY: .40 },
+    action: { reach: .25, y: [.05, .35] },
+  },
 };
 const ALLOWED_EXTENSIONS = ['KHR_materials_specular', 'KHR_materials_ior'];
 const COMPONENT_TYPES = { 5120: ['readInt8', 1], 5121: ['readUInt8', 1], 5122: ['readInt16LE', 2], 5123: ['readUInt16LE', 2], 5125: ['readUInt32LE', 4], 5126: ['readFloatLE', 4] };

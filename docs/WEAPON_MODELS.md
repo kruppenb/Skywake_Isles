@@ -1,12 +1,14 @@
 # Skywake weapons — GLB models
 
-Status: **guns 1 to 4 are built** — the flintlock (`client/assets/weapons/flintlock.glb`, Meshy
+Status: **all five guns are built** — the flintlock (`client/assets/weapons/flintlock.glb`, Meshy
 task `01a092d5-6e56-73cf-95f6-def4c7d721a3`), the scatter (`client/assets/weapons/scatter.glb`,
 Meshy task `01a093f7-8504-73a2-8436-be4019fcef3c`), the repeater
 (`client/assets/weapons/repeater.glb`, Meshy task `01a09439-b36a-74aa-b327-a9e971ec33b0`, the
-first gun whose action translates instead of rotating) and the burst
+first gun whose action translates instead of rotating), the burst
 (`client/assets/weapons/burst.glb`, Meshy task `01a09722-279f-7335-b074-99c5b2e1f5c5`, the long
-carbine); the longshot is still `buildWeapon`'s procedural mesh. This document describes the pipeline that turns a concept plate into
+carbine) and the longshot (`client/assets/weapons/longshot.glb`, Meshy task
+`01a097a3-149b-753b-b5d6-75034486fa2b`, the telescope rifle whose bolt slides back on reload).
+`buildWeapon`'s procedural meshes remain the fallback and the studio comparison. This document describes the pipeline that turns a concept plate into
 `client/assets/weapons/<kind>.glb`, the gun-space contract that GLB must satisfy, and how to add
 the next gun. The end-to-end workflow (who does what, the gates, the per-gun landmark table and
 the QA scripts in `tools/qa/weapons/`) is the `/gun-update <kind>` skill in
@@ -76,6 +78,15 @@ measured on the **built** mesh, not the plate: Meshy put the bore 34 % down the 
 the plate has it 23 % down, so everything under the bore came out .05 … .10 shallower than drawn
 (grip belly y −.030, butt toe −.035, magazine base −.24 against −.12, −.14 and −.31 on the plate)
 and the repeater's band found no vertices at all.
+The longshot's row stretches the z numbers once more, to 2.35: z_min ∈ [−2.00, −1.80] (muzzle at
+z −1.90), z_max ≤ .60, y_min ∈ [−.60, −.18] (no magazine, so the lowest point is the pistol grip's
+brass cap, drawn at y −.31 and built at −.28), y_max ≤ .75 (the telescope, drawn to y .63),
+|x| ≤ .30; muzzle y ∈ [.12, .22]; the repeater's stock-wrist band y ∈ [−.20, −.08] with `zFrom`
+−.02 (this pistol grip is deep enough to keep it); barrel band z ∈ [−1.62, −1.36], the only bare
+tube on the gun — the brass muzzle ring ends at z −1.69, the fore-end was drawn to z −1.22 and
+built to −1.34, and the telescope objective sits behind both at z −1.07; action y ∈ [.05, .35]
+and reach ≤ .25 — the bolt handle's ball knob, a **positive** band unlike the magazines', whose
+ceiling also keeps the hammer (top y .43 on the plate) out of a split that reached too far.
 
 `build_weapon.py` checks every one of those against the exported bytes and exits non-zero on a miss;
 `test/weapon-assets.test.js` checks them again independently.
@@ -418,6 +429,133 @@ glided, landed, `Digit4` accepted with the HUD reading "Common Burst Carbine", o
 with its map and hinge at scale .78, fired to 15/18. Zero console errors or warnings across
 `tune.mjs`, `capture.mjs` and `game-check.mjs`.
 
+### Gun 5 — the longshot
+
+The longshot is drawn as a marksman's long rifle: a very long banded barrel (about three quarters
+of the gun), a boxy steel receiver with the flintlock's lock and hammer on +X, a big telescope
+standing in two tall brass mounts above the receiver and the rear of the barrel, a stubby steel
+bolt handle with a brass ball knob running rearward out of the lock, a wooden fore-end with three
+brass bands, a pistol grip and a short shoulder stock with a brass butt plate — and no magazine.
+Same two plates (side and left; the top came back as a side view a fifth time and was dropped),
+same 30-credit prop task, 77 s to reconstruct. The left plate mirrored the hammer *and* the bolt
+knob onto the plain side, as the burst's had mirrored its hammer; Meshy still built exactly one
+knob, on the lock side. It is the third gun whose action **translates**: the frame code slides
+the bolt by (0, 0, +.17) · `open`, straight back over the stock comb, and the GLB's action carries
+`hingeAxis [0, 0, 1]` like the magazines. **The exact commands that produced the shipped
+longshot:**
+
+```
+node tools/meshy/weapon-plates.mjs longshot
+node tools/meshy/meshy.mjs prop meshy_output/plates/longshot/longshot-side.jpg \
+    meshy_output/plates/longshot/longshot-left.jpg    # 30 credits -> 01a097a3-149b-753b-b5d6-75034486fa2b
+node tools/meshy/meshy.mjs wait m2m 01a097a3-149b-753b-b5d6-75034486fa2b
+node tools/meshy/meshy.mjs download m2m 01a097a3-149b-753b-b5d6-75034486fa2b meshy_output/longshot
+
+# pass 1: orientation pinned to the raw model's own axes (the auto frame came out 13° nose-up)
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/longshot/model_urls.glb.glb --kind longshot \
+    --length 2.35 --muzzle-z -1.90 --bore-y .17 --forward -X --up +Y \
+    --out $SCRATCH/longshot/pass1.glb --report $SCRATCH/longshot/pass1.json --allow-misfit
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/render_glb.py -- $SCRATCH/longshot/pass1.glb \
+    $SCRATCH/longshot/renders-pass1 --wide
+
+# pass 2: the real build, the bolt boxed and hinged at its neck, JPEG albedo
+"C:/Apps/Blender/blender.exe" --background --factory-startup --python-exit-code 1 \
+    --python tools/meshy/build_weapon.py -- \
+    --in meshy_output/longshot/model_urls.glb.glb --kind longshot \
+    --out client/assets/weapons/longshot.glb \
+    --length 2.35 --muzzle-z -1.90 --bore-y .17 --forward -X --up +Y --lock-side -X \
+    --action-box 0.015 0.115 -0.16 0.17 0.26 0.02 --hinge 0.073 0.168 -0.16 \
+    --hinge-axis 0 0 1 --texture-size 1024 --texture-format jpeg --report $SCRATCH/longshot/longshot.json
+node tools/meshy/weapon-manifest.mjs
+node --test test/weapon-assets.test.js
+```
+
+What the long rifle needed that the burst did not:
+
+- **`--forward -X --up +Y`, the first gun whose orientation had to be pinned.** The all-auto pass 1
+  came out 13° nose-up and missed three landmarks (y_min −.643, grip centroid z −.018). The
+  forward-axis refinement re-runs PCA on the front 40 % of the model, and on this gun that slice
+  carries the telescope above the bore and the fore-end below it while the bare barrel between
+  them is modelled with only ~48 vertices, so the refinement was dragged 12.32° off the
+  whole-model PCA — and the default level band, which straddles the muzzle ring and the fore-end
+  nose, then added 6.44° the wrong way. Moving the band onto the bare tube does not rescue it:
+  `--level-band .12 .26` reports `totalDegrees 0.0`, because that stretch has fewer than the six
+  vertices per sub-slice the silhouette tracker needs and it bails on its first iteration — the
+  first gun where levelling starves rather than misfires. The raw Meshy prop turned out to be
+  cleanly axis-aligned (one node, no TRS, barrel along X with the muzzle at −X, up +Y, the barrel
+  parallel to X within .24°), so both axes were pinned; that skips the levelling loop entirely
+  (`build_weapon.py` only levels when forward is auto), and the built height .7621 equals the raw
+  Y span .6167 × the fit scale 1.23576 exactly — no rotation was introduced. Read the raw model's
+  bounds before fighting the auto frame on a gun with a tall sight.
+- **`--lock-side -X`**, decisive this time: the vote read +X .0635 against −X .1351 (a 2.1×
+  margin, not the scatter's 4 mm), the mirror fired and the pass-1 render confirmed the lock,
+  hammer and knob on +X.
+- **Muzzle end** needed no flag (+.0241 against −.0667).
+- **The action box is the bolt only, measured off the built mesh, not the plate.** Meshy built the
+  bolt .16 forward and .04 lower than drawn (plate ball centre z +.080 / y +.212; built z −.084 /
+  y .170, r ≈ .04), still a rearward rod with the ball on its back end. Its neck — where the rod
+  leaves the lock's rear face — is at z −.160 … −.140, x .057 … .089, y .151 … .186, so the box's
+  front face and the hinge go there; the rod and ball run back to z −.033. 321 of 8,270 faces
+  split off; fill 9 cap faces on each side of a .032 × .035 seam, invisible from every render angle
+  (the lock hides the action's cut, the ball hides the body's socket). The hammer (y .31 … .44,
+  z −.45 … −.26), the lock plate and the stock wrist stay on the body, and at `open` 1 the bolt
+  occupies z +.02 … +.14 above the comb, where the body is empty.
+- **The muzzle empty sits .0144 above the tube's centre**, where the repeater and burst sat
+  within .001. Not levelling: the tube's cross-section centre is flat along the barrel (y .1556
+  at z −1.90, .1591 at −1.78, .1560 at −1.57). The fit measures the bore at the muzzle-face slab
+  (the front 4 %, z −1.900 … −1.806), and this gun's brass front-sight blade stands inside that
+  slab, lifting the slab's top from .2377 to .2667 and the pinned centre from .1556 to .1701.
+  Shipped as is: the empty is inside the bore (bare-tube half-height ≈ .040) and the offset is
+  about 1 cm at the navigator's .78 scale. A gun with a taller blade would want the slab measured
+  below the sight.
+- **The built mesh is .76 tall against .94 drawn** (y −.281 … +.482 against −.308 … +.634): the
+  telescope came out lower than the plate and the hammer tops the gun at .48. The contract's
+  y_max .75 is far from binding; the barrel band was tightened from [−1.62, −1.30] to
+  [−1.62, −1.36] after pass 1 because Meshy ran the fore-end forward to z −1.34 where the plate
+  has it at −1.22, and with the wood out of the band its centroid y reads .164 (was .114).
+
+Result: body 7,958 triangles, action 330, one 1024² JPEG albedo of 319,893 bytes, 695,096 bytes of
+GLB; y runs from −.281 (the grip cap) to .482 (the hammer), |x| ≤ .138.
+
+Hands (`WEAPON_ASSET_HANDLING.longshot`, tuned with `tools/qa/weapons/tune.mjs` over about
+thirty-five candidates in five probe sweeps and two tuning passes): right (−.030, −.075, .120),
+left (−.25, −.065, −.50). The GLB has a real pistol grip — a wood column |x| ≤ .072 whose belly
+bottoms at y −.28 over z −.10 … −.08 and ends at z +.04 — but it sits .09 further forward than the
+procedural sphere and is narrower, so the firing wrist goes .085 inboard, .070 up and .090 forward
+onto the belly with the index finger at the trigger-guard bow (the guard bottoms at y −.127 over
+z −.51 … −.18). The fore-end is the bigger move: its wood runs z −1.34 … −.60 with the underside at
+y ≈ 0 … +.02, so its **rear end is .405 further forward than the procedural block's** (z −.195),
+and the procedural support anchor at z −.35 holds nothing at all — the off hand hung in mid-air
+under the receiver, .195 from the nearest wood. The support wrist goes .020 inboard, .115 up and
+.150 forward onto the fore-end just behind its second brass band. Measured in the character studio
+against the shipped GLB: the firing palm .021 off the grip and the support palm .010 under the
+fore-end, against .123 and .195 with the procedural anchors. The reach cap is the binding
+constraint again: measured against a never-clamped reference pair, the winner pulls the gun back
+.016 (mean; .068 at the top of the idle breath), z −.53 pulled .026 for no closer a palm, and the
+procedural pair already pulled .003. The bolt's ball is .289 from the firing wrist at rest and
+.202 at `open` 1, its closest approach anywhere in the stroke. A tighter firing candidate
+(.005 off the grip) put the palm flat on the grip's lock-side face and read as sunk in, the
+repeater's lesson, so .021 was chosen on the images.
+
+Three `tune.mjs` lessons from the longest gun. Its `SUPPORT_TARGET.longshot` is the measured
+fore-end, y [−.30, .15] and z [−1.34, −.60] (the z floor keeps the trigger guard from answering for
+a hand that fell short), and `FIRING_TARGET.longshot` the flat grip band z-windowed to
+[−.17, .10] so neither the guard nor the butt plate counts. The `weaponRig.position` mean is
+phase-sensitive: 90- or 300-frame windows gave means for identical anchors differing by .010,
+enough to invert a ranking, because the idle breathing cycle does not divide the window; 900
+frames (15 s) is repeatable. And both of its close-up cameras are unusable on a 2.35-long gun —
+the left one parks inside the coat, the right one puts the firing forearm across the grip — so the
+hands were judged from scratch cameras parked on the grip and the fore-end, plus the three-quarter
+shot.
+
+The in-game check ran through `tools/qa/weapons/fixture-server.mjs --kind longshot`: joined as
+Watcher, launched, glided, landed, `Digit5` accepted with the HUD reading "Common Longshot", one
+`held-longshot` with its map and hinge at scale .78, fired 4/4 → 3/4, first attempt. Zero console
+errors or warnings across every `tune.mjs`, `capture.mjs` and `game-check.mjs` run.
+
 `meshy.mjs` reads `MESHY_API_KEY` from the environment or, failing that, the key registered for the
 Meshy MCP server in `~/.claude.json`; it never prints it. Meshy downloads expire after a few days,
 so re-download from the task id recorded in `tools/meshy/weapons/<kind>.tasks.json` before a rebuild.
@@ -573,10 +711,13 @@ The stand-in's output is a throwaway — **build it to a scratch path, not over 
 `node tools/meshy/weapon-manifest.mjs` afterwards if you did overwrite the real asset, and rebuild
 it from the Meshy task above.
 
-## Adding the next gun (longshot)
+## Rebuilding a gun, or adding a new kind
 
-The end-to-end workflow with its gates and the per-gun landmark table is the `/gun-update <kind>`
-skill; in outline:
+All five of `buildWeapon`'s kinds ship a GLB. A rebuild re-downloads the task recorded in
+`tools/meshy/weapons/<kind>.tasks.json` and re-runs that gun's pass-2 command above (the Blender
+export is bit-reproducible, so an unchanged input and flags give the shipped sha). A new kind
+follows the end-to-end workflow with its gates and the per-gun landmark table in the
+`/gun-update <kind>` skill; in outline:
 
 1. Add the kind's description to `tools/meshy/weapon-prompts.json` and generate its plates.
 2. `node tools/meshy/meshy.mjs prop …`, `wait`, `download` — 30 credits each.
@@ -588,8 +729,8 @@ skill; in outline:
    repeater, burst and longshot **translate** a magazine or a bolt (`position += … * open`). Box
    that part, put `--hinge` at its attachment centre and pass `--hinge-axis 0 0 1` — an identity
    hinge frame — so the frame code's translation applies unchanged in gun space through the
-   carrier chain in `client/weapon-models.js`. The repeater and the burst are the worked
-   examples: their sections above have the box, the hinge and the scan that found them.
+   carrier chain in `client/weapon-models.js`. The repeater, the burst and the longshot are the
+   worked examples: their sections above have the box, the hinge and the scan that found them.
 5. Record the task id in `tools/meshy/weapons/<kind>.tasks.json`, re-run
    `node tools/meshy/weapon-manifest.mjs`, add the URL to `WEAPON_ASSET_URLS` and a starting
    `WEAPON_ASSET_HANDLING` entry in `client/weapon-models.js`, then tune the anchors with

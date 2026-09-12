@@ -85,14 +85,28 @@ function frameTranslateBurst(weapon, open) {
   weapon.group.updateMatrixWorld(true);
   weapon.stowed.updateMatrixWorld(true);
 }
+// The longshot's lines: the same reset, then the bolt handle pulled straight back along +Z and no
+// rotation and no other axis at all (client/player-character.js 416-419 and client/models.js
+// 995-998, the `kind === 'longshot'` branch ahead of the magazines' else).
+function frameTranslateLongshot(weapon, open) {
+  weapon.action.position.copy(weapon.actionOrigin);
+  weapon.action.rotation.set(0, 0, 0);
+  weapon.action.position.z += .17 * open;
+  weapon.group.updateMatrixWorld(true);
+  weapon.stowed.updateMatrixWorld(true);
+}
 
 test('every shipped kind has a frozen asset URL and unknown kinds never start a load', () => {
   assert.equal(WEAPON_ASSET_URLS.flintlock, '/assets/weapons/flintlock.glb');
   assert.equal(WEAPON_ASSET_URLS.scatter, '/assets/weapons/scatter.glb');
   assert.equal(WEAPON_ASSET_URLS.repeater, '/assets/weapons/repeater.glb');
   assert.equal(WEAPON_ASSET_URLS.burst, '/assets/weapons/burst.glb');
+  assert.equal(WEAPON_ASSET_URLS.longshot, '/assets/weapons/longshot.glb');
   assert.ok(Object.isFrozen(WEAPON_ASSET_URLS));
-  assert.equal(loadWeaponAsset('longshot'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
+  // Every one of buildWeapon's five kinds now ships a GLB, so the no-asset path needs a kind that
+  // does not exist at all; buildWeapon falls through to its carbine branch for an unknown one.
+  assert.equal(WEAPON_ASSET_URLS.harpoon, undefined, 'this case needs a kind with no shipped GLB');
+  assert.equal(loadWeaponAsset('harpoon'), null, 'a kind with no shipped GLB must stay procedural, not fetch');
   assert.equal(loadWeaponAsset('flintlock', ''), null);
 });
 
@@ -292,7 +306,7 @@ test('upgradeWeapon applies a supplied asset, and in Node without one it is a no
   assert.equal(body.geometry, snapshot.geometry);
   assert.equal(procedural.action, snapshot.action);
   closeTo(procedural.socket.position, snapshot.socket, 'muzzle socket');
-  assert.equal(upgradeWeapon(procedural, 'longshot'), procedural, 'a kind with no asset is a no-op');
+  assert.equal(upgradeWeapon(procedural, 'harpoon'), procedural, 'a kind with no asset is a no-op');
   assert.equal(upgradeWeapon(null, KIND), null);
 });
 
@@ -321,10 +335,13 @@ test('upgrading hands the gun its own wrist anchors, and a kind with no entry ge
     assert.ok(weapon.handling[side].every(Number.isFinite), `${side} anchor must be finite`);
   }
   // The renderers read `weapon.handling || WEAPON_HANDLING[kind]`, so a gun whose kind is not in
-  // the table has to fall through rather than take a half-filled object.
-  const other = buildWeapon(palette, 'longshot');
-  assert.equal(WEAPON_ASSET_HANDLING.longshot, undefined, 'this case needs a kind with no tuned anchors');
-  assert.equal(applyWeaponAsset(other, 'longshot', syntheticAsset('longshot')), true);
+  // the table has to fall through rather than take a half-filled object. All five of buildWeapon's
+  // kinds now have an entry, so this needs a kind that does not exist: buildWeapon falls through to
+  // its carbine branch for an unknown one, and neither handling table knows it.
+  const other = buildWeapon(palette, 'harpoon');
+  assert.equal(WEAPON_HANDLING.harpoon, undefined, 'this case needs a kind buildWeapon has no anchors for');
+  assert.equal(WEAPON_ASSET_HANDLING.harpoon, undefined, 'this case needs a kind with no tuned anchors');
+  assert.equal(applyWeaponAsset(other, 'harpoon', syntheticAsset('harpoon')), true);
   assert.equal(other.handling, null, 'an untuned kind must fall back to WEAPON_HANDLING');
   assert.ok(!other.handling, 'and must be falsy so the || in the renderers picks the procedural pair');
 });
@@ -469,6 +486,59 @@ test("the burst's magazine translates in gun space, unrotated, through an identi
     near(turn.angleTo(new THREE.Quaternion()), 0, `the magazine must translate, not rotate, at open ${open}`);
     assert.deepEqual(stowedCarrier.matrixWorld.elements, stowedRest.elements,
       'the stowed magazine must never animate');
+  }
+});
+
+test('the longshot upgrades to its own GLB and its own wrist anchors', () => {
+  assert.equal(WEAPON_ASSET_URLS.longshot, '/assets/weapons/longshot.glb', "the long rifle's asset URL is frozen in");
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'longshot');
+  assert.equal(weapon.asset, 'longshot');
+  assert.equal(weapon.handling, WEAPON_ASSET_HANDLING.longshot, 'the upgraded longshot must carry its own anchors');
+  for (const side of ['right', 'left']) {
+    assert.equal(weapon.handling[side].length, 3, `${side} anchor must be an [x, y, z] triple`);
+    assert.ok(weapon.handling[side].every(Number.isFinite), `${side} anchor must be finite`);
+  }
+  // Tuned in the character studio against the shipped GLB, the longest gun of the five: its pistol
+  // grip is real but sits forward of and above the procedural sphere, and its fore-end stops at
+  // z -.60 where the procedural block ran back to z -.195, so the procedural support anchor holds
+  // nothing but air under the receiver. Both wrists ride up and forward, so neither anchor may be
+  // the procedural pair any more.
+  assert.notDeepEqual([...weapon.handling.right], WEAPON_HANDLING.longshot.right,
+    "the firing override exists because the GLB's grip is not where the procedural sphere hung");
+  assert.notDeepEqual([...weapon.handling.left], WEAPON_HANDLING.longshot.left,
+    'the support override exists because the procedural support anchor reaches no fore-end at all');
+  closeTo(weapon.socket.position, MUZZLE, 'the longshot muzzle socket moves to the asset node');
+});
+
+test("the longshot's bolt translates straight back in gun space, unrotated, through an identity hinge frame", () => {
+  const weapon = upgraded({ hingeAxis: [0, 0, 1] }, 'longshot');
+  const carrier = weapon.group.getObjectByName('reload-action-mesh-longshot');
+  const stowedCarrier = weapon.stowed.getObjectByName('stowed-reload-action-mesh-longshot');
+  assert.ok(carrier && stowedCarrier, 'the longshot must get the same hinge -> action -> mesh carrier chain');
+  // buildWeapon gives the longshot no hinged loading gate either, so its actionOrigin stays at the
+  // origin and the frame code's translation is the whole motion.
+  closeTo(weapon.actionOrigin, new THREE.Vector3(), "actionOrigin is buildWeapon's (0, 0, 0), untouched");
+
+  frameTranslateLongshot(weapon, 0);
+  closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'at rest the bolt must sit exactly where the GLB placed it');
+  closeTo(CARRIER_POINT.clone().applyMatrix4(stowedCarrier.matrixWorld), PIVOT.clone().add(CARRIER_POINT),
+    'the stowed bolt starts where the GLB placed it too');
+  const stowedRest = stowedCarrier.matrixWorld.clone();
+
+  // Same identity Q as the repeater and the burst, so the chain multiplies out to P + d + p -- but
+  // this gun's d is +z only, a bolt pulled straight back toward the shooter, and the point of this
+  // case is that the carrier passes that single axis through unscaled and unrotated rather than
+  // turning it into the magazines' down-and-left slide.
+  for (const open of [0, .17, .5, .83, 1]) {
+    frameTranslateLongshot(weapon, open);
+    closeTo(CARRIER_POINT.clone().applyMatrix4(carrier.matrixWorld),
+      PIVOT.clone().add(CARRIER_POINT).add(new THREE.Vector3(0, 0, .17 * open)),
+      `longshot open ${open}`);
+    const turn = new THREE.Quaternion().setFromRotationMatrix(carrier.matrixWorld);
+    near(turn.angleTo(new THREE.Quaternion()), 0, `the bolt must translate, not rotate, at open ${open}`);
+    assert.deepEqual(stowedCarrier.matrixWorld.elements, stowedRest.elements,
+      'the stowed bolt must never animate');
   }
 });
 

@@ -57,6 +57,7 @@ export const WEAPON_ASSET_URLS = Object.freeze({
   scatter: '/assets/weapons/scatter.glb',
   repeater: '/assets/weapons/repeater.glb',
   burst: '/assets/weapons/burst.glb',
+  longshot: '/assets/weapons/longshot.glb',
 });
 
 // Where the navigator's wrists go once a GLB is drawing instead of the procedural gun. Same gun
@@ -131,6 +132,39 @@ export const WEAPON_ASSET_HANDLING = Object.freeze({
   burst: Object.freeze({
     right: Object.freeze([-.026, .106, .240]),
     left: Object.freeze([-.218, .012, -.377]),
+  }),
+  // The longshot GLB is a scoped long rifle, the longest gun of the five (2.35 muzzle-to-butt), and
+  // both wrists move a long way: its two hands end up .73 gun units apart, which is what makes the
+  // navigator's reach the binding constraint on this one gun. It does have a real pistol grip --
+  // a wood column of |x| <= .072 whose belly bottoms at y -.2805 over z -.10 .. -.08 and stays below
+  // -.23 across z -.16 .. +.04 -- but it sits forward of and well above the procedural grip sphere,
+  // which hung to y -.34 over z .08 .. .30, so the firing wrist goes .085 inboard, .070 up and .090
+  // forward onto the deepest part of that belly with the index finger at the trigger-guard bow.
+  // (x -.046 left the palm .038 off and riding visibly high on the grip with wood showing above the
+  // hand; x -.010 pressed it flat onto the grip's lock-side face and read .005, the repeater's
+  // sunk-into-the-mesh number.) Its fore-end is a fat wooden tube under the barrel running
+  // z -1.34 .. -.60, underside y -.004 .. +.016, where the procedural block ran back to z -.195 and
+  // hung to y -.135: the procedural support anchor therefore leaves the off hand in mid-air under
+  // the receiver, .195 from any wood, with the trigger guard the nearest thing to it. The support
+  // wrist goes .020 inboard, .115 up and .150 forward, onto the fore-end just behind its second
+  // brass band. Further forward is better wood, and the reach cap is what stops it: the support arm
+  // reaches .698 gun units before the clamp in player-character.js drags the whole rig back, and on
+  // this gun that clamp is already biting at the procedural anchors. Averaged over 900 frames
+  // against a reference pair that is never clamped, the gun sits .003 back at the procedural
+  // anchors, .011 at left z -.47, .016 here and .026 at z -.53; z -.47 leaves only the fingertips on
+  // wood (.030) and z -.53 is no closer (.022) for two thirds more pull. Measured in the character
+  // studio against the shipped GLB: the firing palm -- the RightHand bone plus .25 gun units along
+  // the frame code's finger basis -- sits .021 off the nearest grip vertex and the support palm .010
+  // under the fore-end, against .123 and .195 with the procedural anchors. The bolt is this gun's
+  // moving part and it slides +.17 z at the receiver's lock side, clear of both hands the whole way:
+  // .289 from the firing wrist at rest and .202 at open 1, its closest approach in the stroke.
+  // (tools/qa/weapons/tune.mjs measures both against per-kind bands: SUPPORT_TARGET.longshot is the
+  // fore-end, y [-.30, .15] and z [-1.34, -.60] so the trigger guard behind the wood cannot answer
+  // for a hand that fell short, and FIRING_TARGET.longshot is the flat y [-.27, -.05] band the three
+  // earlier pistol grips use, with a z window [-.17, .10] keeping that guard and the butt plate out.)
+  longshot: Object.freeze({
+    right: Object.freeze([-.030, -.075, .120]),
+    left: Object.freeze([-.25, -.065, -.50]),
   }),
 });
 

@@ -1,7 +1,7 @@
 ---
 name: gun-update
-description: Upgrade the next procedural gun (burst or longshot) to a Meshy-built GLB the way the flintlock, the scatter and the repeater were done — the lead plans, reviews plates/renders/shots and judges in-engine; Sonnet/Opus subagents generate, fit, wire, test and tune; credits are spent only after the lead approves the plates. Use when the user says "upgrade the next gun", "/gun-update <kind>", or asks for a GLB model of one of the guns.
-argument-hint: <kind>   (burst | longshot)
+description: Build, rebuild or retune one of the pirate's guns as a Meshy-built GLB the way all five shipped ones (flintlock, scatter, repeater, burst, longshot) were done — the lead plans, reviews plates/renders/shots and judges in-engine; Sonnet/Opus subagents generate, fit, wire, test and tune; credits are spent only after the lead approves the plates. Use when the user says "update the <kind>", "/gun-update <kind>", asks for a new GLB of one of the guns, or adds a new weapon kind.
+argument-hint: <kind>   (flintlock | scatter | repeater | burst | longshot | a new kind)
 ---
 
 # Gun update: one procedural gun → one Meshy GLB
@@ -11,8 +11,12 @@ This must work in a fresh window with no chat history. Authoritative references,
 `client/weapon-models.js` (the runtime swap layer), `client/models.js` lines 617–720
 (`WEAPON_HANDLING`, `buildWeapon`), `test/weapon-assets.test.js` (binary contract, per-kind
 `CONTRACTS`) and `test/weapon-models.test.js`. The flintlock (pistol, 2026-09-11), the scatter
-(blunderbuss, 2026-09-11), the repeater (carbine with a translating magazine, 2026-09-11) and the
-burst (long carbine, 2026-09-12) are the worked examples; every number below was measured.
+(blunderbuss, 2026-09-11), the repeater (carbine with a translating magazine, 2026-09-11), the
+burst (long carbine, 2026-09-12) and the longshot (telescope rifle with a translating bolt,
+2026-09-12) are the worked examples; every number below was measured. All five kinds now ship a
+GLB, so a run is either a rebuild/retune of one of them (re-download the recorded task, re-run its
+pass-2 command from the docs) or a new kind, which needs a `buildWeapon` branch and a
+`WEAPON_HANDLING` row first.
 
 ## Division of labour
 
@@ -66,22 +70,28 @@ Contract ranges are a guard against a mis-fit, not a design. They live in two id
 tables, `tools/meshy/build_weapon.py` (verified at build time; an unknown `--kind` refuses to build)
 and `test/weapon-assets.test.js` (verified from the shipped bytes; a manifest kind with no row
 fails). The flintlock, scatter, repeater and burst rows are shipped and stay verbatim; the
-repeater's is the template for the other long guns. Starting point for the longshot (confirm after
-the pass-1 landmark print, widen only with a reason, and never loosen the muzzle rule): zMin
-[−2.00,−1.80], zMax .60, yMin [−.60,−.22], yMax .75 (scope), ǀxǀ .30, action = bolt on +X,
-y [.05,.45], reach .25, translating. For the long guns use a stock-wrist band y [−.20,−.08] with
-`zFrom` −.02 and centroid z [.05,.40] in place of the pistol's grip band, and a barrel band ahead
-of the fore-end. Muzzle: y within .05 of the procedural bore, ǀxǀ ≤ .03, z within
+repeater's is the template for the other long guns, and the longshot's (shipped: zMin
+[−2.00,−1.80], zMax .60, yMin [−.60,−.18], yMax .75, ǀxǀ .30, stock-wrist band y [−.20,−.08] with
+`zFrom` −.02 and centroid z [.05,.40], barrel band [−1.62,−1.36], action y [.05,.35] reach .25) is
+the template for a gun whose action is a small positive-y part. For the long guns use a
+stock-wrist band in place of the pistol's grip band, and a barrel band on bare tube ahead of the
+fore-end (and of any sight). Muzzle: y within .05 of the procedural bore, ǀxǀ ≤ .03, z within
 [zMin−.02, zMin+.06]. **Measure the approved side plate before the row lands** (muzzle-to-butt =
-the kind's `--length`, the bore at its `--bore-y`): on the repeater that moved yMin's ceiling from
+the kind's `--length`, the bore at its `--bore-y`; Pillow is installed under the system Python,
+so measure pixels with a mask, not by eye): on the repeater that moved yMin's ceiling from
 −.25 to −.18 (Gemini drew the magazine far shallower than the procedural one, and it is the lowest
 point) and the action band's top from .05 to .10 (the split runs along the magazine's seam with
 the receiver at y ≈ .06); on the burst it moved the barrel band to [−1.30, −1.05] because the
-fore-end was drawn running forward to z −1.01. **Then measure the built mesh before calling a
+fore-end was drawn running forward to z −1.01; on the longshot it moved yMin's ceiling to −.18
+(the grip cap drawn at −.31 plus the burst's .10 shallow-build allowance), the barrel band off the
+muzzle ring (which ends at z −1.69) and the action ceiling from .45 to .35 so a split that
+swallowed the hammer (top .43) could not pass. **Then measure the built mesh before calling a
 miss a bad reconstruction**: Meshy built the burst's whole lower half shallower than its plate
 (bore 34 % down the silhouette against the plate's 23 %; grip belly y −.030, butt toe −.035
 against −.12 and −.14 drawn), the renders read as a normal stock, and the stock-wrist band became
-[−.10, .02] on the measured vertices rather than a 30-credit retry.
+[−.10, .02] on the measured vertices rather than a 30-credit retry; the longshot's fore-end was
+built .12 further forward than drawn (z −1.34 against −1.22) and its barrel band was tightened
+after pass 1 so it samples tube, not wood.
 
 ## Phase 0 — spec (lead)
 
@@ -125,8 +135,13 @@ that is where the box's top or floor goes) → pass 2 with `--action-box`, `--hi
 → `node --test test/weapon-assets.test.js` → renders of the shipped GLB. **Lead looks at the pass-1
 side and three-quarter renders** (one clean gun, barrel −Z, lock on +X; this is the retry decision)
 and at the shipped renders (fill only at the split seam). If the part cannot be split cleanly, ship
-without an action and record it. Orientation lessons from the scatter: read the three auto votes in
-the pass-1 log before trusting them. The muzzle-end vote compares the outer-25 % cross-sections
+without an action and record it. Orientation lesson from the longshot: **read the raw Meshy
+model's bounds first** (one node, no TRS; a tiny Blender or Node script prints them) — its props
+come out axis-aligned, and when the auto frame misfits (the longshot's came out 13° nose-up because
+the front-40 % PCA refinement was dragged by the telescope and the fore-end, and the level band
+then starved on ~48 bare-tube vertices and reported 0.0°) pin `--forward` and `--up` to the raw
+axes; that also skips the levelling loop, which only runs when forward is auto. Orientation
+lessons from the scatter: read the three auto votes in the pass-1 log before trusting them. The muzzle-end vote compares the outer-25 % cross-sections
 (`--muzzle-end wider` flips it for a gun whose muzzle is the fat end); bore levelling tracks the
 front 2–35 % of the length by default and must be moved with `--level-band lo hi` onto a straight
 stretch of barrel (the scatter used `.22 .52`, behind the flare and ahead of the pan); the lock-side
@@ -192,11 +207,16 @@ anchors so far: flintlock right (.055, −.025, .375) / left (−.20, −.085, .
 support hand had to leave the magazine (which slides out through it on reload) for the fore-end;
 burst right (−.026, .106, .240) / left (−.218, .012, −.377) — no pistol grip at all, so the firing
 palm closes on the stock-wrist belly (y −.03) and the support hand moves off the magazine well
-onto the fore-end's rear. **The navigator's reach caps how far forward the support hand can go**:
-the arm reaches .723 gun units and the clamp bites at .698, so on a 1.91-long gun a left anchor at
-z −.46 already pulls the whole gun back .020 and z −.56 drags the butt past the shoulder with the
-forearm locked; average `weaponRig.position` over ~90 frames when measuring that (single frames sway
-±.03). `tune.mjs` measures the real hand bone, which sits ≈ (+.09, −.045, −.115) off the
+onto the fore-end's rear; longshot right (−.030, −.075, .120) / left (−.25, −.065, −.50) — a
+real pistol grip .09 forward of the procedural sphere, and a fore-end whose rear end is .405
+further forward than the procedural block's, so the procedural support anchor held air.
+**The navigator's reach caps how far forward the support hand can go**: the arm reaches .723 gun
+units and the clamp bites at .698, so on a 1.91-long gun a left anchor at z −.46 already pulls the
+whole gun back .020 and z −.56 drags the butt past the shoulder with the forearm locked; on the
+2.35-long longshot the clamp already bites at the procedural pair, so measure every pull against
+a never-clamped reference pair (left z ≈ −.10). Average `weaponRig.position` over **900 frames**
+when measuring that: the idle breathing cycle does not divide a 90- or 300-frame window, and those
+gave means for identical anchors differing by .010, enough to invert a ranking. `tune.mjs` measures the real hand bone, which sits ≈ (+.09, −.045, −.115) off the
 anchor+offset target, so calibrate palm-from-anchor from the first pass instead of predicting it.
 The left close-up camera parks inside the coat on a long gun; judge the support hand from the
 three-quarter shot.
@@ -206,11 +226,13 @@ support hand on the fore-end (or the firing hand for a pistol), writes the value
 `WEAPON_ASSET_HANDLING` (and flips the swap-layer test that pinned the starting anchors to the
 flintlock-style `notDeepEqual`), re-runs the tests and the full capture. `tune.mjs`'s support
 metric searches a per-kind `SUPPORT_TARGET` band (y, and a z window for the fore-end guns) and
-echoes the band it searched; the longshot's entry is provisional from the procedural fore-end, so
-check it against the shipped GLB's z-slices (a fore-end underside above the band's ceiling made
-the repeater read ≈ .17 for every correct candidate before the bands were measured) and adjust the
-line before trusting the number. **Lead looks at the side close-up, the reload close-up and the
-in-game shot.** Expect zero console errors and warnings; the missing-asset path is already covered
+echoes the band it searched; every shipped kind's entry is now measured from its GLB, and a new
+kind's must be measured from the shipped GLB's z-slices before trusting the number (a fore-end
+underside above the band's ceiling made the repeater read ≈ .17 for every correct candidate before
+the bands were measured). On a gun longer than ~2 units both of `tune.mjs`'s close-up cameras
+fail (the left one parks inside the coat, the right one puts the firing forearm across the grip):
+judge from the three-quarter shot and from scratch cameras parked on the grip and the fore-end.
+**Lead looks at the side close-up, the reload close-up and the in-game shot.** Expect zero console errors and warnings; the missing-asset path is already covered
 (one warning, procedural gun).
 
 ## Completion (lead)
