@@ -142,10 +142,14 @@ Run with `node --test test/player-character.test.js`; it is part of `npm test`.
   (`utils/SkeletonUtils.js` was added to the server's served three addons).
 - While loading, or if loading or rig lookup fails, the procedural pirate is shown; the swap
   happens in place and is logged once. In Node (tests) the loader never starts.
-- Locomotion: an `AnimationMixer` blends idle / walk / run by speed (walk in by 4.5 m/s, run
-  cross-fades over 3–6.5 m/s). Walk and run are parked and stepped by a distance-driven cycle
-  (2.2 m per walk cycle, 3.2 m per run cycle) so feet plant at any speed and the cross-fade keeps
-  one footfall; idle runs on the clock. Meshy's library idle is a look-around that turns the hips
+- Locomotion: an `AnimationMixer` blends idle / walk / run by speed (full walking pose by
+  2 m/s, run cross-fades over 3–6.5 m/s). Walk and run share a continuous phase, sampling from
+  the first authored key at 1/30 s to the closing key so there is no held frame at each loop.
+  Cadence uses 3.4 game metres per walk cycle and 5.4 per run cycle, capped at 2.1 cycles/s:
+  about three footfalls/s at the normal 8 m/s and four at the 11 m/s sprint. This prioritizes
+  readable motion at the game's exaggerated travel speeds; it is not foot-locking IK.
+  Stopping, mounting a cannon, gliding and knockback stop the cycle and fade to idle.
+  Idle runs on the clock. Meshy's library idle is a look-around that turns the hips
   54° and the head 56°, so it plays at a quarter of its motion against a hold pose built from its
   own first frame: the pirate keeps facing its aim with breathing and small glances (measured
   head travel 16 cm, shoulder travel 15 cm per loop, down from about 54 cm). Remote players get
@@ -155,7 +159,9 @@ Run with `node --test test/player-character.test.js`; it is part of `npm test`.
   weapon rig lives in a "torso" group placed so the navigator's shoulders sit at the procedural
   shoulder line; stances are pulled toward that line by the arm-reach ratio (0.74 m navigator vs
   1.09 m procedural, depth kept at 90 %) and the same reach clamp nudges the gun into range. The
-  guns are drawn at 0.78 scale for this character; muzzle sockets scale with them.
+  guns are drawn at 0.78 scale for this character; muzzle sockets scale with them. During
+  locomotion the torso's weapon frame follows 70% of the hips' travel from their idle pose,
+  keeping the gun with the body. Aiming and reload work suppress that carry motion.
 - After the mixer poses the body, the arms are overwritten in figure space: analytic two-bone IK
   from the live shoulder joint to the wrist target, the upper arm and forearm aimed from their rest
   orientations with a twist so the elbow crease faces the forearm and the wrist follows the palm,
@@ -178,7 +184,8 @@ Controls:
   **Game model** (the live `buildPlayerCharacter` renderer beside the procedural pirate, both
   driven by the Pose panel).
 - **Pose (game model)** — weapon, ground / gliding / aboard-with-gun, aim, reload (a real stroke
-  from the moment pressed), knocked, fire (one recoil kick), aim pitch, speed still/walk/sprint.
+  from the moment pressed), knocked, fire (one recoil kick), aim pitch, speed still/walk/run/sprint
+  (0 / 3.5 / 8 / 11 m/s; run and sprint match gameplay).
   `window.characterStudio.setPose({ reloadProgress: 0.49 })` pins a stroke for screenshots.
 - **Camera** — Front, Three-quarter, Back, Face, Gameplay distance. Fitted presets are fractions
   of the measured subject height, so the 2.75 m navigator and the 3.27 m procedural pirate both
@@ -194,6 +201,12 @@ setCrewColor/setPlaying/setPose/fire/rotate` and `refs` (scene, mixer, actions, 
 scripted inspection; nothing in the game reads it.
 
 ## What was verified, and how
+
+Run timing regression coverage in `test/player-locomotion.test.js` uses the shipped skeleton
+and clips: cadence at 30/60/120 fps, sampling past the export's empty lead-in, synchronized
+walk/run phase and alternating recovery legs, full walking poses, settling after movement or
+mode changes, and weapon carry with aiming suppression. `test/helpers/navigator.js` shares
+the texture-free Node asset loader with the glider grip checks.
 
 Studio (headless Chrome via Playwright driving `window.characterStudio`, island lighting,
 screenshots kept in the review sheet): front, back, three-quarter, face and gameplay-distance

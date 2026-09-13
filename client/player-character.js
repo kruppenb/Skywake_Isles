@@ -12,8 +12,8 @@
 //   ├─ pirate-glider           the shared crew-coloured glider, grips at (±.70, 2.29, −.17)
 //   └─ pirate-contact-shadow
 //
-// Locomotion comes from the GLB's idle/walk/run clips blended by speed, with walk and run keyed
-// to a distance-driven cycle so feet do not slide. Everything the gameplay needs a hand for
+// Locomotion comes from the GLB's idle/walk/run clips blended by speed, with walk and run sharing
+// a speed-driven cycle at a readable cadence. Everything the gameplay needs a hand for
 // (five weapon stances, reload strokes, recoil, glider grips, mounted cannon rails) is the same
 // analytic two-bone arm IK as buildPirate, now written onto the LeftArm/ForeArm/Hand bones in
 // figure space after the mixer has posed the body. Knockback and gliding bend the leg bones
@@ -127,7 +127,11 @@ const WEAPON_SCALE = .78;
 const FIRING_HAND_OFFSET = new THREE.Vector3(.11, .05, .06);
 const SUPPORT_HAND_OFFSET = new THREE.Vector3(-.03, -.02, .05);
 const STANCE_DEPTH_KEEP = .9;   // stances keep most of their forward reach; the reach clamp does the rest
-const WALK_CYCLE = 2.2, RUN_CYCLE = 3.2;      // metres of travel per stride cycle
+// The game moves at 8 m/s normally and 11 m/s sprinting. The old 3.2 m run cycle played
+// almost seven footfalls per second at sprint. Keep the authored run near its natural
+// cadence at normal speed, with a modest increase for sprint and a cap for corrections.
+const WALK_CYCLE = 3.4, RUN_CYCLE = 5.4;      // game metres per complete left/right cycle
+const MAX_CADENCE = 2.1;                    // cycles/s, two footfalls per cycle
 const SPRINT_FROM = 3.0, SPRINT_TO = 6.5;     // m/s band that cross-fades walk into run
 // Meshy's library idle is a look-around that turns the hips 54° and the head 56°; in gameplay the
 // pirate should face where it aims. The idle plays at this fraction of its motion against its
@@ -312,23 +316,29 @@ function buildNavigator(asset, palette, color, group) {
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);
 
   // Clips: idle runs on the clock, damped against a hold pose built from its first frame; walk
-  // and run are parked (timeScale 0) and stepped by distance.
+  // and run are parked (timeScale 0) and stepped together at the movement cadence.
   const mixer = new THREE.AnimationMixer(root);
-  const actions = {};
+  const actions = {}, clipStarts = {};
   for (const clip of asset.animations) {
     if (!['idle', 'walk', 'run'].includes(clip.name)) continue;
     const action = mixer.clipAction(clip);
     action.setLoop(THREE.LoopRepeat, Infinity); action.enabled = true; action.setEffectiveWeight(clip.name === 'idle' ? IDLE_MOTION : 0); action.play();
     if (clip.name !== 'idle') action.timeScale = 0;
     actions[clip.name] = action;
+    // Blender's export begins at 1/30 s, with the closing pose at the end. Sampling
+    // from zero holds that first pose every lap; use the actual keyed interval.
+    clipStarts[clip.name] = Math.min(...clip.tracks.map(track => track.times[0]));
   }
   if (!actions.idle) throw new Error('navigator asset has no idle clip');
   const holdTracks = actions.idle.getClip().tracks.map(track =>
     new track.constructor(track.name, [0], Array.from(track.values.subarray(0, track.getValueSize()))));
   actions.hold = mixer.clipAction(new THREE.AnimationClip('idle_hold', 1, holdTracks));
   actions.hold.setLoop(THREE.LoopRepeat, Infinity); actions.hold.enabled = true; actions.hold.setEffectiveWeight(1 - IDLE_MOTION); actions.hold.play();
+  mixer.update(0); figure.updateMatrixWorld(true);
+  const idleHips = frameOf(bones.hips, new THREE.Vector3());
+  const torsoRest = torso.position.clone(), bodyTravel = new THREE.Vector3();
 
-  let phase = 0, cycle = 0, locomotion = 0, sprint = 0, aiming = 0, glideBlend = 0, knockBlend = 0, recoil = 0;
+  let cycle = 0, locomotion = 0, sprint = 0, aiming = 0, glideBlend = 0, knockBlend = 0, recoil = 0;
   let equipped = 'flintlock', stowed = false;
   let previousReloadUntil = 0, cancelledReloadUntil = 0;
   const gliderToFigure = new THREE.Matrix4(), figureMatrixInv = new THREE.Matrix4();
@@ -371,7 +381,7 @@ function buildNavigator(asset, palette, color, group) {
     const dt = THREE.MathUtils.clamp(Number.isFinite(pose.dt) ? pose.dt : 1 / 60, 0, .1);
     const elapsed = Number.isFinite(pose.elapsed) ? pose.elapsed : 0;
     const falling = player.mode === 'gliding', knocked = !!player.knockedUntil, mounted = player.mode === 'aboard' && !!player.gunId;
-    const motion = falling || knocked ? 0 : THREE.MathUtils.clamp(Number.isFinite(speed) ? speed : 0, 0, 18);
+    const motion = falling || knocked || mounted ? 0 : THREE.MathUtils.clamp(Number.isFinite(speed) ? speed : 0, 0, 18);
     const nextWeapon = WEAPONS[player.weapon] ? player.weapon : 'flintlock';
     const reloadUntil = Number.isFinite(player.reloadUntil) ? player.reloadUntil : 0;
     const canReload = player.mode === 'ground' && !knocked && player.online !== false && !(Number.isFinite(player.hp) && player.hp <= 0);
@@ -389,9 +399,9 @@ function buildNavigator(asset, palette, color, group) {
     const anchors = (weapons[equipped] && weapons[equipped].handling) || handling;
     const reload = sampleReloadAnimation(equipped, reloadUntil, elapsed, anchors.left,
       canReload && reloadUntil !== cancelledReloadUntil);
-    // Distance-driven phase never changes frequency discontinuously at sprint.
-    phase = (phase + motion * dt * 1.22) % (Math.PI * 2);
-    locomotion = ease(locomotion, Math.min(1, motion / 4.5), 13, dt);
+    // Blend into a full walking pose early instead of shrinking the leg swing
+    // against idle at walking speeds. Phase remains continuous through changes.
+    locomotion = ease(locomotion, smooth(motion / 2), 13, dt);
     if (motion === 0 && locomotion < .001) locomotion = 0;
     sprint = ease(sprint, smooth((motion - SPRINT_FROM) / (SPRINT_TO - SPRINT_FROM)), 8, dt);
     aiming = ease(aiming, pose.aiming ? 1 : 0, 16, dt);
@@ -399,19 +409,25 @@ function buildNavigator(asset, palette, color, group) {
     knockBlend = ease(knockBlend, knocked ? 1 : 0, 10, dt);
     recoil *= Math.exp(-18 * dt);
 
-    // Locomotion clips. The stride cycle advances with distance travelled so feet plant instead of
-    // sliding at any speed; walk and run share the cycle so the cross-fade keeps the same footfall.
-    cycle = (cycle + motion * dt / THREE.MathUtils.lerp(WALK_CYCLE, RUN_CYCLE, sprint)) % 1;
+    // The game exaggerates travel speed; preserve a readable run instead of
+    // accelerating the legs without limit. Both clips share the same footfall.
+    const cadence = Math.min(MAX_CADENCE, motion / THREE.MathUtils.lerp(WALK_CYCLE, RUN_CYCLE, sprint));
+    cycle = (cycle + cadence * dt) % 1;
     actions.idle.setEffectiveWeight((1 - locomotion) * IDLE_MOTION);
     actions.hold.setEffectiveWeight((1 - locomotion) * (1 - IDLE_MOTION));
-    if (actions.walk) { actions.walk.setEffectiveWeight(locomotion * (1 - sprint)); actions.walk.time = cycle * actions.walk.getClip().duration; }
-    if (actions.run) { actions.run.setEffectiveWeight(locomotion * sprint); actions.run.time = cycle * actions.run.getClip().duration; }
+    if (actions.walk) { actions.walk.setEffectiveWeight(locomotion * (1 - sprint)); actions.walk.time = clipStarts.walk + cycle * (actions.walk.getClip().duration - clipStarts.walk); }
+    if (actions.run) { actions.run.setEffectiveWeight(locomotion * sprint); actions.run.time = clipStarts.run + cycle * (actions.run.getClip().duration - clipStarts.run); }
     mixer.update(dt);
 
     figure.position.y = -.20 * knockBlend;
     figure.rotation.set(.07 * glideBlend, 0, .32 * knockBlend);
     figure.updateMatrixWorld(true);
     figureMatrixInv.copy(figure.matrixWorld).invert();
+    // Carry the gun with the body's rise and fall instead of pinning both wrists
+    // in space while the shoulders run underneath. Aim/reload retain a steady grip.
+    bodyTravel.setFromMatrixPosition(bones.hips.matrixWorld).applyMatrix4(figureMatrixInv).sub(idleHips);
+    torso.position.copy(torsoRest).addScaledVector(bodyTravel,
+      .7 * locomotion * (1 - aiming) * (1 - reload.work) * (1 - glideBlend) * (1 - knockBlend));
 
     // Legs trail in a glide and fold under a knockback; the head follows the aim pitch.
     for (let i = 0; i < legs.length; i++) {
