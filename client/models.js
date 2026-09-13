@@ -567,7 +567,8 @@ export function buildGlider(palette, color = '#eb785d') {
     gb.line([side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z], [side * 2.7, 3.56, 1.0], .022, '#f7e6b9');
     gb.add('characterCylinder', [side * GLIDER_GRIP.x, GLIDER_GRIP.y + .02, GLIDER_GRIP.z], [.044, .19, .044], [0, 0, side * -.35], leather);
     const grip = new THREE.Object3D(); grip.name = (side < 0 ? 'left' : 'right') + '-glider-grip';
-    grip.position.set(side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z); glider.add(grip); grips.push(grip);
+    grip.position.set(side * GLIDER_GRIP.x, GLIDER_GRIP.y, GLIDER_GRIP.z); grip.rotation.z = side * -.35;
+    glider.add(grip); grips.push(grip);
   }
   gb.line([0, 4.30, -.68], [0, 3.8, 1.2], .055, '#644d3d');
   glider.add(gb.mesh()); glider.visible = false;

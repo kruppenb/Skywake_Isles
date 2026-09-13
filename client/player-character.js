@@ -133,6 +133,9 @@ const SPRINT_FROM = 3.0, SPRINT_TO = 6.5;     // m/s band that cross-fades walk 
 // pirate should face where it aims. The idle plays at this fraction of its motion against its
 // own first frame, which keeps the breathing and small glances and drops the body turn.
 const IDLE_MOTION = .25;
+// The navigator has rigid hand bones, so curl the fingers with a glide-only morph.
+// This point is the centre of the closed palm in hand space, measured in metres.
+const GLIDER_PALM = new THREE.Vector3(0, .18, .07);
 const BONE_NAMES = {
   hips: 'Hips', spine: 'Spine', head: 'Head', stow: 'stow_back',
   shoulder: { L: 'LeftShoulder', R: 'RightShoulder' }, upper: { L: 'LeftArm', R: 'RightArm' },
@@ -142,6 +145,47 @@ const BONE_NAMES = {
 const UP = new THREE.Vector3(0, 1, 0), FORWARD = new THREE.Vector3(0, 0, -1), AXIS_X = new THREE.Vector3(1, 0, 0);
 const ease = (a, target, rate, dt) => THREE.MathUtils.lerp(a, target, 1 - Math.exp(-rate * dt));
 const smooth = value => { const t = THREE.MathUtils.clamp(value, 0, 1); return t * t * (3 - 2 * t); };
+
+function addGliderGripMorph(mesh) {
+  const geometry = mesh.geometry.clone(); geometry.userData.shared = false;
+  const rest = geometry.attributes.position, curled = rest.clone();
+  const curledVertices = [];
+  const point = new THREE.Vector3(), original = new THREE.Vector3(), handScale = new THREE.Vector3();
+  for (const name of ['LeftHand', 'RightHand']) {
+    const index = mesh.skeleton.bones.findIndex(bone => bone.name === name);
+    if (index < 0) continue;
+    mesh.skeleton.bones[index].getWorldScale(handScale);
+    const toHand = new THREE.Matrix4().makeScale(handScale.x, handScale.y, handScale.z)
+      .multiply(mesh.skeleton.boneInverses[index]).multiply(mesh.bindMatrix);
+    const fromHand = toHand.clone().invert();
+    for (let i = 0; i < rest.count; i++) {
+      let weight = 0;
+      for (let joint = 0; joint < 4; joint++) {
+        if (geometry.attributes.skinIndex.getComponent(i, joint) === index)
+          weight += geometry.attributes.skinWeight.getComponent(i, joint);
+      }
+      if (weight <= .5) continue;
+      original.fromBufferAttribute(rest, i); point.copy(original).applyMatrix4(toHand);
+      if (point.y <= .14) continue;
+      // Close the already cupped fingers toward the palm without folding the mesh
+      // through itself. Leave the wrist and heel of the palm intact.
+      const curl = point.y - .14;
+      point.y = .14 + .09 * (1 - Math.exp(-curl / .09));
+      point.z += .025 * smooth(curl / .14);
+      point.applyMatrix4(fromHand).lerp(original, 1 - smooth((weight - .5) * 2));
+      curled.setXYZ(i, point.x, point.y, point.z);
+      curledVertices.push(i);
+    }
+  }
+  geometry.setAttribute('position', curled); geometry.computeVertexNormals();
+  // Retain the authored shading everywhere outside the closing fingers.
+  const curledNormals = mesh.geometry.attributes.normal.clone(), generatedNormals = geometry.attributes.normal;
+  for (const i of curledVertices) curledNormals.setXYZ(i, generatedNormals.getX(i), generatedNormals.getY(i), generatedNormals.getZ(i));
+  geometry.setAttribute('position', rest); geometry.setAttribute('normal', mesh.geometry.attributes.normal.clone());
+  geometry.morphAttributes.position = [curled]; geometry.morphAttributes.normal = [curledNormals];
+  geometry.morphTargetsRelative = false;
+  mesh.geometry = geometry; mesh.updateMorphTargets();
+}
 
 // ------------------------------------------------------------------ builder --
 export function buildPlayerCharacter(palette, color = '#eb785d', { url = NAVIGATOR_URL, asset = null } = {}) {
@@ -225,7 +269,8 @@ function buildNavigator(asset, palette, color, group) {
       side, key, upper, fore, hand, restShoulder: shoulder,
       upperLength: elbow.distanceTo(shoulder), lowerLength: wrist.distanceTo(elbow),
       upperLocalRest: upper.quaternion.clone(), foreLocalRest: fore.quaternion.clone(),
-      foldUpper, palmFore,
+      foldUpper, palmFore, restHandScale: scale.y, glidePalmScale: 1,
+      glideUpperLength: 0, glideLowerLength: 0,
       shoulder: new THREE.Vector3(), wrist: new THREE.Vector3(), direction: new THREE.Vector3(), bend: new THREE.Vector3(),
       elbow: new THREE.Vector3(), segment: new THREE.Vector3(), anchor: null,
       fingers: new THREE.Vector3(), palm: new THREE.Vector3(),
@@ -260,6 +305,8 @@ function buildNavigator(asset, palette, color, group) {
     weaponRig.add(anchor); arm.anchor = anchor;
   }
   const { group: glider, grips } = buildGlider(palette, color); group.add(glider);
+  const gripMeshes = [];
+  root.traverse(node => { if (node.isSkinnedMesh) { addGliderGripMorph(node); gripMeshes.push(node); } });
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(.70, 20), new THREE.MeshBasicMaterial({
     color: '#183c46', transparent: true, opacity: .20, depthWrite: false }));
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);
@@ -396,6 +443,16 @@ function buildNavigator(asset, palette, color, group) {
         arm.side < 0 ? handling.supportRoll * (1 - reload.release) : -.04);
       // Live shoulder joints follow the animated spine.
       arm.shoulder.setFromMatrixPosition(arm.upper.matrixWorld).applyMatrix4(figureMatrixInv).sub(torso.position);
+      if (falling) {
+        // The clips also key bone scale. Measure their live reach so the glide
+        // solver does not put a scaled arm's palm beyond the handle.
+        arm.elbow.setFromMatrixPosition(arm.fore.matrixWorld).applyMatrix4(figureMatrixInv).sub(torso.position);
+        arm.wrist.setFromMatrixPosition(arm.hand.matrixWorld).applyMatrix4(figureMatrixInv).sub(torso.position);
+        arm.glideUpperLength = arm.shoulder.distanceTo(arm.elbow);
+        arm.glideLowerLength = arm.elbow.distanceTo(arm.wrist);
+        relative.multiplyMatrices(figureMatrixInv, arm.hand.matrixWorld).decompose(position, quaternion, scale);
+        arm.glidePalmScale = scale.y / arm.restHandScale;
+      }
     }
     // Move the gun a few centimetres into the intersection of the two reachable wrist spheres.
     for (let pass = 0; pass < 4; pass++) {
@@ -409,6 +466,7 @@ function buildNavigator(asset, palette, color, group) {
     }
     weaponRig.updateMatrix();
     glider.visible = falling; glider.rotation.z = Math.sin(time * 1.8) * .018;
+    for (const mesh of gripMeshes) mesh.morphTargetInfluences[0] = falling ? 1 : 0;
     if (falling) { glider.updateMatrix(); gliderToFigure.copy(figure.matrix).invert().multiply(glider.matrix); }
     for (const [kind, weapon] of weaponEntries) {
       weapon.group.visible = !mounted && !stowed && equipped === kind;
@@ -428,8 +486,14 @@ function buildNavigator(asset, palette, color, group) {
     // fixed-length two-bone IK, written onto the bones as figure-space orientations.
     for (const arm of arms) {
       if (falling) {
-        arm.wrist.copy(grips[arm.side < 0 ? 0 : 1].position).applyMatrix4(gliderToFigure).sub(torso.position);
-        arm.fingers.set(-arm.side * .35, -.15, -.92).normalize(); arm.palm.set(-arm.side, 0, 0);
+        const grip = grips[arm.side < 0 ? 0 : 1];
+        arm.wrist.copy(grip.position).applyMatrix4(gliderToFigure).sub(torso.position);
+        // Thumbs up along the tilted handles, fingers wrapped inward, palms aft.
+        // Transform the entire grip frame with the canopy's sway and the body's lean.
+        arm.fingers.set(-arm.side, 0, 0).applyQuaternion(grip.quaternion).transformDirection(gliderToFigure);
+        arm.palm.set(0, 0, 1).transformDirection(gliderToFigure);
+        arm.wrist.addScaledVector(arm.fingers, -GLIDER_PALM.y * arm.glidePalmScale)
+          .addScaledVector(arm.palm, -GLIDER_PALM.z * arm.glidePalmScale);
       } else if (mounted) {
         arm.wrist.set(arm.side * .28, .38, -.48).sub(PROCEDURAL_SHOULDER).multiply(stanceScale).add(PROCEDURAL_SHOULDER);
         arm.fingers.set(0, -.3, -1).normalize(); arm.palm.set(0, -1, 0);
@@ -447,7 +511,8 @@ function buildNavigator(asset, palette, color, group) {
       arm.direction.copy(arm.wrist).sub(arm.shoulder);
       const distance = Math.max(.001, arm.direction.length());
       arm.direction.multiplyScalar(1 / distance);
-      const upperLength = arm.upperLength, lowerLength = arm.lowerLength;
+      const upperLength = falling ? arm.glideUpperLength : arm.upperLength;
+      const lowerLength = falling ? arm.glideLowerLength : arm.lowerLength;
       const clamped = Math.min(distance, upperLength + lowerLength - .01);
       const alongReach = (upperLength * upperLength - lowerLength * lowerLength + clamped * clamped) / (2 * clamped);
       const height = Math.sqrt(Math.max(0, upperLength * upperLength - alongReach * alongReach));
