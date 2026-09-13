@@ -74,19 +74,19 @@ function buildTail(color) {
   const main = new THREE.Color(color), deep = main.clone().multiplyScalar(.68), warm = main.clone().lerp(new THREE.Color('#ffffff'), .08), pearl = main.clone().lerp(new THREE.Color('#fff5dc'), .18);
   const scaleCenter = new THREE.Vector3(), scaleSide = new THREE.Vector3(), scaleNormal = new THREE.Vector3(), scaleTangent = new THREE.Vector3(), outward = new THREE.Vector3(), point = new THREE.Vector3(), finTangent = new THREE.Vector3(), finNormal = new THREE.Vector3();
 
-  // A narrow coat-hem cuff opens into a hip swell just below the waist, then
-  // resolves into a small peduncle instead of a tube pushed through the shirt.
-  const radiusAt = t => .285 + .11 * Math.sin(Math.PI * Math.min(1, t / .5)) - .185 * t;
+  // Narrow steadily from the coat hem to the fluke. A swell below the cuff
+  // made the upper tail look like a separate round abdomen.
+  const radiusAt = t => .085 + .2 * Math.pow(1 - t, 1.15);
 
   function frameAt(t, phase, speed, outCenter = center, outTangent = tangent, outSide = sideAxis, outNormal = normal) {
     const moving = clamp(speed / 5, 0, 1), wave = t * t;
     const phaseAt = phase - t * (4.35 + moving * .65), amplitude = .045 + moving * .115;
     const crossFrequency = 3.175 + moving * .48, crossPhase = phase - t * crossFrequency;
-    outCenter.set(Math.sin(phaseAt) * amplitude * wave, -1.72 * t, .025 + .66 * t * t + Math.cos(crossPhase) * amplitude * .16 * wave);
+    outCenter.set(Math.sin(phaseAt) * amplitude * wave, -1.95 * t, .025 + .38 * t * t + Math.cos(crossPhase) * amplitude * .16 * wave);
     outTangent.set(
       amplitude * (2 * t * Math.sin(phaseAt) - wave * (4.35 + moving * .65) * Math.cos(phaseAt)),
-      -1.72,
-      1.32 * t + amplitude * .16 * (2 * t * Math.cos(crossPhase) + wave * crossFrequency * Math.sin(crossPhase)),
+      -1.95,
+      .76 * t + amplitude * .16 * (2 * t * Math.cos(crossPhase) + wave * crossFrequency * Math.sin(crossPhase)),
     ).normalize();
     outSide.copy(SIDE).addScaledVector(outTangent, -SIDE.dot(outTangent));
     if (outSide.lengthSq() < 1e-6) outSide.set(0, 0, 1); else outSide.normalize();
@@ -144,8 +144,12 @@ function buildTail(color) {
 
 export function buildMermaid(palette, color = '#eb785d', { asset = null } = {}) {
   const group = new THREE.Group(); group.name = 'meridian-swimming-pirate'; group.userData.kind = 'mermaid';
-  const pirate = buildPlayerCharacter(palette, color, { swimming: true, asset }); group.add(pirate.group);
-  const tailRoot = new THREE.Group(); tailRoot.name = 'meridian-articulated-tail'; group.add(tailRoot);
+  // Pitch around the waist inside the world's yaw, so sprinting leans toward
+  // the facing at every heading without dropping the head around a foot pivot.
+  const swimPivot = new THREE.Group(); swimPivot.name = 'meridian-swim-pivot'; swimPivot.position.y = 1.35; swimPivot.rotation.x = -.13; group.add(swimPivot);
+  const body = new THREE.Group(); body.position.y = -1.35; swimPivot.add(body);
+  const pirate = buildPlayerCharacter(palette, color, { swimming: true, asset }); body.add(pirate.group);
+  const tailRoot = new THREE.Group(); tailRoot.name = 'meridian-articulated-tail'; body.add(tailRoot);
   const tail = buildTail(color); tailRoot.add(tail.mesh, tail.scales, tail.fluke);
   let recoil = 0, tailPhase = 0, haveHipRest = false;
   const anchor = new THREE.Vector3(), offset = new THREE.Vector3(), parentInverse = new THREE.Matrix4(), parentQ = new THREE.Quaternion(), hipQ = new THREE.Quaternion(), hipLocal = new THREE.Quaternion(), hipRestInverse = new THREE.Quaternion();
@@ -178,20 +182,26 @@ export function buildMermaid(palette, color = '#eb785d', { asset = null } = {}) 
   return {
     group,
     animate(time, speed, player = {}, pose = {}) {
+      const motion = player.knockedUntil ? 0 : Math.max(0, Number.isFinite(speed) ? speed : 0);
+      const moving = clamp(motion / 8, 0, 1);
+      const dt = clamp(Number.isFinite(pose.dt) ? pose.dt : 1 / 60, 0, .1);
+      const pitch = clamp(Number.isFinite(player.pitch) ? player.pitch : 0, -1.35, 1.35);
+      // Normal swimming tops out at 8 m/s; only the 12 m/s sprint settles into
+      // the forward swimming pose. Displayed travel also works for remote crew.
+      const surge = THREE.MathUtils.smoothstep(motion, 8.5, 11.5);
+      const lean = THREE.MathUtils.lerp(-.13 - moving * .12, -1.12 + pitch * .7, surge);
+      swimPivot.rotation.x += (lean - swimPivot.rotation.x) * (1 - Math.exp(-8 * dt));
       // Keep ground-mode weapon handling, but never feed swimming travel into
-      // the walk/run clips: the pelvis then remains a dependable tail anchor.
-      pirate.animate(time, 0, { ...player, mode: 'ground' }, pose);
+      // the walk/run clips. Compensate aim for the body's forward pitch.
+      pirate.animate(time, 0, { ...player, mode: 'ground', pitch: pitch - swimPivot.rotation.x }, pose);
       const shadow = pirate.group.getObjectByName('pirate-contact-shadow'), glider = pirate.group.getObjectByName('pirate-glider');
       if (shadow) shadow.visible = false;
       if (glider) glider.visible = false;
-      const moving = clamp((Number.isFinite(speed) ? speed : 0) / 5, 0, 1);
-      const dt = clamp(Number.isFinite(pose.dt) ? pose.dt : 1 / 60, 0, .1);
       // Integrating phase, rather than deriving it from time * speed, makes a
       // speed correction or a non-monotonic render clock unable to snap a fin.
       tailPhase = (tailPhase + dt * (2.35 + moving * 3.65)) % (Math.PI * 2);
-      group.rotation.x = -.13 - moving * .12;
       recoil = Math.max(0, recoil - dt * 4); pirate.group.position.z = recoil * .11;
-      attachTailToWaist(); tail.deform(tailPhase, Number.isFinite(speed) ? speed : 0);
+      attachTailToWaist(); tail.deform(tailPhase, motion);
     },
     fire(weapon) { recoil = Math.min(1, recoil + (weapon === 'scatter' ? 1 : .65)); pirate.fire(weapon); },
     getMuzzle(target) { return pirate.getMuzzle(target); },

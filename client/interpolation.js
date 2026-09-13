@@ -19,7 +19,10 @@ export function displayedSpeed(previous, current, dt, reset = false) {
   if (reset || !(dt > 0) || dt > .2 || poseDiscontinuity(previous, current, dt) || current.knockedUntil || current.gunId || current.mode === 'gliding') return 0;
   const aboard = current.mode === 'aboard';
   const x = aboard ? 'deckX' : 'x', z = aboard ? 'deckZ' : 'z';
-  return Math.min(12, Math.hypot(finite(current[x]) - finite(previous[x]), finite(current[z]) - finite(previous[z])) / dt);
+  // A swimmer's sprint and tail cadence follow 3D travel, including steep
+  // climbs and dives. Ground/deck gait still uses only horizontal distance.
+  const dy = current.mode === 'swimming' ? finite(current.y) - finite(previous.y) : 0;
+  return Math.min(12, Math.hypot(finite(current[x]) - finite(previous[x]), dy, finite(current[z]) - finite(previous[z])) / dt);
 }
 
 export function createRemoteInterpolation({ delay = 100, maxFrames = 12, staleAfter = 400 } = {}) {

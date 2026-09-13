@@ -147,3 +147,58 @@ test('reef camera clear arm respects hull walls, floor and an open upper route',
   assert.equal(reefCameraFraction({ x: -7, y: 12, z: -10 }, { x: 6, y: 12, z: -10 }), 1, 'open water above the walls remains usable');
   assert.ok(reefCameraFraction({ x: -18, y: 2, z: 20 }, { x: -18, y: -9, z: 20 }) < 1, 'camera cannot sink below the reef floor');
 });
+
+test('mermaid tail narrows gradually from the coat to the fluke throughout its stroke', () => {
+  const palette = makePalette(), mermaid = buildMermaid(palette);
+  const skin = mermaid.group.getObjectByName('meridian-continuous-crew-tail');
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  for (const speed of [0, 8, 12]) for (let frame = 0; frame < 30; frame++) {
+    mermaid.animate(frame / 30, speed, { mode: 'swimming' }, { dt: 1 / 30 });
+    const positions = skin.geometry.attributes.position, widths = [];
+    for (let ring = 0; ring < (positions.count - 1) / 14; ring++) {
+      a.fromBufferAttribute(positions, ring * 14); b.fromBufferAttribute(positions, ring * 14 + 7);
+      widths.push(a.distanceTo(b));
+    }
+    for (let ring = 1; ring < widths.length; ring++) {
+      assert.ok(widths[ring] < widths[ring - 1], 'no round hip bulge beneath a narrow cuff');
+      assert.ok(widths[ring - 1] - widths[ring] < .04, 'each ring continues a gradual taper without a sudden pinch');
+    }
+    assert.ok(widths.at(-1) < widths[0] * .35, 'the taper reaches a slender fluke attachment');
+  }
+  mermaid.dispose(); disposePalette(palette);
+});
+
+test('sprint swimming eases into a forward waist pivot at every heading and releases cleanly', async () => {
+  const palette = makePalette(), asset = await navigatorAsset(), mermaid = buildMermaid(palette, '#55c9ba', { asset });
+  await Promise.resolve();
+  const pivot = mermaid.group.getObjectByName('meridian-swim-pivot');
+  const state = { mode: 'swimming', weapon: 'flintlock', pitch: 0 };
+  let time = 0;
+  const advance = (speed, frames = 60, player = state) => {
+    for (let frame = 0; frame < frames; frame++) { time += 1 / 60; mermaid.animate(time, speed, player, { dt: 1 / 60 }); }
+    mermaid.group.updateMatrixWorld(true);
+  };
+  const hips = () => mermaid.group.getObjectByName('Hips').getWorldPosition(new THREE.Vector3());
+  const torso = () => mermaid.group.getObjectByName('Head').getWorldPosition(new THREE.Vector3()).sub(hips()).normalize();
+  advance(8);
+  const normalLean = pivot.rotation.x, normalHips = hips();
+  assert.ok(torso().y > .85, 'normal swimming stays mostly upright');
+  advance(12, 1);
+  assert.ok(pivot.rotation.x < normalLean && pivot.rotation.x > normalLean - .15, 'pressing sprint begins a blend, not a pose snap');
+  advance(12);
+  assert.ok(hips().distanceTo(normalHips) < .25, 'leaning rotates around the waist rather than sinking from the feet');
+  for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    mermaid.group.rotation.y = yaw; mermaid.group.updateMatrixWorld(true);
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), direction = torso();
+    assert.ok(direction.dot(forward) > .75 && direction.y < .65, 'head leads the hips toward the facing while sprinting');
+    assert.ok(Number.isFinite(mermaid.getMuzzle(new THREE.Vector3()).length()), 'sprint retains a live weapon muzzle');
+  }
+  const sprintLean = pivot.rotation.x;
+  mermaid.animate(time, 0, state, { dt: 0 });
+  assert.equal(pivot.rotation.x, sprintLean, 'a paused renderer holds the swim pose');
+  advance(8);
+  assert.ok(Math.abs(pivot.rotation.x - normalLean) < .005, 'releasing sprint restores normal swimming');
+  advance(12); advance(12, 60, { ...state, knockedUntil: 100 });
+  assert.ok(pivot.rotation.x > -.2, 'a knock releases sprint even if a travel sample still reports speed');
+  mermaid.dispose(); disposePalette(palette);
+});

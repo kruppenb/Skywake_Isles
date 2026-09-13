@@ -43,3 +43,13 @@ test('remote interpolation starts a fresh track when a crewmate changes realms a
   assert.notEqual(sample.generation, generation); assert.equal(buffer.count(first.id), 1);
   assert.equal(displayedSpeed(first, sample.player, .05), 0);
 });
+
+test('displayed swim speed preserves sprint through steep climbs and dives without adding height to land gait', () => {
+  const previous = reef({ x: 0, y: 8, z: 0 }), dt = .05;
+  for (const speed of [8, 12]) for (const pitch of [-1.2, 0, 1.2, Math.PI / 2]) {
+    const current = { ...previous, y: previous.y + Math.sin(pitch) * speed * dt, z: -Math.cos(pitch) * speed * dt };
+    assert.ok(Math.abs(displayedSpeed(previous, current, dt) - speed) < 1e-8, 'swim animation follows the full 3D distance');
+  }
+  const ground = island({ x: 0, y: 8, z: 0 });
+  assert.equal(displayedSpeed(ground, { ...ground, y: 8.6 }, dt), 0, 'jumping in place does not start the land gait');
+});
