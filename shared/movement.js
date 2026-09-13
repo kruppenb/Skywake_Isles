@@ -1,13 +1,14 @@
 import { WORLD_RADIUS, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
 import { resolveWorldCollision } from './collision.js';
 import { SHIP_DECK, SHIP_GUNS, LAUNCH_CARRY_DECAY, gunAim, gunOperator } from './airship.js';
+import { REEF_SPAWN, resolveReefSwimmerCollision } from './underwater.js';
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const finite = (x, fallback = 0) => Number.isFinite(x) ? x : fallback;
 export function makePlayerPosition() {
   const ship = shipAt(0);
   return { x: ship.x, y: ship.y, z: ship.z, yaw: 0, pitch: 0, vy: 0, launchVx: 0, launchVz: 0,
-    mode: 'aboard', jumpHeld: false, grounded: true, deckX: 0, deckZ: 0, gunId: null, shipReturned: false };
+    realm: 'island', mode: 'aboard', jumpHeld: false, grounded: true, deckX: 0, deckZ: 0, gunId: null, shipReturned: false };
 }
 
 export function movePlayer(p, input = {}, dt, elapsed = 0) {
@@ -22,6 +23,26 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
   const speed = input.sprint ? 11 : 8;
   const jump = !!input.jump && !p.jumpHeld;
   p.jumpHeld = !!input.jump;
+
+  // Swimming is a fully 3D mode and must stay ahead of the island resolver:
+  // the island's floor, sea edge and buildings have no meaning in the reef.
+  if (p.mode === 'swimming' || p.realm === 'reef') {
+    p.realm = 'reef'; p.mode = 'swimming'; p.gunId = null; p.launchVx = 0; p.launchVz = 0;
+    const up = Number(input.jump === true) - Number(input.dive === true);
+    const magnitude = Math.hypot(dx, up, dz);
+    const swimSpeed = input.sprint ? 12 : 8;
+    if (magnitude > .000001) {
+      const divisor = Math.max(1, magnitude);
+      p.x = finite(p.x, REEF_SPAWN.x) + dx / divisor * swimSpeed * dt;
+      p.y = finite(p.y, REEF_SPAWN.y) + up / divisor * swimSpeed * dt;
+      p.z = finite(p.z, REEF_SPAWN.z) + dz / divisor * swimSpeed * dt;
+      p.vy = up / divisor * swimSpeed;
+    } else {
+      p.x = finite(p.x, REEF_SPAWN.x); p.y = finite(p.y, REEF_SPAWN.y); p.z = finite(p.z, REEF_SPAWN.z); p.vy = 0;
+    }
+    p.grounded = false; p.deckX = 0; p.deckZ = 0;
+    return resolveReefSwimmerCollision(p);
+  }
 
   if (p.mode === 'aboard') {
     const ship = shipAt(elapsed);

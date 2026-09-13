@@ -1,10 +1,12 @@
+import { REEF_BOUNDS, reefLineOfSight } from '../shared/underwater.js';
+
 // Transport the camera with the rendered pirate, then ease only look/zoom and
 // obstacle offsets. Easing world-space travel makes a stopped pirate appear
 // to slide backwards while the camera catches up.
 export function cameraTravel(previous, player, { menu = false, round = 0 } = {}) {
-  if (menu || !player || !['ground', 'gliding'].includes(player.mode)) return { anchor: null, delta: null, reset: !!previous };
-  const anchor = { id: player.id, mode: player.mode, round, x: player.x, y: player.y, z: player.z };
-  const compatible = previous && previous.id === anchor.id && previous.mode === anchor.mode && previous.round === round;
+  if (menu || !player || !['ground', 'gliding', 'swimming'].includes(player.mode)) return { anchor: null, delta: null, reset: !!previous };
+  const anchor = { id: player.id, mode: player.mode, realm: player.realm || 'island', round, x: player.x, y: player.y, z: player.z };
+  const compatible = previous && previous.id === anchor.id && previous.mode === anchor.mode && previous.realm === anchor.realm && previous.round === round;
   const delta = compatible ? { x: anchor.x - previous.x, y: anchor.y - previous.y, z: anchor.z - previous.z } : null;
   if (!delta || Math.hypot(delta.x, delta.y, delta.z) > 5) return { anchor, delta: null, reset: true };
   return { anchor, delta, reset: false };
@@ -41,6 +43,29 @@ export function shipClearFraction(anchor, camera, ship, box = SHIP_CAMERA_BOX) {
     if (enter >= leave) return 1;
   }
   return enter < 1 && leave > 0 ? Math.max(0, enter - 1e-4) : 1;
+}
+
+// The reef uses its own canonical solids and 3D floor/ceiling.  Pull a chase
+// camera in before it crosses a hull wall; keeping this analytic and renderer
+// free makes the same clear arm easy to verify without a WebGL scene.
+export function reefCameraFraction(anchor, camera, padding = .18) {
+  if (![anchor?.x, anchor?.y, anchor?.z, camera?.x, camera?.y, camera?.z].every(Number.isFinite)) return 1;
+  let ceiling = 1;
+  for (const [axis, low, high] of [['x', REEF_BOUNDS.minX + padding, REEF_BOUNDS.maxX - padding], ['y', REEF_BOUNDS.minY + padding, REEF_BOUNDS.maxY - padding], ['z', REEF_BOUNDS.minZ + padding, REEF_BOUNDS.maxZ - padding]]) {
+    const delta = camera[axis] - anchor[axis];
+    if (delta > 0 && camera[axis] > high) ceiling = Math.min(ceiling, (high - anchor[axis]) / delta);
+    if (delta < 0 && camera[axis] < low) ceiling = Math.min(ceiling, (low - anchor[axis]) / delta);
+  }
+  ceiling = Math.max(0, Math.min(1, ceiling));
+  const clipped = axis => anchor[axis] + (camera[axis] - anchor[axis]) * ceiling;
+  if (reefLineOfSight(anchor, { x: clipped('x'), y: clipped('y'), z: clipped('z') }, padding)) return ceiling;
+  let safe = 0, blocked = ceiling;
+  for (let pass = 0; pass < 9; pass++) {
+    const middle = (safe + blocked) / 2;
+    const probe = { x: anchor.x + (camera.x - anchor.x) * middle, y: anchor.y + (camera.y - anchor.y) * middle, z: anchor.z + (camera.z - anchor.z) * middle };
+    if (reefLineOfSight(anchor, probe, padding)) safe = middle; else blocked = middle;
+  }
+  return Math.max(0, safe - .015);
 }
 
 // No shoulder offset or trailing camera inside the optic: its center ray is

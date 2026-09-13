@@ -9,15 +9,17 @@ import { weaponPresentation } from './weapon-presentation.js';
 import { SEED, SHRINES, CHESTS, heightAt, shipAt } from '/shared/world.js';
 import { SHIP_GUNS, GUN_COOLDOWN, GUN_RANGE, gunAim, gunMuzzle } from '/shared/airship.js';
 import { WEAPON_ORDER, WEAPONS, RARITIES, weaponStats } from '/shared/weapons.js';
+import { reefLineOfSight, sameRealm } from '/shared/underwater.js';
 
 const canvas = document.getElementById('world');
 const testMode = new URLSearchParams(location.search).get('test') === '1';
 const STEP = PREDICTION_STEP;
-const neutral = (view) => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: view?.yaw || 0, pitch: view?.pitch || 0 });
+const neutral = (view) => ({ forward: 0, right: 0, sprint: false, jump: false, dive: false, yaw: view?.yaw || 0, pitch: view?.pitch || 0 });
 const previewState = () => ({
   phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
   players: [], enemies: [], shipGuns: [], flyingTargets: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
   chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), pearls: 0, shards: 0, bossId: null,
+  underwater: { entered: false, completed: false, remaining: 0, chestOpened: false },
   pings: [], drops: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
 });
 let state = previewState();
@@ -34,6 +36,7 @@ let forcePrediction = false;
 let lastAuthoritativeMode = null;
 let lastAuthoritativeGunId = null;
 let lastAuthoritativeReturned = false;
+let lastAuthoritativeRealm = null;
 let lastVictoryRound = null;
 let running = true;
 let animationFrame = 0;
@@ -142,6 +145,7 @@ function resetToWelcome() {
   lastAuthoritativeMode = null;
   lastAuthoritativeGunId = null;
   lastAuthoritativeReturned = false;
+  lastAuthoritativeRealm = null;
   ui.reset();
   input.reset(); input.releasePointer(); input.setEnabled(false);
   lastUIAt = 0;
@@ -197,10 +201,11 @@ function receiveState(next) {
   // A confirmed gate departure ends the deck timeline: queued walking steps and
   // a held key are consumed once here, so nothing replays onto the deck we left.
   const departed = lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding';
-  if (gunChanged || returned || departed) {
+  const traveled = lastAuthoritativeRealm !== null && (lastAuthoritativeRealm || 'island') !== (authoritative.realm || 'island');
+  if (gunChanged || returned || departed || traveled) {
     // Keep a held Space through the dismount ACK. Sending a neutral packet here
     // would release its jump edge before the authority has consumed it.
-    const settling = !!authoritative.gunId || returned || departed;
+    const settling = !!authoritative.gunId || returned || departed || traveled;
     if (settling) input.reset();
     nextShotAt = 0;
     ui.clearWeaponPresentation();
@@ -208,9 +213,10 @@ function receiveState(next) {
     if (gunChanged && gun) input.setView(gun.yaw, .1);
     if (settling) sendNeutralInput();
   }
-  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer || gunChanged || returned || departed);
+  reconcile(authoritative, forcePrediction || phaseChanged || stale || !simulationPlayer || gunChanged || returned || departed || traveled);
   lastAuthoritativeGunId = authoritative.gunId || null;
   lastAuthoritativeReturned = !!authoritative.shipReturned;
+  lastAuthoritativeRealm = authoritative.realm || 'island';
   forcePrediction = false;
   if (lastAuthoritativeMode !== authoritative.mode) {
     if (lastAuthoritativeMode === 'aboard' && authoritative.mode === 'gliding') audio.play('drop');
@@ -220,6 +226,12 @@ function receiveState(next) {
     }
     if (lastAuthoritativeMode === 'ground' && authoritative.mode === 'aboard') ui.toast('Back aboard! E mans a deck gun. Walk to the bow or starboard JUMP gate and press E when you want to glide down.');
     lastAuthoritativeMode = authoritative.mode;
+  }
+  if (traveled) {
+    input.setView(authoritative.yaw || 0, authoritative.realm === 'reef' ? 0 : -.16);
+    ui.toast(authoritative.realm === 'reef'
+      ? 'Welcome to Sunken Reach. Swim with WASD, hold Space to rise, C to dive, and Shift to surge.'
+      : state.phase === 'voyage' ? 'Back on Sunwake Strand. The Sunken Reach dive remains open.' : 'Back on Sunwake Strand. The final battle has begun.');
   }
   synchronizeInput();
 }
@@ -238,10 +250,15 @@ function receiveEvent(event) {
   if (!event || typeof event.kind !== 'string') return;
   world.handleEvent(event);
   const mine = event.playerId === net.id;
-  const name = state.players.find((player) => player.id === event.playerId)?.name || 'A crewmate';
+  const source = state.players.find((player) => player.id === event.playerId || player.id === event.sourceId);
+  const local = state.players.find((player) => player.id === net.id) || renderedPlayer;
+  const eventRealm = event.realm || source?.realm || 'island';
+  const nearbyRealm = !local || eventRealm === (local.realm || 'island');
+  const name = source?.name || 'A crewmate';
+  const place = eventRealm === 'reef' || event.id === 'sunken-reach-chest' ? ' in Sunken Reach' : ' on the island';
   switch (event.kind) {
     case 'shot':
-      if (mine || !renderedPlayer || Math.hypot((event.from?.x || 0) - renderedPlayer.x, (event.from?.z || 0) - renderedPlayer.z) < 40) audio.play('shot', { distant: !mine, weapon: event.weapon });
+      if (mine || nearbyRealm && (!renderedPlayer || Math.hypot((event.from?.x || 0) - renderedPlayer.x, (event.from?.z || 0) - renderedPlayer.z) < 40)) audio.play('shot', { distant: !mine, weapon: event.weapon });
       if (mine && event.hitId) { ui.hit(); audio.play('hit'); }
       break;
     case 'hit':
@@ -252,17 +269,17 @@ function receiveEvent(event) {
     case 'swap': if (mine) audio.play('reload'); break;
     case 'melee': if (mine) audio.play('melee'); break;
     case 'chest': {
-      audio.play('collect', { distant: !mine });
+      if (mine || nearbyRealm) audio.play('collect', { distant: !mine });
       const gun = Object.hasOwn(WEAPONS, event.weapon) ? `${RARITIES[event.rarity]?.name || 'Common'} ${WEAPONS[event.weapon].name}` : '';
       // The opener is already standing on the gun, so it equips or is salvaged
       // on the same tick; only crewmates need directions to it.
       if (mine) ui.toast(`You found ${event.pearls || 0} shared pearls!${gun ? ` A ${gun} tumbles out.` : ''}`);
-      else ui.toast(`${name} found ${event.pearls || 0} shared pearls!${gun ? ` Walk over the ${gun} to equip it. Your copy disappears; the crew's stays.` : ''}`);
+      else ui.toast(`${name} found ${event.pearls || 0} shared pearls${place}!${gun ? nearbyRealm ? ` Walk over the ${gun} to equip it. Your copy disappears; the crew's stays.` : ` The ${gun} waits there for the crew.` : ''}`);
       break;
     }
     case 'salvage': {
       if (!Object.hasOwn(WEAPONS, event.weapon)) break;
-      audio.play('collect', { distant: !mine });
+      if (mine || nearbyRealm) audio.play('collect', { distant: !mine });
       const pearls = Number.isFinite(event.pearls) ? event.pearls : 0;
       ui.toast(mine ? `You already carry an equal or better ${WEAPONS[event.weapon].name}, so it was salvaged for +${pearls} shared pearls.`
         : `${name} salvaged a spare ${WEAPONS[event.weapon].name} for +${pearls} shared pearls.`);
@@ -271,7 +288,7 @@ function receiveEvent(event) {
     case 'loot':
       if (mine) ui.revealLoot(event);
       else if (Object.hasOwn(WEAPONS, event.weapon) && Object.hasOwn(RARITIES, event.rarity)) {
-        audio.play('collect', { distant: true });
+        if (nearbyRealm) audio.play('collect', { distant: true });
         ui.toast(`${name} equipped ${RARITIES[event.rarity].name} ${WEAPONS[event.weapon].name}.`);
       }
       break;
@@ -281,11 +298,11 @@ function receiveEvent(event) {
       else if (event.status === 'active') ui.toast(`${shrine?.name || 'The shrine'} is awake. Clear its cheeky crabs!`);
       break;
     }
-    case 'heal': audio.play('heal', { distant: !mine }); if (mine) ui.toast('Healing pulse! Nearby friends recover health too.'); break;
-    case 'revive': audio.play('heal', { distant: !mine }); ui.toast(mine ? 'Back on your feet! You have a short safety shield.' : `${name} is back on their feet!`); break;
-    case 'downed': if (mine) audio.play('downed'); else ui.toast(`${name} needs a hand. Get close and press E to help.`); break;
-    case 'ping': audio.play('ping', { distant: !mine }); ui.toast(mine ? 'Your location is marked on everyone’s map.' : `${name} marked a location on your map.`); break;
-    case 'splash': audio.play('splash', { distant: true }); break;
+    case 'heal': if (mine || nearbyRealm) audio.play('heal', { distant: !mine }); if (mine) ui.toast('Healing pulse! Nearby friends recover health too.'); break;
+    case 'revive': if (mine || nearbyRealm) audio.play('heal', { distant: !mine }); ui.toast(mine ? 'Back on your feet! You have a short safety shield.' : `${name} is back on their feet${place}!`); break;
+    case 'downed': if (mine) audio.play('downed'); else ui.toast(nearbyRealm ? `${name} needs a hand. Get close and press E to help.` : `${name} needs help${place}.`); break;
+    case 'ping': if (mine || nearbyRealm) audio.play('ping', { distant: !mine }); if (mine || nearbyRealm) ui.toast(mine ? 'Your location is marked for nearby crew.' : `${name} marked a location on your map.`); break;
+    case 'splash': if (!event.realm || !local || (event.realm || 'island') === (local.realm || 'island')) audio.play('splash', { distant: true }); break;
     case 'victory': if (lastVictoryRound !== state.round) { lastVictoryRound = state.round; audio.play('victory'); } break;
     case 'notice': if (typeof event.message === 'string') ui.toast(event.message); break;
     case 'side-event': {
@@ -324,7 +341,7 @@ function aimPoint(player) {
   let nearest = Math.max(72, weaponStats(player.weapon, player.rarity).range + 12);
   let enemy = null;
   for (const candidate of state.enemies) {
-    if (candidate.hp <= 0) continue;
+    if (candidate.hp <= 0 || !sameRealm(player, candidate)) continue;
     const ox = origin.x - candidate.x;
     const oy = origin.y - (candidate.y + candidate.radius * .8);
     const oz = origin.z - candidate.z;
@@ -337,7 +354,10 @@ function aimPoint(player) {
     if (t < 0) t = -b + root;
     if (t > .1 && t < nearest) { nearest = t; enemy = candidate; }
   }
-  if (direction.y < -.015) {
+  if ((player.realm || 'island') === 'reef') {
+    const endpoint = { x: origin.x + direction.x * nearest, y: origin.y + direction.y * nearest, z: origin.z + direction.z * nearest };
+    if (!reefLineOfSight(origin, endpoint)) enemy = null;
+  } else if (direction.y < -.015) {
     for (let t = 2; t < nearest; t += 1.2) {
       const x = origin.x + direction.x * t;
       const y = origin.y + direction.y * t;
@@ -368,7 +388,7 @@ function performAction(action) {
   if (gun && !['fire', 'interact', 'ping'].includes(action)) return;
   if (action === 'fire') {
     const now = performance.now();
-    if (now < nextShotAt || (!gun && player.mode !== 'ground')) return;
+    if (now < nextShotAt || (!gun && !['ground', 'swimming'].includes(player.mode))) return;
     if (gun && (state.shipGuns?.find((entry) => entry.id === gun.id)?.readyAt || 0) > renderClock.elapsed) return;
     nextShotAt = now + (gun ? GUN_COOLDOWN : weaponStats(player.weapon, player.rarity).cooldown) * 1000 + 10;
     const aim = aimPoint(player);
@@ -388,7 +408,7 @@ function performAction(action) {
     if (target && !target.disabled) {
       // Stop held movement before requesting a lift, so fixed ticks queued
       // before its snapshot cannot carry island input onto the returned deck.
-      if (target.kind === 'airship-return' || target.kind === 'jump-gate') { input.reset(); sendInput(neutral(input)); }
+      if (['airship-return', 'jump-gate', 'dive-entrance', 'reef-exit'].includes(target.kind)) { input.reset(); sendInput(neutral(input)); }
       else sendInput(base);
       net.action('interact', target.id);
     }
@@ -466,7 +486,7 @@ function frame(now) {
     world.update(dt, renderState, renderedPlayer, view);
     world.render();
     if (now - lastUIAt >= 65) {
-      ui.setTarget(renderedPlayer && (renderedPlayer.mode === 'ground' || renderedPlayer.gunId) ? aimPoint(renderedPlayer).enemy : null);
+      ui.setTarget(renderedPlayer && (['ground', 'swimming'].includes(renderedPlayer.mode) || renderedPlayer.gunId) ? aimPoint(renderedPlayer).enemy : null);
       ui.update(renderState, renderedPlayer, world, view);
       lastUIAt = now;
     }

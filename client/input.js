@@ -1,4 +1,4 @@
-const MOVEMENT_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space']);
+const MOVEMENT_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space', 'KeyC']);
 const ACTION_KEYS = { KeyE: 'interact', KeyF: 'melee', KeyQ: 'heal', KeyR: 'reload', KeyG: 'ping', Digit1: 'flintlock', Digit2: 'scatter', Digit3: 'repeater', Digit4: 'burst', Digit5: 'longshot' };
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const isControl = (element) => !!element?.closest?.('input,textarea,select,button,a,[contenteditable="true"],[role="dialog"]');
@@ -172,6 +172,7 @@ export function createInput(canvas, callbacks = {}, { testMode = false } = {}) {
         right: allowed ? Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft')) : 0,
         sprint: allowed && (keys.has('ShiftLeft') || keys.has('ShiftRight')),
         jump: allowed && (keys.has('Space') || performance.now() < pulseJumpUntil),
+        dive: allowed && keys.has('KeyC'),
         yaw, pitch,
       };
     },

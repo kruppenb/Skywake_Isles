@@ -191,17 +191,47 @@ function addGliderGripMorph(mesh) {
   mesh.geometry = geometry; mesh.updateMorphTargets();
 }
 
+// The navigator arrives as one skinned mesh.  Sunken Reach keeps the authored
+// head, tricorn, coat, arms and weapon skeleton, then removes triangles led by
+// either leg's skin weights.  This is a true waist cut (not a bubble or an
+// opaque cover): the articulated tail added by mermaid.js occupies the exposed
+// hem and no concealed boots can appear during an animation blend.
+function trimNavigatorLegs(mesh) {
+  const geometry = mesh.geometry, index = geometry.index, skinIndex = geometry.attributes.skinIndex, skinWeight = geometry.attributes.skinWeight;
+  if (!skinIndex || !skinWeight) return;
+  const legBones = new Set(mesh.skeleton.bones.map((bone, i) => /^(Left|Right)(UpLeg|Leg|Foot|Toe)/.test(bone.name) ? i : -1).filter(i => i >= 0));
+  if (!legBones.size) return;
+  const weightAt = vertex => {
+    let total = 0;
+    for (let channel = 0; channel < 4; channel++) if (legBones.has(skinIndex.getComponent(vertex, channel))) total += skinWeight.getComponent(vertex, channel);
+    return total;
+  };
+  const kept = [], count = index ? index.count : geometry.attributes.position.count;
+  for (let i = 0; i < count; i += 3) {
+    const a = index ? index.getX(i) : i, b = index ? index.getX(i + 1) : i + 1, c = index ? index.getX(i + 2) : i + 2;
+    // Removing any triangle dominated by a leg leaves the coat/pelvis hem in
+    // place and avoids triangles that stretch from the waist to a hidden boot.
+    if (Math.max(weightAt(a), weightAt(b), weightAt(c)) < .42) kept.push(a, b, c);
+  }
+  const trimmed = geometry.clone(); trimmed.setIndex(kept); trimmed.computeBoundingSphere(); trimmed.userData.shared = false;
+  mesh.geometry.dispose(); mesh.geometry = trimmed;
+}
+
 // ------------------------------------------------------------------ builder --
-export function buildPlayerCharacter(palette, color = '#eb785d', { url = NAVIGATOR_URL, asset = null } = {}) {
+export function buildPlayerCharacter(palette, color = '#eb785d', { url = NAVIGATOR_URL, asset = null, swimming = false } = {}) {
   const group = new THREE.Group(); group.name = 'pirate'; group.userData.kind = 'pirate';
   let fallback = buildPirate(palette, color); group.add(fallback.group);
+  if (swimming) {
+    fallback.group.getObjectByName('left-hip')?.removeFromParent();
+    fallback.group.getObjectByName('right-hip')?.removeFromParent();
+  }
   let navigator = null, disposed = false;
   const ready = asset ? Promise.resolve(asset) : canLoadInThisRuntime() ? loadNavigatorAsset(url) : null;
   if (ready) {
     ready.then(loaded => {
       if (disposed) return;
       try {
-        navigator = buildNavigator(loaded, palette, color, group);
+        navigator = buildNavigator(loaded, palette, color, group, { swimming });
       } catch (error) {
         if (!warned) { warned = true; console.warn('navigator rig unusable, keeping the procedural pirate', error); }
         return;
@@ -229,7 +259,7 @@ function disposeProcedural(object) {
   object.removeFromParent();
 }
 
-function buildNavigator(asset, palette, color, group) {
+function buildNavigator(asset, palette, color, group, { swimming = false } = {}) {
   const figure = new THREE.Group(); figure.name = 'navigator-figure'; group.add(figure);
   const root = cloneSkeleton(asset.scene); root.name = 'SkywakeNavigator'; figure.add(root);
   const materials = [];
@@ -310,7 +340,7 @@ function buildNavigator(asset, palette, color, group) {
   }
   const { group: glider, grips } = buildGlider(palette, color); group.add(glider);
   const gripMeshes = [];
-  root.traverse(node => { if (node.isSkinnedMesh) { addGliderGripMorph(node); gripMeshes.push(node); } });
+  root.traverse(node => { if (node.isSkinnedMesh) { addGliderGripMorph(node); if (swimming) trimNavigatorLegs(node); gripMeshes.push(node); } });
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(.70, 20), new THREE.MeshBasicMaterial({
     color: '#183c46', transparent: true, opacity: .20, depthWrite: false }));
   shadow.name = 'pirate-contact-shadow'; shadow.rotation.x = -Math.PI / 2; shadow.position.y = .025; group.add(shadow);

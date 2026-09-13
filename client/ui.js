@@ -10,10 +10,12 @@ import { canReturnAtShrine } from '../shared/shrines.js';
 import { SKY_BOSSES, SKY_GROUND_WAVES } from '../shared/sky-finale.js';
 import { skyState } from './sky-finale.js';
 import { createLootReveal } from './loot-reveal.js';
+import { DIVE_ENTRANCE, REEF_EXIT, REEF_CHEST, REEF_BOUNDS, REEF_SOLIDS, reefLineOfSight, realmOf, sameRealm } from '../shared/underwater.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const distance3 = (a, b) => Math.hypot(a.x - b.x, (a.y || 0) - (b.y || 0), a.z - b.z);
 const formatTime = (seconds) => `${Math.floor(Math.max(0, seconds) / 60)}:${String(Math.floor(Math.max(0, seconds) % 60)).padStart(2, '0')}`;
 const read = (key, fallback) => { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } };
 const write = (key, value) => { try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ } };
@@ -93,7 +95,7 @@ export function jumpGateLabel(state) {
 // deck, a skycrab on its lane — mark that exact point. Everything standing on the
 // island keeps its terrain-relative offset, including the Tempest, whose y is a
 // feet position. A new kind opts in here explicitly.
-const ABSOLUTE_MARKER_KINDS = new Set(['jump-gate', 'cannon', 'sky-boss']);
+const ABSOLUTE_MARKER_KINDS = new Set(['jump-gate', 'cannon', 'sky-boss', 'reef-guard', 'reef-chest', 'reef-exit']);
 export function objectiveMarkerHeight(objective) {
   if (ABSOLUTE_MARKER_KINDS.has(objective?.kind) && Number.isFinite(objective.y)) return objective.y;
   return heightAt(objective.x, objective.z) + (objective.kind === 'boss' ? 4 : 9);
@@ -147,15 +149,36 @@ export function findInteractable(state, player) {
     }
     return null;
   }
+  if (player.mode === 'swimming' || realmOf(player) === 'reef') {
+    if (!['voyage', 'finale'].includes(state.phase) || player.hp <= 0 || player.online === false) return null;
+    const options = [];
+    const eye = { x: player.x, y: player.y + .7, z: player.z };
+    for (const friend of state.players || []) {
+      if (friend.id !== player.id && friend.online && sameRealm(player, friend) && friend.knockedUntil > state.elapsed
+        && distance3(player, friend) <= 3.5 && reefLineOfSight(eye, { x: friend.x, y: friend.y + .7, z: friend.z }, .08)) {
+        options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance3(player, friend) - 10 });
+      }
+    }
+    const exitDistance = distance3(player, REEF_EXIT);
+    if (exitDistance <= REEF_EXIT.range && reefLineOfSight(eye, { x: REEF_EXIT.x, y: REEF_EXIT.y + .7, z: REEF_EXIT.z }, .08)) {
+      options.push({ ...REEF_EXIT, kind: 'reef-exit', label: 'Return to shore', color: '#79f5ff', distance: exitDistance });
+    }
+    return options.sort((a, b) => a.distance - b.distance)[0] || null;
+  }
   if (player.mode !== 'ground') return null;
   const options = [];
   const reachable = (target) => hasWorldLineOfSight(
     { x: player.x, y: player.y + 1.1, z: player.z },
     { x: target.x, y: (target.y ?? heightAt(target.x, target.z)) + .9, z: target.z }, .08);
   for (const friend of state.players) {
-    if (friend.id !== player.id && friend.online && friend.knockedUntil > state.elapsed && distance(player, friend) <= 3.5 && reachable(friend)) {
+    if (friend.id !== player.id && friend.online && sameRealm(player, friend) && friend.knockedUntil > state.elapsed && distance(player, friend) <= 3.5 && reachable(friend)) {
       options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance(player, friend) - 10 });
     }
+  }
+  const diveEntrance = { ...DIVE_ENTRANCE, y: heightAt(DIVE_ENTRANCE.x, DIVE_ENTRANCE.z) };
+  if (state.phase === 'voyage' && player.grounded && player.hp > 0 && player.online !== false
+    && distance3(player, diveEntrance) <= DIVE_ENTRANCE.range && reachable(diveEntrance)) {
+    options.push({ ...diveEntrance, kind: 'dive-entrance', label: 'Dive to Sunken Reach', color: '#79f5ff', distance: distance3(player, diveEntrance) });
   }
   if (['voyage', 'finale'].includes(state.phase) && player.grounded && player.hp > 0 && player.online !== false) {
     for (const lift of AIRSHIP_RETURNS) {
@@ -374,8 +397,30 @@ export function skyObjective(state, player) {
   return { ...BEACON, name: 'Tideglass Lighthouse', kind: 'beacon' };
 }
 
+export function underwaterHud(state, player) {
+  if (!player || realmOf(player) !== 'reef') return null;
+  const underwater = state.underwater || {};
+  const remaining = Math.max(0, Number(underwater.remaining) || 0);
+  if (remaining > 0) return { stage: 'guards', title: 'Clear the Sunken Reach', detail: `${remaining} reef guard${remaining === 1 ? '' : 's'} remaining` };
+  if (!underwater.chestOpened) return { stage: 'chest', title: 'Search the wreck', detail: 'The treasure chest is unlocked. Swim inside to collect it.' };
+  return { stage: 'return', title: 'Return to shore', detail: 'The wreck is secured. Follow the cyan beacon and press E.' };
+}
+
+export function underwaterObjective(state, player) {
+  const hud = underwaterHud(state, player);
+  if (!hud) return null;
+  if (hud.stage === 'guards') {
+    const enemies = (state.enemies || []).filter(enemy => enemy.hp > 0 && sameRealm(player, enemy));
+    const target = enemies.sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+    return target ? { ...target, name: 'Reef guard', kind: 'reef-guard' } : { ...REEF_CHEST, name: 'Sunken wreck', kind: 'reef-chest' };
+  }
+  if (hud.stage === 'chest') return { ...REEF_CHEST, name: 'Wreck treasure', kind: 'reef-chest' };
+  return { ...REEF_EXIT, kind: 'reef-exit' };
+}
+
 export function nearestObjective(state, player) {
   if (!player) return null;
+  if (realmOf(player) === 'reef') return underwaterObjective(state, player);
   if (skyState(state)) return skyObjective(state, player);
   if (player.gunId) return null;
   if (player.mode === 'aboard') {
@@ -395,12 +440,34 @@ export function nearestObjective(state, player) {
   return nearbyActive || remaining.sort((a, b) => distance(player, a) - distance(player, b))[0] || null;
 }
 
+// Pure map inventory used by the painter and tests. Cross-realm crew, pings and
+// drops never appear as if they occupy the same chart.
+export function mapEntries(state, player) {
+  const realm = realmOf(player);
+  const players = (state.players || []).filter(entry => entry.online && realmOf(entry) === realm);
+  const playerIds = new Set(players.map(entry => entry.id));
+  return {
+    realm,
+    players,
+    pings: (state.pings || []).filter(entry => entry.realm ? realmOf(entry) === realm : playerIds.has(entry.playerId)),
+    drops: (state.drops || []).filter(entry => realmOf(entry) === realm),
+    landmarks: realm === 'reef'
+      ? [{ ...REEF_EXIT, kind: 'reef-exit' }, { ...REEF_CHEST, name: 'Wreck treasure', kind: 'reef-chest' }]
+      : [{ ...DIVE_ENTRANCE, kind: 'dive-entrance' }],
+  };
+}
+
 function avatar(player) {
   const element = document.createElement('span');
   element.className = 'crew-avatar';
   element.style.setProperty('--crew-color', COLORS.includes(player.color) ? player.color : COLORS[0]);
   element.textContent = (player.name || '?').slice(0, 1).toUpperCase();
   return element;
+}
+
+export function crewLocationLabel(localPlayer, player) {
+  if (sameRealm(localPlayer, player)) return '';
+  return realmOf(player) === 'reef' ? 'below' : 'ashore';
 }
 
 function createMapPainter() {
@@ -474,6 +541,63 @@ function createMapPainter() {
     ctx.fillStyle = SIDE_EVENT_COLOR; ctx.fill(); ctx.strokeStyle = '#123c51'; ctx.lineWidth = 1.5; ctx.stroke();
   };
 
+  function drawReefMap(ctx, width, height, size, ox, oy, state, player, large, elapsed) {
+    const entries = mapEntries(state, player);
+    const spanX = REEF_BOUNDS.maxX - REEF_BOUNDS.minX, spanZ = REEF_BOUNDS.maxZ - REEF_BOUNDS.minZ;
+    const point = value => ({ x: ox + (value.x - REEF_BOUNDS.minX) / spanX * size,
+      y: oy + (value.z - REEF_BOUNDS.minZ) / spanZ * size });
+    const scaleX = size / spanX, scaleZ = size / spanZ;
+    const gradient = ctx.createLinearGradient(0, oy, 0, oy + size);
+    gradient.addColorStop(0, '#176b76'); gradient.addColorStop(1, '#062f47');
+    ctx.fillStyle = '#082d41'; ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = gradient; ctx.fillRect(ox, oy, size, size);
+    ctx.strokeStyle = '#89e7df22'; ctx.lineWidth = 1;
+    for (let i = 1; i < 8; i++) { ctx.beginPath(); ctx.moveTo(ox, oy + size * i / 8); ctx.lineTo(ox + size, oy + size * i / 8); ctx.stroke(); }
+    // Broken hull boxes are drawn from the exact collision plan shared with the server.
+    for (const solid of REEF_SOLIDS) {
+      const center = point(solid);
+      ctx.fillStyle = solid.id === 'wreck-deck' ? '#98754a' : '#694f39';
+      ctx.strokeStyle = '#d3bd83'; ctx.lineWidth = large ? 2 : 1;
+      ctx.fillRect(center.x - solid.width * scaleX / 2, center.y - solid.depth * scaleZ / 2,
+        solid.width * scaleX, solid.depth * scaleZ);
+      ctx.strokeRect(center.x - solid.width * scaleX / 2, center.y - solid.depth * scaleZ / 2,
+        solid.width * scaleX, solid.depth * scaleZ);
+    }
+    if (large) {
+      ctx.font = 'bold 12px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#dcf8ed';
+      const wreck = point(REEF_CHEST); ctx.fillText('Sunken wreck', wreck.x, wreck.y - 18);
+      ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.fillStyle = '#9ed7d3'; ctx.fillText(`Depth ${Math.max(0, Math.round(18 - player.y))} m`, ox + size - 43, oy + 17);
+    }
+    const exit = point(REEF_EXIT);
+    ctx.beginPath(); ctx.arc(exit.x, exit.y, large ? 9 : 5, 0, Math.PI * 2); ctx.fillStyle = '#79f5ff'; ctx.fill();
+    ctx.strokeStyle = '#fff7d9'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(exit.x, exit.y + 4); ctx.lineTo(exit.x, exit.y - 5); ctx.moveTo(exit.x - 4, exit.y - 1); ctx.lineTo(exit.x, exit.y - 5); ctx.lineTo(exit.x + 4, exit.y - 1); ctx.stroke();
+    const chest = point(REEF_CHEST);
+    if (!state.underwater?.chestOpened) {
+      ctx.fillStyle = '#ffd16c'; ctx.fillRect(chest.x - (large ? 5 : 3), chest.y - (large ? 4 : 2), large ? 10 : 6, large ? 8 : 4);
+    }
+    const objective = nearestObjective(state, player);
+    if (large && objective) {
+      const a = point(player), b = point(objective);
+      ctx.strokeStyle = '#fff0a0'; ctx.lineWidth = 2; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    for (const ping of entries.pings) {
+      if (ping.expiresAt < elapsed) continue;
+      const position = point(ping), owner = entries.players.find(entry => entry.id === ping.playerId);
+      ctx.beginPath(); ctx.arc(position.x, position.y, (large ? 12 : 6) + Math.sin(elapsed * 5) * 2, 0, Math.PI * 2);
+      ctx.strokeStyle = owner?.color || '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    }
+    for (const friend of entries.players) {
+      const current = friend.id === player.id ? player : friend, position = point(current), local = friend.id === player.id;
+      ctx.save(); ctx.translate(position.x, position.y);
+      if (local) { ctx.rotate(-current.yaw); ctx.beginPath(); ctx.moveTo(0, large ? -9 : -6); ctx.lineTo(large ? 7 : 4.5, large ? 7 : 4.5); ctx.lineTo(0, large ? 3 : 2); ctx.lineTo(large ? -7 : -4.5, large ? 7 : 4.5); ctx.closePath(); }
+      else { ctx.beginPath(); ctx.arc(0, 0, large ? 5 : 3.5, 0, Math.PI * 2); }
+      ctx.fillStyle = current.color; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.stroke(); ctx.restore();
+      if (large) { ctx.font = `${local ? 'bold ' : ''}11px "Trebuchet MS",sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#e9fffb'; ctx.fillText(local ? 'You' : friend.name, position.x, position.y - 12); }
+    }
+    ctx.strokeStyle = '#8be7df88'; ctx.lineWidth = large ? 2 : 1; ctx.strokeRect(ox, oy, size, size);
+  }
+
   return function drawMap(canvas, state, player, large, elapsed, discoveries) {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
@@ -487,6 +611,10 @@ function createMapPainter() {
     ctx.clearRect(0, 0, width, height);
     const size = Math.min(width, height) - (large ? 16 : 0);
     const ox = (width - size) / 2; const oy = (height - size) / 2;
+    if (realmOf(player) === 'reef') {
+      drawReefMap(ctx, width, height, size, ox, oy, state, player, large, elapsed);
+      return;
+    }
     const mapPoint = (point) => ({ x: ox + size * (.5 + point.x / (extent * 2)), y: oy + size * (.5 + point.z / (extent * 2)) });
     const mapEvents = state.phase === 'voyage' ? sideEventEntries(state).filter((event) => ['available', 'active'].includes(event.status)) : [];
     const occupied = [];
@@ -589,14 +717,17 @@ function createMapPainter() {
       ctx.fillText(place.name, label.x + 5, label.y + 12);
       if (statusLine) { ctx.fillStyle = isLift ? '#315e66' : '#fff6dd'; ctx.font = '10px "Trebuchet MS",sans-serif'; ctx.fillText(statusLine, label.x + 5, label.y + 25); }
     }
-    for (const ping of state.pings) {
+    const entries = mapEntries(state, player);
+    const dive = mapPoint(DIVE_ENTRANCE);
+    ctx.beginPath(); ctx.arc(dive.x, dive.y, large ? 8 : 4.5, 0, Math.PI * 2); ctx.fillStyle = '#146d86'; ctx.fill(); ctx.strokeStyle = '#c9fbef'; ctx.lineWidth = 2; ctx.stroke();
+    if (large) { ctx.font = 'bold 10px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#174555'; ctx.fillText('Sunken Reach', dive.x, dive.y + 20); }
+    for (const ping of entries.pings) {
       if (ping.expiresAt < elapsed) continue;
       const position = mapPoint(ping);
-      const owner = state.players.find((entry) => entry.id === ping.playerId);
+      const owner = entries.players.find((entry) => entry.id === ping.playerId);
       ctx.beginPath(); ctx.arc(position.x, position.y, (large ? 12 : 6) + Math.sin(elapsed * 5) * 2, 0, Math.PI * 2); ctx.strokeStyle = owner?.color || '#fff'; ctx.lineWidth = 2; ctx.stroke();
     }
-    for (const friend of state.players) {
-      if (!friend.online) continue;
+    for (const friend of entries.players) {
       const isLocal = friend.id === player?.id;
       const current = isLocal ? player : friend;
       const position = mapPoint(current);
@@ -624,6 +755,7 @@ export function createUI(callbacks = {}) {
   let lastRoster = '';
   let lastCrewHealth = '';
   let lastVictory = '';
+  let lastMapRealm = '';
   let mapAt = 0;
   let hitUntil = 0;
   let bannerTimer = 0;
@@ -653,7 +785,7 @@ export function createUI(callbacks = {}) {
     lootState = state; lootPlayer = player;
     lootReveal.setContext({ round: state?.round ?? null, playerId: player?.id ?? null,
       active: lootConnected && !!player && ['voyage', 'finale'].includes(state?.phase)
-        && player.mode === 'ground' && player.hp > 0 && player.online !== false
+        && ['ground', 'swimming'].includes(player.mode) && player.hp > 0 && player.online !== false
         && !(player.knockedUntil > state.elapsed) && !paused && !mapOpen && !document.hidden });
   }
   listen(document, 'visibilitychange', () => updateLootContext());
@@ -770,13 +902,17 @@ export function createUI(callbacks = {}) {
 
   function crewHealth(state, localPlayer) {
     const friends = state.players.filter((player) => player.id !== localPlayer.id);
-    const signature = friends.map((player) => `${player.id}:${player.name}:${player.color}:${Math.ceil(player.hp)}:${player.online}:${player.knockedUntil > state.elapsed}`).join('|');
+    const signature = `${localPlayer.id}:${realmOf(localPlayer)}|${friends.map((player) => `${player.id}:${player.name}:${player.color}:${Math.ceil(player.hp)}:${player.online}:${player.knockedUntil > state.elapsed}:${realmOf(player)}`).join('|')}`;
     if (signature === lastCrewHealth) return;
     lastCrewHealth = signature;
     refs['crew-hud'].replaceChildren();
     for (const player of friends) {
       const li = document.createElement('li'); li.className = player.online ? '' : 'offline';
-      const name = document.createElement('span'); name.className = 'crew-name'; name.textContent = `${player.name}${player.knockedUntil > state.elapsed ? ' · needs help' : !player.online ? ' · rejoining' : ''}`;
+      const location = crewLocationLabel(localPlayer, player);
+      const elsewhere = location ? ` · ${location}` : '';
+      const status = player.knockedUntil > state.elapsed ? ' · needs help' : !player.online ? ' · rejoining' : '';
+      const name = document.createElement('span'); name.className = 'crew-name'; name.textContent = `${player.name}${status}${elsewhere}`;
+      name.title = `${player.name}${status}${elsewhere}`;
       const health = document.createElement('progress'); health.max = player.maxHp; health.value = player.hp; health.setAttribute('aria-label', `${player.name}: ${Math.ceil(player.hp)} health`);
       li.append(avatar(player), name, health); refs['crew-hud'].append(li);
     }
@@ -858,11 +994,11 @@ export function createUI(callbacks = {}) {
     reset() {
       lootReveal.reset(); lootState = null; lootPlayer = null;
       api.clearWeaponPresentation();
-      joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = '';
+      joined = false; paused = false; mapOpen = false; lastPhase = ''; lastRoster = ''; lastCrewHealth = ''; lastVictory = ''; lastMapRealm = '';
       discoveryRound = null; clearDiscoveries();
       show(refs['pause-overlay'], false); show(refs['map-overlay'], false); show(refs['victory-overlay'], false); show(refs['join-error'], false);
       api.announce(null);
-      document.body.classList.remove('paused', 'map-open'); plates.forEach((plate) => plate.remove()); plates.clear(); modalChanged();
+      document.body.classList.remove('paused', 'map-open', 'in-reef'); plates.forEach((plate) => plate.remove()); plates.clear(); modalChanged();
     },
     updateLootContext,
     revealLoot(event) { return lootReveal.enqueue(event); },
@@ -909,6 +1045,7 @@ export function createUI(callbacks = {}) {
       refs.reticle.classList.toggle('reloading', presentation.reloading);
       show(refs['look-hint'], presentation.active && (!view.locked || player?.weapon === 'longshot'));
       text(refs['look-hint'], player?.gunId ? 'Hold right mouse to aim · Hold click fire · E or Space leaves the gun'
+        : player?.mode === 'swimming' ? 'WASD swim · Space rise · C dive · Shift surge · Hold right mouse to aim'
         : presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
         : player?.weapon === 'longshot' ? 'Hold right mouse to scope Longshot · R reload · Esc menu'
           : 'Click to aim · Hold right mouse to look · R reload · Esc menu');
@@ -930,6 +1067,7 @@ export function createUI(callbacks = {}) {
       show(refs['victory-overlay'], won);
       document.body.classList.toggle('is-playing', joined);
       document.body.classList.toggle('cannon-mounted', !!player?.gunId);
+      document.body.classList.toggle('in-reef', realmOf(player) === 'reef');
       if (!joined) return;
       if (lastPhase !== state.phase) {
         lastPhase = state.phase;
@@ -944,7 +1082,8 @@ export function createUI(callbacks = {}) {
       }
       if (won) { victory(state, player); return; }
       if (!playing) return;
-      const region = regionAt(player.x, player.z);
+      const reef = realmOf(player) === 'reef';
+      const region = reef ? null : regionAt(player.x, player.z);
       const place = player.mode === 'ground' ? pointOfInterestAt(player.x, player.z) : null;
       if (place && player.grounded && player.knockedUntil <= state.elapsed && !paused && !mapOpen && !discoveries.has(place.id)) {
         discoveries.add(place.id); updateDiscoveries(); mapAt = 0;
@@ -952,13 +1091,17 @@ export function createUI(callbacks = {}) {
         discoveryUntil = now + 6500; show(refs['discovery-notice'], true);
       }
       const objective = nearestObjective(state, player);
-      const objectiveDistance = objective ? Math.round(distance(player, objective)) : 0;
+      const objectiveDistance = objective ? Math.round(reef ? distance3(player, objective) : distance(player, objective)) : 0;
       let title = 'Find the three compass shards';
       let detail = objective ? `${objective.name} · ${objectiveDistance} m away` : 'Explore the island with your crew.';
       let activeShrine = null;
+      const underwater = underwaterHud(state, player);
       const sky = skyHud(state, player);
       const gunner = skyGunnerGuidance(state, player);
-      if (gunner) {
+      if (underwater) {
+        title = underwater.title;
+        detail = `${underwater.detail}${objective ? ` · ${objective.name} ${objectiveDistance} m away` : ''}`;
+      } else if (gunner) {
         // The old practice line was the only thing a gunner ever read. During the
         // siege they get their own crab, its health and where the fight moved to.
         title = gunner.title;
@@ -1010,7 +1153,7 @@ export function createUI(callbacks = {}) {
           detail = 'The shrine captures automatically when its last defender falls.';
         }
       }
-      text(refs['quest-region'], player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
+      text(refs['quest-region'], reef ? 'Beneath Sunwake Strand' : player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
       text(refs['quest-title'], title); text(refs['quest-detail'], detail); text(refs['pearl-count'], `${state.pearls} shared pearls`);
       refs['shard-slots'].setAttribute('aria-label', `${state.shards} of 3 compass shards`);
       [...refs['shard-slots'].children].forEach((slot, index) => slot.classList.toggle('collected', index < state.shards));
@@ -1046,6 +1189,17 @@ export function createUI(callbacks = {}) {
         }
       }
       crewHealth(state, player);
+      const mapRealm = reef ? 'reef' : 'island';
+      if (lastMapRealm !== mapRealm) {
+        lastMapRealm = mapRealm;
+        refs['minimap-caption'].replaceChildren(document.createTextNode(reef ? 'Sunken Reach map ' : 'Island map '), Object.assign(document.createElement('kbd'), { textContent: 'M' }));
+        refs['minimap-button'].setAttribute('aria-label', `Open ${reef ? 'Sunken Reach' : 'island'} map (M)`);
+        text(refs['map-title'], reef ? 'The Sunken Reach' : 'Chart the isles.');
+        text(refs['map-kicker'], reef ? 'A wreck below the safe beach' : 'Your shared adventure');
+        refs['large-map'].setAttribute('aria-label', reef
+          ? 'Sunken Reach chart showing the wreck, treasure chest, return beacon, and nearby crew'
+          : 'Island chart showing regions, paths, buildings, places, shrines, lighthouse, lifts, dive entrance, and nearby crew');
+      }
       const hp = Math.max(0, Math.ceil(player.hp));
       text(refs['health-number'], hp); refs['health-bar'].value = hp; refs['health-bar'].max = player.maxHp;
       refs['health-bar'].setAttribute('aria-label', `Your health: ${hp} of ${player.maxHp}`);
@@ -1092,7 +1246,7 @@ export function createUI(callbacks = {}) {
       const boss = state.enemies.find((enemy) => enemy.id === state.bossId && enemy.hp > 0);
       show(refs['boss-health'], state.phase === 'finale' && !!boss);
       if (boss) { refs['boss-meter'].value = boss.hp / boss.maxHp; text(refs['boss-percent'], `${Math.ceil(boss.hp / boss.maxHp * 100)}%`); }
-      show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && (player.mode === 'ground' || mounted));
+      show(refs['target-health'], !!target && target.hp > 0 && !paused && !mapOpen && (['ground', 'swimming'].includes(player.mode) || mounted));
       if (target) { text(refs['target-health'].firstElementChild, target.name || (target.type === 'flying-crab' ? 'Flying crab' : ENEMY_TYPES[target.type]?.name || ENEMY_TYPES.crab.name)); refs['target-health'].lastElementChild.max = target.maxHp; refs['target-health'].lastElementChild.value = target.hp; }
       const bearing = ((-view.yaw * 180 / Math.PI) % 360 + 360) % 360;
       for (const point of compassPoints) {
@@ -1128,7 +1282,7 @@ export function createUI(callbacks = {}) {
       }
       const activeIds = new Set();
       for (const friend of state.players) {
-        if (!friend.online || friend.id === player.id || distance(friend, player) > 95) continue;
+        if (!friend.online || friend.id === player.id || !sameRealm(friend, player) || distance3(friend, player) > 95) continue;
         activeIds.add(friend.id);
         let plate = plates.get(friend.id);
         if (!plate) { plate = document.createElement('span'); plate.className = 'nameplate'; refs.nameplates.append(plate); plates.set(friend.id, plate); }

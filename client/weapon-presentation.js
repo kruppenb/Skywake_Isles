@@ -10,7 +10,7 @@ export function weaponPresentation(state, player, {
   menuOpen = false, aiming = false, pendingAction = null,
 } = {}) {
   const active = !!player && connected && controlsActive && !menuOpen
-    && ['voyage', 'finale'].includes(state.phase) && player.mode === 'ground'
+    && ['voyage', 'finale'].includes(state.phase) && ['ground', 'swimming'].includes(player.mode)
     && player.online !== false && player.hp > 0 && !(player.knockedUntil > elapsed);
   const remaining = player && Number.isFinite(player.reloadUntil) ? Math.max(0, player.reloadUntil - elapsed) : 0;
   const reloading = active && remaining > 0 && pendingAction !== 'swap';

@@ -3,11 +3,14 @@ import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBS
 import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
 import { makePalette, GeoBatch, buildGalleon, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { buildPlayerCharacter } from './player-character.js';
+import { buildMermaid } from './mermaid.js';
+import { createUnderwaterPresentation } from './underwater.js';
+import { realmOf, sameRealm } from '../shared/underwater.js';
 import { upgradeWeapon } from './weapon-models.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
 import { hasWorldLineOfSight } from '../shared/collision.js';
-import { cameraTravel, scopeCameraPose, shipClearFraction } from './camera.js';
+import { cameraTravel, scopeCameraPose, shipClearFraction, reefCameraFraction } from './camera.js';
 import { SHIP_GUNS } from '../shared/airship.js';
 import { canReturnAtShrine } from '../shared/shrines.js';
 import { createAirshipPresentation, gunCameraPose, updateDeckCannons } from './airship.js';
@@ -505,14 +508,21 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.18;
   renderer.shadowMap.enabled = quality !== 'low'; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#85d9ee'); scene.fog = new THREE.Fog('#a2def0', 180, 610);
+  // The reef has independent fog and light. It shares the renderer and camera
+  // with shore so a realm switch cannot leave another WebGL context behind.
+  const reefScene = new THREE.Scene(); reefScene.background = new THREE.Color('#257f91'); reefScene.fog = new THREE.Fog('#2c8996', 18, 72);
   const camera = new THREE.PerspectiveCamera(53, 1, .12, 1100);
   const palette = makePalette(), preserve = new Set([palette.solid, palette.glow]);
+  const underwater = createUnderwaterPresentation({ palette, heightAt }); reefScene.add(underwater.group); scene.add(underwater.diveMarker);
   const random = seededRandom(SEED);
   const hemisphere = new THREE.HemisphereLight('#d9f6ff', '#779e7a', 2.2); scene.add(hemisphere);
   const sun = new THREE.DirectionalLight('#fff0d0', 2.7); sun.position.set(-70, 140, 80); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -.00025; sun.shadow.normalBias = .06;
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 10, far: 360 });
   sun.shadow.camera.updateProjectionMatrix(); scene.add(sun, sun.target);
+  const reefHemisphere = new THREE.HemisphereLight('#b9fbef', '#275b56', 2.25);
+  const reefSun = new THREE.DirectionalLight('#d9fff2', 1.8); reefSun.position.set(-18, 30, 12); reefSun.target.position.set(0, 0, -8);
+  reefScene.add(reefHemisphere, reefSun, reefSun.target);
   scene.add(buildTerrain(palette));
   const ocean = buildOcean(palette, random), scenery = buildScenery(palette, random), sky = buildSky(palette, random);
   scene.add(ocean.group, scenery.group, sky.group);
@@ -536,7 +546,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const players = new Map(), enemies = new Map(), chestModels = new Map(), shrineModels = new Map(), sideEventModels = new Map(), pingModels = new Map(), dropModels = new Map();
   const effects = [], pendingSurges = [], telegraphs = new Map(), discharges = new Map(), pendingImpacts = new Map();
   const remotePlayers = createRemoteInterpolation();
-  let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false;
+  let elapsed = 0, clockTime = 0, latestState = null, latestLocal = null, latestView = {}, disposed = false, cameraReady = false, renderedRealm = 'island';
   let cameraShipPose = null, cameraFollowPose = null, cameraGunId = null;
   let width = 1, height = 1, frameCount = 0, fps = 60, fpsElapsed = 0, lowQuality = quality === 'low';
   const direction = new THREE.Vector3(), right = new THREE.Vector3(), desiredCamera = new THREE.Vector3(), cameraTarget = new THREE.Vector3();
@@ -544,6 +554,15 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const cabinBounds = new THREE.Box3(new THREE.Vector3(-3.55, 0, 6.10), new THREE.Vector3(3.55, 2.85, 10.85));
   const cabinNearBounds = cabinBounds.clone().expandByScalar(.4);
   const cabinCamera = new THREE.Vector3(), cabinTorso = new THREE.Vector3(), cabinHit = new THREE.Vector3(), cabinRay = new THREE.Ray();
+  const activeRealm = () => realmOf(latestLocal);
+  const activeScene = () => activeRealm() === 'reef' ? reefScene : scene;
+  function clearRealmModels() {
+    for (const model of players.values()) { model.dispose?.(); disposeObject(model.group, preserve); }
+    for (const model of enemies.values()) { disposeObject(model.group, preserve); disposeObject(model.hpGroup, preserve); }
+    for (const model of dropModels.values()) disposeObject(model.group, preserve);
+    for (const model of pingModels.values()) disposeObject(model, preserve);
+    players.clear(); enemies.clear(); dropModels.clear(); pingModels.clear(); discharges.clear(); pendingImpacts.clear(); remotePlayers.clear();
+  }
 
   for (const chest of CHESTS) {
     const model = buildChest(palette), beam = makeBeam('#ffd473', 7, .26);
@@ -590,7 +609,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     effect.cleanup?.(); disposeObject(effect.object, preserve);
   }
   function addEffect(object, life, update, cleanup) {
-    scene.add(object); effects.push({ object, life, age: 0, update, cleanup });
+    activeScene().add(object); effects.push({ object, life, age: 0, update, cleanup });
     if (effects.length > 120) removeEffect(effects.shift());
     return object;
   }
@@ -628,6 +647,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   }
   function makeTelegraph(event) {
     if (!Number.isFinite(event.x) || !Number.isFinite(event.z)) return;
+    if (event.style === 'bubble' && activeRealm() === 'reef') {
+      const radius = event.radius || 2.4, bubble = new THREE.Mesh(new THREE.SphereGeometry(radius, 18, 14), new THREE.MeshBasicMaterial({ color: '#8df3df', transparent: true, opacity: .18, wireframe: true, depthWrite: false }));
+      bubble.name = 'reef-bubble-telegraph'; bubble.position.set(event.x, Number.isFinite(event.y) ? event.y : 3, event.z);
+      const duration = clamp(event.duration || 1.25, .2, 4);
+      addEffect(bubble, duration, (object, age) => { object.scale.setScalar(.82 + age / duration * .28); object.material.opacity = .12 + Math.sin(age * 18) * .08; });
+      if (event.id) telegraphs.set(event.id, clockTime + duration); return;
+    }
     // A skycrab shell already carries its own warning ring in the sky layer,
     // which counts down from the authoritative impact time and survives a late
     // join. Drawing the generic ring here too would double every telegraph.
@@ -691,7 +717,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const shotTime = typeof performance === 'undefined' ? clockTime : performance.now() / 1000;
     const previous = discharges.get(event.playerId);
     if (!previous || previous.weapon !== event.weapon || shotTime - previous.time >= .08) {
-      model?.fire?.(event.weapon); muzzleEffects(cannon ? null : model, from, shotDirection, cannon);
+      model?.fire?.(event.weapon);
+      if (activeRealm() === 'reef') {
+        const bubbles = underwater.shotBubbles(from, to); addEffect(bubbles.object, bubbles.life, (_, age) => bubbles.update(age));
+      } else muzzleEffects(cannon ? null : model, from, shotDirection, cannon);
       discharges.set(event.playerId, { weapon: event.weapon, time: shotTime });
     }
     const tracer = new THREE.Group(); tracer.name = 'bullet-tracer';
@@ -733,9 +762,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
 
   function handleEvent(event) {
     if (!event || disposed) return;
+    // Phase is global lifecycle cleanup even though older servers omit realm.
+    if (event.kind === 'phase') pendingSurges.length = 0;
+    // Realm-less legacy events are island events.  Never draw them into the
+    // separate reef scene (or draw a late reef event back on shore).
+    if (event.kind !== 'phase' && !sameRealm(event, latestLocal)) return;
     // A new phase (finale start, victory, restart) drops any surge foam still
     // waiting on its delay, so a fresh round never pops old ranks late.
-    if (event.kind === 'phase') pendingSurges.length = 0;
     if (event.kind === 'shot' && event.from && event.to) {
       if (![event.from.x, event.from.y, event.from.z, event.to.x, event.to.y, event.to.z].every(Number.isFinite)) return;
       showShot(event);
@@ -803,6 +836,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
         }
       }
     } else if (event.kind === 'telegraph') makeTelegraph(event);
+    else if (event.kind === 'bubble' && activeRealm() === 'reef') {
+      const radius = event.radius || 1.8, sphere = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), new THREE.MeshBasicMaterial({ color: '#b9fff0', transparent: true, opacity: .48, wireframe: true, depthWrite: false }));
+      sphere.position.set(event.x, event.y, event.z); addEffect(sphere, .52, (object, age) => { object.scale.setScalar(1 + age * .55); object.material.opacity = .48 * (1 - age / .52); });
+    }
     else if (event.kind === 'splash') {
       if (Number.isFinite(event.x) && Number.isFinite(event.z)) { pulse(event.x, event.z, '#b8eff2', event.radius || 4, .65); burst(event.x, (event.y || heightAt(event.x, event.z)) + .3, event.z, '#a2e5ed', 28, 1.9); }
     } else if (event.kind === 'melee') {
@@ -823,16 +860,17 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const seen = new Set();
     for (const source of state?.players || []) {
       if (!source.online && source.id !== localPlayer?.id) continue;
+      if (realmOf(source) !== realmOf(localPlayer)) continue;
       const isLocal = source.id === localPlayer?.id;
       const sample = isLocal ? null : remotePlayers.sample(source.id, time * 1000, shipPose);
       const player = isLocal ? localPlayer : sample?.player || source;
       seen.add(player.id);
       let model = players.get(player.id);
       if (!model) {
-        model = { ...buildPlayerCharacter(palette, player.color), flashUntil: 0 };
+        model = { ...(realmOf(player) === 'reef' ? buildMermaid(palette, player.color) : buildPlayerCharacter(palette, player.color)), flashUntil: 0 };
         model.group.userData.playerId = player.id;
         model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
-        scene.add(model.group); players.set(player.id, model);
+        activeScene().add(model.group); players.set(player.id, model);
       }
       model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
       model.speed = displayedSpeed(model.lastPose, player, dt, !!sample && model.generation !== sample.generation);
@@ -841,24 +879,25 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       model.lastPose = { ...player }; model.generation = sample?.generation;
       model.group.visible = !(isLocal && (view.scoped || player.gunId)) && (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
     }
-    for (const [id, model] of players) if (!seen.has(id)) { disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
+    for (const [id, model] of players) if (!seen.has(id)) { model.dispose?.(); disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
   }
   function updateEnemies(dt, state, time) {
     const seen = new Set();
     for (const enemy of state?.enemies || []) {
       if (enemy.hp <= 0) continue;
+      if (realmOf(enemy) !== activeRealm()) continue;
       seen.add(enemy.id); let model = enemies.get(enemy.id);
       if (!model) {
         const scale = enemy.scale || ENEMY_TYPES[enemy.type]?.scale || 1.0;
         model = { ...buildCrab(palette, enemy.type, scale), flashUntil: 0 };
-        model.group.position.set(enemy.x, enemy.y ?? heightAt(enemy.x, enemy.z), enemy.z);
+        model.group.position.set(enemy.x, enemy.y ?? (activeRealm() === 'reef' ? 3 : heightAt(enemy.x, enemy.z)), enemy.z);
         const hpGroup = new THREE.Group(), back = new THREE.Mesh(new THREE.PlaneGeometry(1.8, .17), new THREE.MeshBasicMaterial({ color: '#244657', transparent: true, opacity: .85, depthWrite: false }));
         const hp = new THREE.Mesh(new THREE.PlaneGeometry(1.72, .095), new THREE.MeshBasicMaterial({ color: '#ffcf7d', transparent: true, depthWrite: false })); hp.position.z = .012;
         back.renderOrder = 1; hp.renderOrder = 2;
-        hpGroup.add(back, hp); hpGroup.position.y = enemy.type === 'tempest' ? 8.8 : 2.0; scene.add(hpGroup); model.hpGroup = hpGroup; model.hpBar = hp; model.baseScale = scale;
-        scene.add(model.group); enemies.set(enemy.id, model);
+        hpGroup.add(back, hp); hpGroup.position.y = enemy.type === 'tempest' ? 8.8 : 2.0; activeScene().add(hpGroup); model.hpGroup = hpGroup; model.hpBar = hp; model.baseScale = scale;
+        activeScene().add(model.group); enemies.set(enemy.id, model);
       }
-      const goal = new THREE.Vector3(enemy.x, enemy.y ?? heightAt(enemy.x, enemy.z), enemy.z);
+      const goal = new THREE.Vector3(enemy.x, enemy.y ?? (activeRealm() === 'reef' ? 3 : heightAt(enemy.x, enemy.z)), enemy.z);
       model.group.position.lerp(goal, model.group.position.distanceTo(goal) > 12 ? 1 : 1 - Math.exp(-dt * 16));
       model.group.rotation.y += Math.atan2(Math.sin((enemy.yaw || 0) - model.group.rotation.y), Math.cos((enemy.yaw || 0) - model.group.rotation.y)) * (1 - Math.exp(-dt * 13));
       model.animate(time, enemy);
@@ -876,6 +915,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const reducedMotion = reducedMotionPreference.matches, objectiveTime = reducedMotion ? 0 : time;
     const seenDrops = new Set();
     for (const drop of state?.drops || []) {
+      if (realmOf(drop) !== activeRealm()) continue;
       if (!isLootVisible(drop, latestLocal) || !Object.hasOwn(WEAPONS, drop.weapon)) continue;
       seenDrops.add(drop.id);
       let model = dropModels.get(drop.id);
@@ -889,20 +929,22 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
         ring.position.y = .075;
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(.12, .36, 2.7, 10, 1, true), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .10, side: THREE.DoubleSide, depthWrite: false }));
         beam.position.y = 1.4;
-        group.add(gun, ring, beam); scene.add(group);
+        group.add(gun, ring, beam); activeScene().add(group);
         model = { group, gun, ring, beam }; dropModels.set(drop.id, model);
       }
-      model.group.position.set(drop.x, drop.y ?? heightAt(drop.x, drop.z), drop.z);
+      model.group.position.set(drop.x, drop.y ?? (activeRealm() === 'reef' ? 2 : heightAt(drop.x, drop.z)), drop.z);
       const motion = reducedMotionPreference.matches ? 0 : time;
       model.gun.position.y = 1.20 + Math.sin(motion * 1.7) * .11;
       model.gun.rotation.y = motion * .48 + .7;
       model.ring.material.opacity = .64 + Math.sin(motion * 1.7) * .10;
     }
     for (const [id, model] of dropModels) if (!seenDrops.has(id)) { disposeObject(model.group, preserve); dropModels.delete(id); }
-    for (const chest of state?.chests || []) { const model = chestModels.get(chest.id); if (model) model.opened = !!chest.opened; }
-    for (const model of chestModels.values()) {
-      model.animate(time, model.opened, { reducedMotion, dt }); model.beam.visible = !model.opened;
-      model.beam.userData.star.position.y = 1.9 + Math.sin(objectiveTime * 2.0) * .15; model.beam.userData.star.rotation.y = objectiveTime;
+    if (activeRealm() === 'island') {
+      for (const chest of state?.chests || []) { const model = chestModels.get(chest.id); if (model) model.opened = !!chest.opened; }
+      for (const model of chestModels.values()) {
+        model.animate(time, model.opened, { reducedMotion, dt }); model.beam.visible = !model.opened;
+        model.beam.userData.star.position.y = 1.9 + Math.sin(objectiveTime * 2.0) * .15; model.beam.userData.star.rotation.y = objectiveTime;
+      }
     }
     for (const shrine of SHRINES) {
       const model = shrineModels.get(shrine.id), status = state?.shrines?.find(s => s.id === shrine.id);
@@ -930,9 +972,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     lighthousePivot.rotation.y = time * .20; lighthouseRay.material.opacity = state?.phase === 'victory' ? .13 : .04;
     const seen = new Set();
     for (const ping of state?.pings || []) {
+      if (realmOf(ping) !== activeRealm()) continue;
       seen.add(ping.id); let marker = pingModels.get(ping.id);
-      if (!marker) { marker = makeBeam('#a6f2f1', 9, .22); scene.add(marker); pingModels.set(ping.id, marker); }
-      marker.position.set(ping.x, heightAt(ping.x, ping.z), ping.z); marker.userData.star.position.y = 2.4 + Math.sin(time * 3) * .25; marker.userData.star.rotation.y = time;
+      if (!marker) { marker = makeBeam('#a6f2f1', 9, .22); activeScene().add(marker); pingModels.set(ping.id, marker); }
+      marker.position.set(ping.x, ping.y ?? (activeRealm() === 'reef' ? 2 : heightAt(ping.x, ping.z)), ping.z); marker.userData.star.position.y = 2.4 + Math.sin(time * 3) * .25; marker.userData.star.rotation.y = time;
     }
     for (const [id, model] of pingModels) if (!seen.has(id)) { disposeObject(model, preserve); pingModels.delete(id); }
   }
@@ -964,6 +1007,25 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       direction.set(pose.direction.x, pose.direction.y, pose.direction.z);
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
       camera.fov = 55;
+    } else if (realmOf(player) === 'reef' || player.mode === 'swimming') {
+      const yaw = Number.isFinite(view.yaw) ? view.yaw : player.yaw || 0, pitch = clamp(Number.isFinite(view.pitch) ? view.pitch : player.pitch || 0, -1.18, 1.12);
+      direction.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+      if (view.scoped) {
+        const pose = scopeCameraPose(player, yaw, pitch);
+        camera.position.set(pose.origin.x, pose.origin.y, pose.origin.z); cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
+        camera.fov = reducedMotionPreference.matches ? SCOPE_FOV : camera.fov + (SCOPE_FOV - camera.fov) * (1 - Math.exp(-dt * 12));
+      } else {
+      // Swimming is a free 3D chase.  It uses the same y+1.25 eye/muzzle
+      // convention as authority and deliberately never samples island height.
+      const anchor = new THREE.Vector3(player.x, player.y + 1.25, player.z);
+      desiredCamera.copy(anchor).addScaledVector(direction, view.aiming ? -4.8 : -6.0).addScaledVector(right, .72);
+      const safeFraction = reefCameraFraction(anchor, desiredCamera);
+      if (safeFraction < 1) desiredCamera.lerpVectors(anchor, desiredCamera, safeFraction);
+      const snap = !cameraReady || travel.reset || camera.position.distanceTo(desiredCamera) > 30 || latestView.menu;
+      camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 14));
+      cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
+      camera.fov = smooth(camera.fov, view.aiming ? 46 : 53, dt * 9);
+      }
     } else if (view.scoped) {
       const pose = scopeCameraPose(player, view.yaw, view.pitch);
       camera.position.set(pose.origin.x, pose.origin.y, pose.origin.z);
@@ -1048,27 +1110,37 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     dt = clamp(Number.isFinite(dt) ? dt : .016, 0, .1); clockTime += dt;
     for (let i = pendingSurges.length - 1; i >= 0; i--) if (pendingSurges[i].at <= clockTime) pendingSurges.splice(i, 1)[0].fn();
     elapsed = state?.elapsed || 0; latestState = state; latestLocal = localPlayer;
+    const nextRealm = activeRealm();
+    if (nextRealm !== renderedRealm) {
+      for (const effect of [...effects]) removeEffect(effect);
+      effects.length = 0; clearRealmModels(); renderedRealm = nextRealm;
+    }
     const time = Number.isFinite(view.time) ? view.time : clockTime;
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
-    ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time, reducedMotionPreference.matches);
-    updateDeckCannons(ship, state, localPlayer, view, dt);
-    ocean.animate(time); sky.animate(time);
+    const reefActive = activeRealm() === 'reef';
+    if (!reefActive) {
+      ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time, reducedMotionPreference.matches);
+      updateDeckCannons(ship, state, localPlayer, view, dt); ocean.animate(time); sky.animate(time);
+    }
+    underwater.update(time, state, { lowQuality, reducedMotion: reducedMotionPreference.matches });
     updateCamera(dt, localPlayer, view, shipPose);
-    airship.update(dt, state, time, camera, reducedMotionPreference.matches, clockTime);
-    skyFinale.update(dt, state, time, camera, { reducedMotion: reducedMotionPreference.matches, lowQuality, effectTime: clockTime });
-    settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
-    oldWatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    windwardFarm.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    tideglassMarket.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    saltwindHarbor.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    driftwoodYard.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    palmheartCamp.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    cinderworks.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    moonwatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    island.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
-    environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady(), palmheartReady: palmheartCamp.isReady(), cinderworksReady: cinderworks.isReady(), moonwatchReady: moonwatch.isReady() });
+    if (!reefActive) {
+      airship.update(dt, state, time, camera, reducedMotionPreference.matches, clockTime);
+      skyFinale.update(dt, state, time, camera, { reducedMotion: reducedMotionPreference.matches, lowQuality, effectTime: clockTime });
+      settlements.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer, camera: camera.position });
+      oldWatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      windwardFarm.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      tideglassMarket.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      saltwindHarbor.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      driftwoodYard.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      palmheartCamp.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      cinderworks.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      moonwatch.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      island.animate(time, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
+      environmentLighting.update(localPlayer, { oldWatchReady: oldWatch.isReady(), farmReady: windwardFarm.isReady(), tideglassReady: tideglassMarket.isReady(), saltwindReady: saltwindHarbor.isReady(), driftwoodReady: driftwoodYard.isReady(), palmheartReady: palmheartCamp.isReady(), cinderworksReady: cinderworks.isReady(), moonwatchReady: moonwatch.isReady() });
+    }
     updatePlayers(dt, state, localPlayer, time, view, shipPose); updateEnemies(dt, state, time); updateObjectives(state, time, dt);
-    for (const mote of motes) {
+    if (!reefActive) for (const mote of motes) {
       const a = mote.phase + time * (mote.ember ? .1 : .16);
       mote.mesh.position.set(mote.center.x + Math.sin(a) * mote.radius, mote.center.y + (mote.ember ? (mote.rise + time * .7) % 7 : Math.sin(time * .5 + mote.phase) * 1.1 + mote.rise * .4), mote.center.z + Math.cos(a) * mote.radius);
       mote.mesh.material.opacity = .5 + Math.sin(time * 1.5 + mote.phase) * .3;
@@ -1085,7 +1157,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     if (fpsElapsed >= 1) { fps = Math.round(frameCount / fpsElapsed); frameCount = 0; fpsElapsed = 0; }
     latestView = { ...view };
   }
-  function render() { if (!disposed) renderer.render(scene, camera); }
+  function render() { if (!disposed) renderer.render(activeScene(), camera); }
   function resize() {
     const rect = canvas.getBoundingClientRect(); width = Math.max(1, rect.width || canvas.clientWidth || window.innerWidth); height = Math.max(1, rect.height || canvas.clientHeight || window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowQuality ? 1 : 1.5)); renderer.setSize(width, height, false);
@@ -1104,12 +1176,13 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, airship: airship.getStats(), sky: skyFinale.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', realm: activeRealm(), players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, underwater: underwater.getStats(), airship: airship.getStats(), sky: skyFinale.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
+    for (const model of players.values()) model.dispose?.();
     oldWatch.dispose(); airship.dispose();
     windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
-    disposeObject(scene); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
+    disposeObject(scene, preserve); disposeObject(reefScene, preserve); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     skyFinale.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();
   }

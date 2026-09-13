@@ -4,7 +4,7 @@ const lerp = (a, b, amount) => a + (b - a) * amount;
 const poseFields = ['x', 'y', 'z', 'pitch', 'deckX', 'deckZ', 'vy'];
 
 export function poseDiscontinuity(previous, current, dt = .05) {
-  if (!previous || previous.mode !== current.mode || (previous.gunId || null) !== (current.gunId || null)
+  if (!previous || previous.mode !== current.mode || (previous.realm || 'island') !== (current.realm || 'island') || (previous.gunId || null) !== (current.gunId || null)
     || !!previous.shipReturned !== !!current.shipReturned || !!previous.knockedUntil !== !!current.knockedUntil) return true;
   const aboard = current.mode === 'aboard';
   const dx = finite(current[aboard ? 'deckX' : 'x']) - finite(previous[aboard ? 'deckX' : 'x']);

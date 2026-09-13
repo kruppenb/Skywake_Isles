@@ -6,6 +6,9 @@ export const ENEMY_TYPES = Object.freeze(Object.fromEntries([
   // Optional-defense mini boss: a slow, armoured tide crab with a wide swipe.
   { id: 'tidebreaker', name: 'Tidebreaker crab', hp: 240, hpPerExtraPlayer: 30, radius: 1.25, scale: 1.9, attackRadius: 3.4, damage: 18, speed: 2.9, windup: 1, pearls: 15, supplyDamage: 14, miniBoss: true },
   { id: 'tempest', name: 'Tempest Crab', hp: 650, hpPerExtraPlayer: 180, radius: 2.4, scale: 3.1, attackRadius: 5.5, damage: 22, speed: 3, windup: 1.05, pearls: 60, boss: true },
+  // A slow hovering defender for Sunken Reach. Its ranged bubble is telegraphed
+  // by the ordinary public attackAt/state fields before it resolves.
+  { id: 'reef-guard', name: 'Reef guard', hp: 76, hpPerExtraPlayer: 12, radius: .9, scale: 1.15, attackRadius: 13, damage: 11, speed: 2.2, windup: 1.25, pearls: 5, ranged: true, hovering: true },
 ].map(type => [type.id, Object.freeze(type)])));
 
 export const enemyStats = type => ENEMY_TYPES[type] ?? ENEMY_TYPES.crab;

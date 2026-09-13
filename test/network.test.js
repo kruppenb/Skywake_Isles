@@ -212,7 +212,10 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     formationRadius = 1.3;
     t.diagnostic('Five pirates automatically equipped one persistent weapon; reconnect and a later arrival retained shared access.');
 
-    combat = true;
+    // Keep the controller from firing during the activation snapshot. This
+    // records the exact initial roster through the real network state, then
+    // turns ordinary aimed combat back on for the actual defense.
+    combat = false;
     for (const shrine of SHRINES) {
       destination = BEACON;
       await until(() => gathered(BEACON), 22000, 'walk to haven route junction', details);
@@ -221,7 +224,9 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
       crew[1].action('interact', shrine.id);
       await until(() => crew[1].state.shrines.find(s => s.id === shrine.id).status === 'active', 3000, `activate ${shrine.id}`);
       assert.equal(crew[1].state.shrines.find(s => s.id === shrine.id).remaining, 11);
+      combat = true;
       await until(() => crew.every(b => b.state.shrines.find(s => s.id === shrine.id).status === 'cleared'), 22000, `defeat ${shrine.id} guards and capture automatically`, details);
+      combat = false;
       t.diagnostic(`${shrine.name} captured automatically after aimed weapon fire cleared its defenders.`);
     }
     assert.ok(crew.every(b => b.state.shards === 3));
@@ -265,6 +270,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     assert.equal(crew[1].state.finale.stage, 1); assert.equal(crew[1].state.finale.stages, FINALE_STAGES.length);
     assert.equal(crew[1].state.bossId, null); assert.equal(crew[1].state.finale.remaining, stageOne);
     assert.ok(crew[1].events.some(e => e.kind === 'finale' && e.stage === 1 && e.spawns.length === stageOne && e.spawns.every(s => SHRINES.some(shrine => shrine.id === s.from))));
+    combat = true;
     await until(() => crew.every(b => b.state.finale?.stage === 2), 120000, 'stage one shrine crabs cleared', details);
     t.diagnostic('Stage one: shrine crabs cleared at the lighthouse dais.');
     const bossHp = await until(() => {

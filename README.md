@@ -31,19 +31,20 @@ Use a desktop or laptop with a keyboard, mouse, and a browser supporting WebGL2.
 
 | Control | Action |
 | --- | --- |
-| WASD or arrow keys | Move |
+| WASD or arrow keys | Move on land or swim horizontally |
 | Mouse | Look; click the game to capture the pointer |
 | Right mouse drag | Look when pointer capture is unavailable |
-| Shift | Sprint |
-| Space | Jump on the island; leave a deck cannon. It never throws you off the ship |
+| Shift | Sprint or swim faster |
+| Space | Jump on the island, rise underwater, or leave a deck cannon. It never throws you off the ship |
+| C | Dive underwater |
 | Left mouse (hold) | Fire the equipped blaster or mounted deck cannon |
 | F | Cutlass swing |
-| E | Man or leave a deck cannon, glide down from a marked jump gate, use an airship lift or captured shrine to return to the boat, activate a shrine, restore the lighthouse, or revive a nearby friend |
+| E | Man or leave a deck cannon, use a jump gate or lift, enter or leave Sunken Reach, activate an objective, or revive a nearby friend |
 | Q | Healing pulse for you and nearby crew |
 | R | Reload |
 | 1 / 2 / 3 / 4 / 5 | Flintlock / scatter blaster / tide repeater / burst carbine / longshot |
 | G | Mark your position for the crew |
-| M | Expand the island map |
+| M | Expand the map for your current area |
 | Enter | In the lobby: Set sail as captain, or mark yourself Ready, even while the mouse is captured |
 | Escape | Pause your controls and open help/settings |
 
@@ -58,6 +59,8 @@ You leave the ship on purpose, from a **jump gate**. Two are painted on the deck
 Press E beside a free deck cannon to man it. Several crew can shoot together from different stations; each gun has one operator. Aim with the mouse and hold left click to fire, with unlimited ammunition and a short reload between shots. E or Space leaves the gun and keeps you safely on deck; walk to a jump gate when you want to glide down. Eight harmless winged flying crabs orbit the ship as practice targets, take two cannon hits, and return seven seconds after being shot down. Practice targets fly during the voyage and the first three finale stages; practice awards no pearls or kills and never touches island enemies. In the final skycrab siege the practice crabs clear off and the same cannons become the only weapon that reaches the two giant skycrabs.
 
 To return, approach any captured shrine and press E: its inlaid runes and floating return marker light up cyan within reach, with an **E — Return to boat** prompt. The pale cyan lifts with brass rims and floating ↑ markers at Sunwake beach and beside Tideglass Lighthouse also remain available; both lifts are marked and named on the island map (M). Returning preserves health and equipment, and you stay aboard indefinitely until you walk to a jump gate and press E. The gates work exactly the same way on the opening voyage and on every later visit. You can return and glide down again throughout the adventure.
+
+The first underwater expedition, **Sunken Reach**, begins at the blue dive marker beside the safe landing beach on Sunwake Strand. Stand beside it and press **E** during the voyage. Below, WASD swims horizontally relative to your view, **Space** rises, **C** dives, and **Shift** swims faster; releasing movement leaves you hovering. Defeat the three reef guards, then swim into the broken wreck to collect its chest for shared pearls and a shared weapon drop. Your normal blasters, Longshot scope, cutlass and healing pulse all work underwater. The cyan return beacon at the entry point remains available throughout the expedition, so a player can return to shore before or after the chest opens. The island map marks the dive; while below, M switches to the wreck plan and shows only crewmates in Sunken Reach. The crew list labels friends who are in the other area. Starting the lighthouse finale returns anyone below to shore and closes the dive for that voyage.
 
 Branching footpaths lead to eight places with their own daily bustle: Saltwind Harbor's tavern and fishing boats, the striped awnings of Tideglass Market, Windward Farm's turning windmill, the ruins of Old Watch, Palmheart Camp, the caldera forge at Cinderworks, Moonwatch's observatory, and the hull under repair at Driftwood Yard. Friendly fishers, merchants, farmers, a smith, a lookout, a scholar, and shipwrights tend their work sites. Walk through the open doorways of nine furnished buildings to explore taverns, cottages, warehouses, a barn, forge, and barracks. Each contains a chest. Roofs cut away while you are inside, and pale gaps on map footprints mark entrances. Solid walls block movement, shots and interactions; open doors let you fight between indoors and outdoors.
 

@@ -3,6 +3,7 @@ import { SHIP_GUNS, SHIP_JUMP_POINTS, AIRSHIP_RETURNS, RETURN_RANGE, GUN_INTERAC
 import { canReturnAtShrine, SHRINE_RETURN_RANGE } from '../shared/shrines.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
+import { DIVE_ENTRANCE, REEF_SPAWN, REEF_EXIT, REEF_CHEST, reefLineOfSight, resolveReefCollision, realmOf, sameRealm } from '../shared/underwater.js';
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
@@ -12,16 +13,16 @@ import { SKY_STAGE_KIND, skyStageCleared } from '../shared/sky-finale.js';
 import { startSkyStage, tickSkyStage, settleSkyStage, skyCounts, skyStageNumber, publicSkyState, cancelSkyActivity, clearSkyStage, livingSkyBosses, damageSkyBoss } from './sky-finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
-const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'realm', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
 const PUBLIC_FLYING_TARGET = ['id', 'type', 'x', 'y', 'z', 'yaw', 'radius', 'hp', 'maxHp'];
-const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'scale', 'attackRadius'];
+const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'realm', 'scale', 'attackRadius'];
 const PUBLIC_SIDE_EVENT = ['id', 'status', 'wave', 'remaining', 'integrity', 'maxIntegrity', 'startedAt', 'endsAt', 'finishedAt'];
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const cleanObject = (value, keys) => Object.fromEntries(keys.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
 const good = () => ({ ok: true });
 const bad = (message, code = 'ACTION_DENIED') => ({ ok: false, message, code });
-const restInput = p => ({ forward: 0, right: 0, sprint: false, jump: false, yaw: p.yaw, pitch: p.pitch });
+const restInput = p => ({ forward: 0, right: 0, sprint: false, jump: false, dive: false, yaw: p.yaw, pitch: p.pitch });
 const sightPoint = (point, lift = 1) => ({ x: point.x, y: (point.y ?? heightAt(point.x, point.z)) + lift, z: point.z });
 const canReach = (from, to) => hasWorldLineOfSight(sightPoint(from, 1.25), sightPoint(to, 0.8));
 // Landed pirates open chests and collect (or salvage) guns by walking this close.
@@ -209,8 +210,8 @@ export function finaleGroupSpawns(groups, occupied = []) {
   return result;
 }
 
-function clipShotEndpoint(from, to) {
-  if (hasWorldLineOfSight(from, to)) return to;
+function clipShotEndpoint(from, to, sight = hasWorldLineOfSight) {
+  if (sight(from, to)) return to;
   let clear = 0, blocked = 1;
   const along = fraction => ({ x: from.x + (to.x - from.x) * fraction,
     y: from.y + (to.y - from.y) * fraction, z: from.z + (to.z - from.z) * fraction });
@@ -218,7 +219,7 @@ function clipShotEndpoint(from, to) {
   // stop even an 80m longshot within a centimetre of the first solid surface.
   for (let i = 0; i < 13; i++) {
     const middle = (clear + blocked) / 2;
-    if (hasWorldLineOfSight(from, along(middle))) clear = middle;
+    if (sight(from, along(middle))) clear = middle;
     else blocked = middle;
   }
   return along(clear);
@@ -260,6 +261,7 @@ export class Game {
     this.sideEvents = SIDE_EVENTS.map(event => ({ id: event.id, status: 'available', wave: 0, remaining: 0,
       integrity: 100, maxIntegrity: 100, startedAt: 0, endsAt: 0, finishedAt: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
+    this.underwater = { entered: false, completed: false, remaining: 0, chestOpened: false };
     // Stage 0 means the beacon is unlit; `stages` travels in the snapshot so a
     // client can label "stage 2/4" without importing the stage table. `_sky`
     // holds the airship stage's private lifecycle while it runs, and nothing
@@ -282,7 +284,7 @@ export class Game {
       reloadUntil: 0, healUntil: 0, knockedUntil: 0, invulnerableUntil: 0,
       lastInputSeq: -1, _receivedInputSeq: -1, kills: 0, rescues: 0, chests: 0,
       _fireAt: 0, _meleeAt: 0, _swapAt: 0, _pingAt: 0, _damageAt: -100, _burst: null,
-      _inputAt: -1, _input: { forward: 0, right: 0, sprint: false, jump: false, yaw: 0, pitch: 0 },
+      realm: 'island', _inputAt: -1, _input: { forward: 0, right: 0, sprint: false, jump: false, dive: false, yaw: 0, pitch: 0 },
     });
     const slot = [...this.players.keys()].indexOf(p.id);
     p.deckX = ((Math.max(slot, 0) % 3) - 1) * 2;
@@ -350,7 +352,7 @@ export class Game {
     p._receivedInputSeq = input.seq;
     p._input = { forward: clamp(input.forward, -1, 1), right: clamp(input.right, -1, 1),
       yaw: ((input.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI,
-      pitch: clamp(input.pitch, -1.35, 1.35), jump: input.jump === true, sprint: input.sprint === true };
+      pitch: clamp(input.pitch, -1.35, 1.35), jump: input.jump === true, dive: input.dive === true, sprint: input.sprint === true };
     const gun = SHIP_GUNS.find(station => station.id === p.gunId);
     if (gun) Object.assign(p._input, gunAim(gun, p._input.yaw, p._input.pitch));
     p.yaw = p._input.yaw; p.pitch = p._input.pitch; p._inputAt = this.clock;
@@ -600,27 +602,28 @@ export class Game {
     for (const [yawOffset, pitchOffset] of pellets) {
       const yaw = aim.yaw + yawOffset, pitch = aim.pitch + pitchOffset;
       const direction = { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: -Math.cos(yaw) * Math.cos(pitch) };
-      const hit = this.raycast(from, direction, w.range);
+      const hit = this.raycast(from, direction, w.range, realmOf(p));
       const to = hit ? { x: hit.x, y: hit.y + hit.radius * 0.8, z: hit.z } : clipShotEndpoint(from, {
         x: from.x + direction.x * w.range, y: from.y + direction.y * w.range, z: from.z + direction.z * w.range,
-      });
+      }, realmOf(p) === 'reef' ? reefLineOfSight : hasWorldLineOfSight);
       const damage = hit ? Math.min(hit.hp, w.damage) : 0;
-      this.emit({ kind: 'shot', playerId: p.id, from, to, weapon: p.weapon, ...(hit ? { hitId: hit.id, damage } : {}) });
+      this.emit({ kind: 'shot', playerId: p.id, from, to, weapon: p.weapon, realm: realmOf(p), ...(hit ? { hitId: hit.id, damage } : {}) });
       if (hit) this.damageEnemy(hit, w.damage, p.id);
     }
     if (!p.ammo) this.reload(p);
   }
 
-  raycast(from, direction, range) {
+  raycast(from, direction, range, realm = 'island') {
     let best = null, bestDistance = Infinity;
     for (const e of this.enemies.values()) {
-      if (e.hp <= 0) continue;
+      if (e.hp <= 0 || realmOf(e) !== realm) continue;
       const x = e.x - from.x, y = e.y + e.radius * 0.8 - from.y, z = e.z - from.z;
       const d = Math.hypot(x, y, z), along = x * direction.x + y * direction.y + z * direction.z;
       if (d > range + e.radius || along <= 0 || along >= bestDistance) continue;
       const offAxis = Math.sqrt(Math.max(0, d * d - along * along));
       if (offAxis > e.radius + Math.tan(8 * Math.PI / 180) * along) continue;
-      if (hasWorldLineOfSight(from, sightPoint(e, e.radius * 0.8))) { best = e; bestDistance = along; }
+      const target = realm === 'reef' ? { x: e.x, y: e.y + e.radius * 0.8, z: e.z } : sightPoint(e, e.radius * 0.8);
+      if ((realm === 'reef' ? reefLineOfSight : hasWorldLineOfSight)(from, target)) { best = e; bestDistance = along; }
     }
     return best;
   }
@@ -628,10 +631,11 @@ export class Game {
   melee(p) {
     if (this.elapsed + 1e-8 < p._meleeAt) return good();
     p._meleeAt = this.elapsed + 0.6;
-    this.emit({ kind: 'melee', playerId: p.id, x: p.x, y: p.y + 1, z: p.z, yaw: p.yaw });
+    this.emit({ kind: 'melee', playerId: p.id, x: p.x, y: p.y + 1, z: p.z, yaw: p.yaw, realm: realmOf(p) });
     for (const e of [...this.enemies.values()]) {
-      const d = distance(p, e);
-      if (d > 3 + e.radius || Math.abs(p.y - e.y) > 3 || !canReach(p, e)) continue;
+      const d = distance(p, e), vertical = Math.abs(p.y - e.y);
+      const visible = realmOf(p) === 'reef' ? reefLineOfSight(p, e) : canReach(p, e);
+      if (!sameRealm(p, e) || d > 3 + e.radius || vertical > 3 || !visible) continue;
       const dot = ((e.x - p.x) * -Math.sin(p.yaw) + (e.z - p.z) * -Math.cos(p.yaw)) / (d || 1);
       if (dot > 0.35 || d < 1.2) this.damageEnemy(e, 32, p.id);
     }
@@ -640,14 +644,15 @@ export class Game {
 
   damageEnemy(e, amount, sourceId) {
     if (e.hp <= 0 || !this.enemies.has(e.id)) return;
+    const source = this.players.get(sourceId); if (source && !sameRealm(source, e)) return;
     const damage = Math.min(e.hp, amount);
     e.hp -= damage;
-    this.emit({ kind: 'hit', targetId: e.id, damage, x: e.x, y: e.y + e.radius, z: e.z, sourceId });
+    this.emit({ kind: 'hit', targetId: e.id, damage, x: e.x, y: e.y + e.radius, z: e.z, sourceId, realm: realmOf(e) });
     if (e.hp > 0) return;
     this.enemies.delete(e.id);
     const p = this.players.get(sourceId); if (p) p.kills++;
     this.pearls += enemyStats(e.type).pearls;
-    this.emit({ kind: 'defeated', id: e.id, x: e.x, y: e.y, z: e.z, type: e.type });
+    this.emit({ kind: 'defeated', id: e.id, x: e.x, y: e.y, z: e.z, type: e.type, realm: realmOf(e) });
     // Minions are conjured by the boss rather than by a stage, so they leave
     // with it and never hold a stage open.
     if (e.type === 'tempest') for (const minion of [...this.enemies.values()]) if (minion._bossMinion) this.enemies.delete(minion.id);
@@ -655,30 +660,106 @@ export class Game {
     // stage wins in the same call.
     if (e._shrine) this.settleShrine(this.shrines.find(shrine => shrine.id === e._shrine));
     if (e._finale) this.settleFinale();
+    if (realmOf(e) === 'reef') this.underwater.remaining = [...this.enemies.values()].filter(other => realmOf(other) === 'reef' && other.hp > 0).length;
   }
 
   heal(p) {
     if (this.elapsed < p.healUntil) return good();
     p.healUntil = this.elapsed + 20;
-    for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) <= 9) ally.hp = Math.min(ally.maxHp, ally.hp + 35);
-    this.emit({ kind: 'heal', playerId: p.id });
+    for (const ally of this.players.values()) if (ally.online && sameRealm(p, ally) && !ally.knockedUntil &&
+      (realmOf(p) === 'reef' ? Math.hypot(p.x - ally.x, p.y - ally.y, p.z - ally.z) : distance(p, ally)) <= 9) ally.hp = Math.min(ally.maxHp, ally.hp + 35);
+    this.emit({ kind: 'heal', playerId: p.id, realm: realmOf(p) });
     return good();
   }
 
   ping(p) {
     if (this.elapsed < p._pingAt) return good();
     p._pingAt = this.elapsed + 1;
-    const ping = { id: `ping-${this.nextPingId++}`, playerId: p.id, x: p.x, z: p.z, expiresAt: this.elapsed + 8 };
+    const ping = { id: `ping-${this.nextPingId++}`, playerId: p.id, x: p.x, y: p.y, z: p.z, realm: realmOf(p), expiresAt: this.elapsed + 8 };
     this.pings = this.pings.filter(item => item.playerId !== p.id); this.pings.push(ping);
-    this.emit({ kind: 'ping', playerId: p.id, x: p.x, z: p.z });
+    this.emit({ kind: 'ping', playerId: p.id, x: p.x, y: p.y, z: p.z, realm: realmOf(p) });
     return good();
+  }
+
+  enterReef(p) {
+    const entrance = { ...DIVE_ENTRANCE, y: heightAt(DIVE_ENTRANCE.x, DIVE_ENTRANCE.z) };
+    if (this.phase !== 'voyage' || realmOf(p) !== 'island' || p.mode !== 'ground' || !p.grounded ||
+      Math.hypot(p.x - entrance.x, p.y - entrance.y, p.z - entrance.z) > DIVE_ENTRANCE.range || !canReach(p, entrance)) {
+      return bad('Stand at the Sunken Reach dive with a clear path from shore.', 'TOO_FAR');
+    }
+    this.releaseGun(p);
+    Object.assign(p, { ...REEF_SPAWN, realm: 'reef', mode: 'swimming', grounded: false, vy: 0, yaw: Math.atan2(-(REEF_CHEST.x - REEF_SPAWN.x), -(REEF_CHEST.z - REEF_SPAWN.z)), pitch: 0,
+      launchVx: 0, launchVz: 0, jumpHeld: false, _burst: null });
+    p._input = restInput(p); p._inputAt = this.clock;
+    if (!this.underwater.entered) {
+      this.underwater.entered = true;
+      for (const point of [{ x: 0, y: 8, z: 3 }, { x: 17, y: 8, z: -7 }, { x: 8, y: 8, z: -17 }]) this.spawnReefEnemy(point);
+      this.underwater.remaining = 3;
+    }
+    this.emit({ kind: 'dive', playerId: p.id, realm: 'reef', id: DIVE_ENTRANCE.id });
+    return good();
+  }
+
+  returnFromReef(p) {
+    if (!['voyage', 'finale'].includes(this.phase) || realmOf(p) !== 'reef' || p.mode !== 'swimming' ||
+      Math.hypot(p.x - REEF_EXIT.x, p.y - REEF_EXIT.y, p.z - REEF_EXIT.z) > REEF_EXIT.range || !reefLineOfSight(p, REEF_EXIT)) {
+      return bad('Swim to the return current with a clear route.', 'TOO_FAR');
+    }
+    this.placeOnIsland(p);
+    this.emit({ kind: 'reef-return', playerId: p.id, realm: 'island', id: REEF_EXIT.id });
+    return good();
+  }
+
+  placeOnIsland(p) {
+    this.releaseGun(p);
+    Object.assign(p, { x: 14, z: 103, y: heightAt(14, 103), realm: 'island', mode: 'ground', grounded: true, vy: 0, yaw: 0, pitch: -.16,
+      launchVx: 0, launchVz: 0, jumpHeld: false, _burst: null });
+    p._input = restInput(p); p._inputAt = this.clock;
+  }
+
+  returnReefCrew() {
+    for (const p of this.players.values()) if (realmOf(p) === 'reef') this.placeOnIsland(p);
+    for (const e of [...this.enemies.values()]) if (realmOf(e) === 'reef') this.enemies.delete(e.id);
+    this.underwater.remaining = 0;
+  }
+
+  spawnReefEnemy({ x, y, z }) {
+    const stats = enemyStats('reef-guard'), point = resolveReefCollision({ x, y, z }, stats.radius);
+    const hp = stats.hp + (stats.hpPerExtraPlayer ?? 0) * Math.max(0, this.onlineCount - 1);
+    const e = { id: `enemy-${this.nextEnemyId++}`, type: 'reef-guard', x: point.x, y: point.y, z: point.z, yaw: 0,
+      hp, maxHp: hp, radius: stats.radius, scale: stats.scale, attackRadius: stats.attackRadius, zone: 'sunken-reach', realm: 'reef',
+      state: 'idle', attackAt: 0, _home: { x: point.x, y: point.y, z: point.z }, _nextAttack: this.elapsed + 1.2, _attack: null, _endAttack: 0 };
+    this.enemies.set(e.id, e);
+    return e;
+  }
+
+  openReefChest(p) {
+    if (this.underwater.chestOpened || this.underwater.remaining || realmOf(p) !== 'reef' ||
+      Math.hypot(p.x - REEF_CHEST.x, p.y - REEF_CHEST.y, p.z - REEF_CHEST.z) > 3.5 || !reefLineOfSight(p, REEF_CHEST)) return false;
+    this.underwater.chestOpened = true; this.underwater.completed = true; p.chests++; this.pearls += CHEST_PEARLS;
+    for (const ally of this.players.values()) if (ally.online && sameRealm(p, ally) && !ally.knockedUntil &&
+      Math.hypot(p.x - ally.x, p.y - ally.y, p.z - ally.z) < 10) ally.hp = Math.min(ally.maxHp, ally.hp + 22);
+    const rolled = rollWeapon(this.random), drop = { ...REEF_CHEST, id: `drop-${this.round}-${REEF_CHEST.id}`, ...rolled, realm: 'reef' };
+    this.drops.push(drop);
+    this.emit({ kind: 'chest', id: REEF_CHEST.id, playerId: p.id, pearls: CHEST_PEARLS, ...rolled, dropId: drop.id, realm: 'reef' });
+    return true;
   }
 
   interact(p, target) {
     if (p.mode === 'aboard') return this.interactAboard(p, target);
+    if (realmOf(p) === 'reef') {
+      // A fallen nearby crewmate takes precedence for an untargeted E; an
+      // explicit id constrains every option so it can never revive by accident.
+      const ally = [...this.players.values()].find(other => other.id !== p.id && other.online && other.knockedUntil && sameRealm(p, other) &&
+        (!target || target === other.id) && Math.hypot(p.x - other.x, p.y - other.y, p.z - other.z) <= 3.5 && reefLineOfSight(p, other));
+      if (ally) { this.revive(ally, p); return good(); }
+      if ((!target || target === REEF_EXIT.id) && Math.hypot(p.x - REEF_EXIT.x, p.y - REEF_EXIT.y, p.z - REEF_EXIT.z) <= REEF_EXIT.range && reefLineOfSight(p, REEF_EXIT)) return this.returnFromReef(p);
+      if ((!target || target === REEF_CHEST.id) && this.openReefChest(p)) return good();
+      return bad('Swim closer to the return current, treasure, or a fallen crewmate.', 'TOO_FAR');
+    }
     if (p.mode !== 'ground') return bad('Land near the treasure to interact.', 'TOO_FAR');
     const options = [];
-    for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
+    for (const ally of this.players.values()) if (ally.id !== p.id && ally.online && ally.knockedUntil && sameRealm(p, ally)) options.push({ id: ally.id, kind: 'revive', data: ally, range: 3.5, point: ally });
     if (p.grounded) for (const point of AIRSHIP_RETURNS) {
       if (Math.hypot(p.x - point.x, p.y - heightAt(point.x, point.z), p.z - point.z) <= RETURN_RANGE) {
         options.push({ id: point.id, kind: 'airship-return', range: RETURN_RANGE, point });
@@ -689,7 +770,7 @@ export class Game {
     for (const chest of this.chests) if (!chest.opened) options.push({ id: chest.id, kind: 'chest', data: chest, range: 3.5, point: CHEST_POINTS.get(chest.id) });
     // Retained weapons must not mask nearby E interactions. Explicit drop
     // targets remain supported for clients that still send pickup actions.
-    if (target) for (const drop of this.drops) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
+    if (target) for (const drop of this.drops) if (sameRealm(p, drop)) options.push({ id: drop.id, kind: 'loot', data: drop, range: 3.5, point: drop });
     for (const shrine of this.shrines) {
       const point = SHRINES.find(s => s.id === shrine.id);
       if (shrine.status === 'dormant') options.push({ id: shrine.id, kind: 'shrine', data: shrine, range: 4, point });
@@ -702,6 +783,7 @@ export class Game {
       }
     }
     if (this.shards === 3 && this.phase === 'voyage') options.push({ id: BEACON.id, kind: 'beacon', range: 4, point: BEACON });
+    if (this.phase === 'voyage') options.push({ id: DIVE_ENTRANCE.id, kind: 'reef-dive', range: DIVE_ENTRANCE.range, point: { ...DIVE_ENTRANCE, y: heightAt(DIVE_ENTRANCE.x, DIVE_ENTRANCE.z) } });
     const reachable = options.filter(o => (!target || o.id === target) && distance(p, o.point) <= o.range &&
       (o.kind === 'airship-return' || Math.abs(p.y - (o.point.y ?? heightAt(o.point.x, o.point.z))) < 3) && canReach(p, o.point));
     reachable.sort((a, b) => (a.kind === 'revive' ? -10 : distance(p, a.point)) - (b.kind === 'revive' ? -10 : distance(p, b.point)));
@@ -709,6 +791,7 @@ export class Game {
     if (!option) return bad(target === BEACON.id && this.shards < 3 ? 'Find all three compass shards first.' : 'Move closer with a clear path to treasure, a shrine, or a fallen friend.', 'TOO_FAR');
     if (option.kind === 'revive') { this.revive(option.data, p); return good(); }
     if (option.kind === 'airship-return') return this.returnToAirship(p, option.point, option.range);
+    if (option.kind === 'reef-dive') return this.enterReef(p);
     if (option.kind === 'side-event') return this.startSideEvent(p, option.id);
     if (option.kind === 'loot') return this.pickupWeapon(p, option.data);
     if (option.kind === 'chest') this.openChest(p, option.data, option.point);
@@ -722,6 +805,7 @@ export class Game {
       option.data.remaining = n;
       this.emit({ kind: 'shrine', id: option.id, status: 'active' });
     } else if (option.kind === 'beacon') {
+      this.returnReefCrew();
       this.phase = 'finale';
       for (const event of this.sideEvents) if (event.status === 'active') this.finishSideEvent(event, 'cancelled');
       // The crew that lights the beacon is the crew every stage is sized for.
@@ -734,11 +818,11 @@ export class Game {
 
   openChest(p, chest, point = CHEST_POINTS.get(chest.id)) {
     chest.opened = true; p.chests++; this.pearls += CHEST_PEARLS;
-    for (const ally of this.players.values()) if (ally.online && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
+    for (const ally of this.players.values()) if (ally.online && sameRealm(p, ally) && !ally.knockedUntil && distance(p, ally) < 10) ally.hp = Math.min(100, ally.hp + 22);
     const rolled = rollWeapon(this.random);
-    const drop = { id: `drop-${this.round}-${chest.id}`, ...rolled, x: point.x, y: point.y, z: point.z };
+    const drop = { id: `drop-${this.round}-${chest.id}`, ...rolled, x: point.x, y: point.y, z: point.z, realm: 'island' };
     this.drops.push(drop);
-    this.emit({ kind: 'chest', id: chest.id, playerId: p.id, pearls: CHEST_PEARLS, ...rolled, dropId: drop.id });
+    this.emit({ kind: 'chest', id: chest.id, playerId: p.id, pearls: CHEST_PEARLS, ...rolled, dropId: drop.id, realm: 'island' });
   }
 
   startSideEvent(p, id) {
@@ -945,7 +1029,7 @@ export class Game {
     const point = resolveWorldCollision({ x, y: heightAt(x, z), z }, boss ? 1.7 : stats.miniBoss ? 1.2 : 0.8);
     x = point.x; z = point.z;
     const hp = stats.hp + (stats.hpPerExtraPlayer ?? 0) * Math.max(0, crewCount - 1);
-    const e = { id: `enemy-${this.nextEnemyId++}`, type, x, y: heightAt(x, z), z, yaw: 0, hp, maxHp: hp,
+    const e = { id: `enemy-${this.nextEnemyId++}`, type, x, y: heightAt(x, z), z, yaw: 0, hp, maxHp: hp, realm: 'island',
       radius: stats.radius, scale: stats.scale,
       state: 'idle', attackAt: 0, attackRadius: stats.attackRadius, zone,
       _home: { x, z }, _shrine: shrine, _camp: null, _patrolIndex: 0, _nextAttack: this.elapsed + 1.4, _attack: null,
@@ -955,9 +1039,10 @@ export class Game {
   }
 
   damagePlayer(p, amount, sourceId) {
-    if (!p.online || p.knockedUntil || p.mode === 'aboard' || this.elapsed < p.invulnerableUntil) return;
+    const source = this.enemies.get(sourceId);
+    if (!p.online || p.knockedUntil || p.mode === 'aboard' || this.elapsed < p.invulnerableUntil || (source && !sameRealm(p, source))) return;
     p.hp = Math.max(0, p.hp - amount); p._damageAt = this.elapsed;
-    this.emit({ kind: 'hit', targetId: p.id, damage: amount, x: p.x, y: p.y + 1, z: p.z, sourceId });
+    this.emit({ kind: 'hit', targetId: p.id, damage: amount, x: p.x, y: p.y + 1, z: p.z, sourceId, realm: realmOf(p) });
     if (!p.hp) {
       p.knockedUntil = this.elapsed + 8; p._input = restInput(p); p._burst = null;
       this.emit({ kind: 'downed', playerId: p.id });
@@ -966,7 +1051,10 @@ export class Game {
 
   revive(p, by = null) {
     p.hp = 65; p.knockedUntil = 0; p.invulnerableUntil = this.elapsed + 3; p._damageAt = this.elapsed;
-    if (!by) {
+    if (!by && realmOf(p) === 'reef' && this.phase === 'voyage') {
+      Object.assign(p, { ...REEF_SPAWN, realm: 'reef', mode: 'swimming', grounded: false, vy: 0, yaw: Math.atan2(-(REEF_CHEST.x - REEF_SPAWN.x), -(REEF_CHEST.z - REEF_SPAWN.z)), pitch: 0,
+        launchVx: 0, launchVz: 0 });
+    } else if (!by) {
       let slot = Math.max(0, [...this.players.keys()].indexOf(p.id));
       // The sky stage's haven checkpoint authors exactly MAX_PLAYERS slots. The
       // players Map can be longer when disconnected characters are still
@@ -980,7 +1068,7 @@ export class Game {
       p.y = heightAt(p.x, p.z); p.mode = 'ground'; p.grounded = true; p.vy = 0;
     } else by.rescues++;
     p._input = restInput(p);
-    this.emit({ kind: 'revive', playerId: p.id, ...(by ? { by: by.id } : {}) });
+    this.emit({ kind: 'revive', playerId: p.id, realm: realmOf(p), ...(by ? { by: by.id } : {}) });
   }
 
   tick(dt = 0.05) {
@@ -1000,7 +1088,7 @@ export class Game {
       if (mounted && p.gunId !== mounted) this.releaseGun(p);
       p.lastInputSeq = p._receivedInputSeq;
       if (p.reloadUntil && this.elapsed + 1e-8 >= p.reloadUntil) { p.ammo = p.maxAmmo; p.inventory[p.weapon].ammo = p.ammo; p.reloadUntil = 0; }
-      if ((this.phase === 'voyage' || this.phase === 'finale') && p.hp > 0 && p.mode === 'ground' && p.grounded) {
+      if ((this.phase === 'voyage' || this.phase === 'finale') && p.hp > 0 && p.mode === 'ground' && p.grounded && realmOf(p) === 'island') {
         // Walking over treasure opens it, and its gun is collected or salvaged
         // on the same tick; no key press is needed for either.
         for (const chest of this.chests) {
@@ -1009,8 +1097,13 @@ export class Game {
           if (distance(p, point) <= PICKUP_RADIUS && Math.abs(p.y - point.y) < 3 && canReach(p, point)) this.openChest(p, chest, point);
         }
         for (const drop of this.drops) {
+          if (!sameRealm(p, drop)) continue;
           if (distance(p, drop) <= PICKUP_RADIUS && Math.abs(p.y - drop.y) < 3 && canReach(p, drop)) this.pickupWeapon(p, drop);
         }
+      }
+      if (this.phase === 'voyage' && p.hp > 0 && realmOf(p) === 'reef' && p.mode === 'swimming') {
+        this.openReefChest(p);
+        for (const drop of this.drops) if (sameRealm(p, drop) && Math.hypot(p.x - drop.x, p.y - drop.y, p.z - drop.z) <= PICKUP_RADIUS && reefLineOfSight(p, drop)) this.pickupWeapon(p, drop);
       }
       if (p._burst && (p.weapon !== p._burst.weapon || p.rarity !== p._burst.rarity || p.mode === 'aboard')) p._burst = null;
       if (p._burst && this.elapsed + 1e-8 >= p._burst.nextAt) {
@@ -1047,6 +1140,7 @@ export class Game {
   tickEnemy(e, dt) {
     const t = this.elapsed;
     if (!this.enemies.has(e.id)) return;
+    if (realmOf(e) === 'reef') return this.tickReefEnemy(e, dt);
     const defense = e._sideEvent ? this.sideEvents.find(event => event.id === e._sideEvent) : null;
     const supplies = defense ? SIDE_EVENTS.find(point => point.id === defense.id) : null;
     if (e._sideEvent && (defense?.status !== 'active' || defense.integrity <= 0)) return;
@@ -1143,6 +1237,48 @@ export class Game {
     e.y = heightAt(e.x, e.z);
   }
 
+  tickReefEnemy(e, dt) {
+    const t = this.elapsed, stats = enemyStats(e.type);
+    // The entry current is a safe pocket. A guard only sees swimmers who have
+    // left it and are still within its bounded wreck patrol.
+    const living = [...this.players.values()].filter(p => p.online && p.hp > 0 && !p.knockedUntil && sameRealm(p, e) &&
+      Math.hypot(p.x - REEF_SPAWN.x, p.y - REEF_SPAWN.y, p.z - REEF_SPAWN.z) > 8 &&
+      Math.hypot(p.x - e._home.x, p.y - e._home.y, p.z - e._home.z) < 28);
+    living.sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z));
+    const target = living[0];
+    if (e.state === 'windup') {
+      if (t + 1e-8 < e.attackAt) return;
+      const a = e._attack;
+      for (const p of living) if (Math.hypot(p.x - a.x, p.y - a.y, p.z - a.z) <= a.radius && reefLineOfSight(e, p)) this.damagePlayer(p, stats.damage, e.id);
+      this.emit({ kind: 'bubble', id: e.id, x: a.x, y: a.y, z: a.z, radius: a.radius, style: 'bubble', realm: 'reef' });
+      e.state = 'attack'; e._endAttack = t + .25; e._nextAttack = t + 2.3;
+      return;
+    }
+    if (e.state === 'attack') { if (t < e._endAttack) return; e.state = 'idle'; }
+    if (!target) {
+      const hx = e._home.x - e.x, hy = e._home.y - e.y, hz = e._home.z - e.z, homeDistance = Math.hypot(hx, hy, hz);
+      if (homeDistance > .1) {
+        const step = Math.min(homeDistance, stats.speed * dt);
+        e.x += hx / homeDistance * step; e.y += hy / homeDistance * step; e.z += hz / homeDistance * step;
+        resolveReefCollision(e, e.radius);
+      }
+      e.state = 'idle'; return;
+    }
+    const dx = target.x - e.x, dy = target.y - e.y, dz = target.z - e.z, d = Math.hypot(dx, dy, dz);
+    e.yaw = Math.atan2(-dx, -dz);
+    if (d < stats.attackRadius && reefLineOfSight(e, target) && t >= e._nextAttack) {
+      e._attack = { x: target.x, y: target.y, z: target.z, radius: 2.4 };
+      e.state = 'windup'; e.attackAt = t + stats.windup;
+      this.emit({ kind: 'telegraph', id: e.id, x: target.x, y: target.y, z: target.z, radius: 2.4, duration: stats.windup, style: 'bubble', realm: 'reef' });
+      return;
+    }
+    if (d < 5 || !reefLineOfSight(e, target)) { e.state = 'idle'; return; }
+    const step = Math.min(d, stats.speed * dt);
+    e.x += dx / d * step; e.y += dy / d * step; e.z += dz / d * step;
+    resolveReefCollision(e, e.radius);
+    e.state = 'chase';
+  }
+
   win() {
     if (this.phase === 'victory') return;
     // However victory is reached, the sky stage ends with it: no boss, shell,
@@ -1169,8 +1305,9 @@ export class Game {
       sideEvents: this.sideEvents.map(event => cleanObject(event, PUBLIC_SIDE_EVENT)),
       // `sky` is a fresh bounded copy and appears only while that stage runs.
       finale: { ...cleanObject(this.finale, ['stage', 'stages', 'remaining']), ...(sky ? { sky } : {}) },
-      shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z'])),
+      shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z', 'realm'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
-      pings: this.pings.map(p => ({ ...p })), stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };
+      pings: this.pings.map(p => ({ ...p })), underwater: { entered: !!this.underwater.entered, completed: !!this.underwater.completed,
+        remaining: Math.max(0, this.underwater.remaining | 0), chestOpened: !!this.underwater.chestOpened }, stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };
   }
 }
