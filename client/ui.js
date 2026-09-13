@@ -1045,7 +1045,7 @@ export function createUI(callbacks = {}) {
       refs.reticle.classList.toggle('reloading', presentation.reloading);
       show(refs['look-hint'], presentation.active && (!view.locked || player?.weapon === 'longshot'));
       text(refs['look-hint'], player?.gunId ? 'Hold right mouse to aim · Hold click fire · E or Space leaves the gun'
-        : player?.mode === 'swimming' ? 'WASD swim · Space rise · C dive · Shift surge · Hold right mouse to aim'
+        : player?.mode === 'swimming' ? 'Look to steer · WASD swim · Space rise · C dive · Shift surge'
         : presentation.scoped ? 'Release right mouse to leave scope · R reload · Esc menu'
         : player?.weapon === 'longshot' ? 'Hold right mouse to scope Longshot · R reload · Esc menu'
           : 'Click to aim · Hold right mouse to look · R reload · Esc menu');

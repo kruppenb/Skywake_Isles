@@ -29,14 +29,20 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
   if (p.mode === 'swimming' || p.realm === 'reef') {
     p.realm = 'reef'; p.mode = 'swimming'; p.gunId = null; p.launchVx = 0; p.launchVz = 0;
     const up = Number(input.jump === true) - Number(input.dive === true);
-    const magnitude = Math.hypot(dx, up, dz);
+    // Forward/back follows the full look direction; strafing stays level and
+    // Space/C add world-vertical movement independently of where we look.
+    const swimForward = forward * Math.cos(p.pitch);
+    const swimX = -Math.sin(p.yaw) * swimForward + Math.cos(p.yaw) * right;
+    const swimY = Math.sin(p.pitch) * forward + up;
+    const swimZ = -Math.cos(p.yaw) * swimForward - Math.sin(p.yaw) * right;
+    const magnitude = Math.hypot(swimX, swimY, swimZ);
     const swimSpeed = input.sprint ? 12 : 8;
     if (magnitude > .000001) {
       const divisor = Math.max(1, magnitude);
-      p.x = finite(p.x, REEF_SPAWN.x) + dx / divisor * swimSpeed * dt;
-      p.y = finite(p.y, REEF_SPAWN.y) + up / divisor * swimSpeed * dt;
-      p.z = finite(p.z, REEF_SPAWN.z) + dz / divisor * swimSpeed * dt;
-      p.vy = up / divisor * swimSpeed;
+      p.x = finite(p.x, REEF_SPAWN.x) + swimX / divisor * swimSpeed * dt;
+      p.y = finite(p.y, REEF_SPAWN.y) + swimY / divisor * swimSpeed * dt;
+      p.z = finite(p.z, REEF_SPAWN.z) + swimZ / divisor * swimSpeed * dt;
+      p.vy = swimY / divisor * swimSpeed;
     } else {
       p.x = finite(p.x, REEF_SPAWN.x); p.y = finite(p.y, REEF_SPAWN.y); p.z = finite(p.z, REEF_SPAWN.z); p.vy = 0;
     }

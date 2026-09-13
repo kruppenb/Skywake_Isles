@@ -50,6 +50,10 @@ test('two sockets split realms, swim, reconnect, and share one reef chest', asyn
     a.input({ jump: true, sprint: true });
     const startY = a.player().y;
     await until(() => a.player().y > startY, 'authoritative 3D swim input');
+    const beforeLookSwim = { ...a.player() };
+    a.input({ forward: 1, yaw: Math.PI / 2, pitch: .6 });
+    await until(() => a.player().y > beforeLookSwim.y + .2 && a.player().x < beforeLookSwim.x - .2,
+      'forward input swims up along the networked look direction without jump or dive');
     a.input();
     const token = a.token; a.close();
     await until(() => server.game.players.get(a.id)?.online === false, 'reef disconnect');

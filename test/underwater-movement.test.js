@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { movePlayer } from '../shared/movement.js';
 import { REEF_BOUNDS, REEF_SOLIDS, REEF_SWIMMER_BODY, reefLineOfSight, resolveReefCollision, resolveReefSwimmerCollision } from '../shared/underwater.js';
 
+const freeSwimmer = () => ({ realm: 'reef', mode: 'swimming', x: -18, y: 8, z: 20, yaw: 0, pitch: 0 });
+
+test('forward and backward swimming follow look pitch and yaw without vertical keys', () => {
+  for (const pitch of [-Math.PI / 6, 0, Math.PI / 6]) for (const yaw of [0, Math.PI / 2]) for (const forward of [-1, .5, 1]) {
+    const swimmer = freeSwimmer(), before = { ...swimmer };
+    movePlayer(swimmer, { forward, yaw, pitch }, .05);
+    const travel = .4 * forward;
+    assert.ok(Math.abs(swimmer.x - before.x + Math.sin(yaw) * Math.cos(pitch) * travel) < 1e-8);
+    assert.ok(Math.abs(swimmer.y - before.y - Math.sin(pitch) * travel) < 1e-8, 'look pitch steers depth with no Space/C');
+    assert.ok(Math.abs(swimmer.z - before.z + Math.cos(yaw) * Math.cos(pitch) * travel) < 1e-8);
+  }
+});
+
+test('looking alone hovers, strafing stays level, and Space/C remain world-vertical controls', () => {
+  for (const pitch of [-1, 1]) {
+    const swimmer = freeSwimmer(), before = { ...swimmer };
+    movePlayer(swimmer, { pitch, yaw: 0 }, .05);
+    assert.deepEqual([swimmer.x, swimmer.y, swimmer.z], [before.x, before.y, before.z]);
+    movePlayer(swimmer, { right: 1, pitch, yaw: 0 }, .05);
+    assert.ok(swimmer.x > before.x); assert.equal(swimmer.y, before.y); assert.equal(swimmer.z, before.z);
+    const x = swimmer.x;
+    movePlayer(swimmer, { jump: true, pitch, yaw: 0 }, .05);
+    assert.ok(Math.abs(swimmer.y - before.y - .4) < 1e-8);
+    movePlayer(swimmer, { dive: true, pitch, yaw: 0 }, .05);
+    assert.ok(Math.abs(swimmer.y - before.y) < 1e-8);
+    assert.equal(swimmer.x, x); assert.equal(swimmer.z, before.z);
+  }
+});
+
+test('combined pitched swimming, strafing and vertical controls respect normal and surge speed caps', () => {
+  for (const sprint of [false, true]) for (const pitch of [-1, 0, 1]) for (const jump of [false, true]) for (const dive of [false, true]) {
+    const swimmer = freeSwimmer(), before = { ...swimmer };
+    movePlayer(swimmer, { forward: 1, right: 1, jump, dive, sprint, yaw: .4, pitch }, .05);
+    const distance = Math.hypot(swimmer.x - before.x, swimmer.y - before.y, swimmer.z - before.z);
+    assert.ok(distance <= (sprint ? .6 : .4) + 1e-8, 'combined inputs cannot boost speed beyond the swim cap');
+  }
+});
+
 test('Sunken Reach swimming stays finite, bounded, and truly three dimensional', () => {
   const swimmer = { realm: 'reef', mode: 'swimming', x: -18, y: 6, z: 20, yaw: 0, pitch: 0 };
   movePlayer(swimmer, { forward: 1, right: 1, jump: true, dive: false, sprint: true, yaw: 0, pitch: 0 }, .05);

@@ -230,7 +230,7 @@ function receiveState(next) {
   if (traveled) {
     input.setView(authoritative.yaw || 0, authoritative.realm === 'reef' ? 0 : -.16);
     ui.toast(authoritative.realm === 'reef'
-      ? 'Welcome to Sunken Reach. Swim with WASD, hold Space to rise, C to dive, and Shift to surge.'
+      ? 'Welcome to Sunken Reach. Look to steer your swim with W/S; A/D strafe, Space rises, C dives, and Shift surges.'
       : state.phase === 'voyage' ? 'Back on Sunwake Strand. The Sunken Reach dive remains open.' : 'Back on Sunwake Strand. The final battle has begun.');
   }
   synchronizeInput();

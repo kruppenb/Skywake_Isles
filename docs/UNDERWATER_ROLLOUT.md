@@ -11,7 +11,7 @@ Sunken Reach is a bounded realm below the safe landing beach. Its shore entrance
 Implemented scope:
 
 - A separate reef realm with 3D swimming, bounded movement, wreck collision, realm-specific line of sight, and no island height or collision queries below.
-- WASD horizontal swimming relative to view, Space to rise, C to dive, Shift for faster swimming, and neutral hover when movement is released.
+- W/S swimming along the full look direction, including pitch, A/D level strafing, Space to rise, C to dive, Shift for faster swimming, and neutral hover when movement is released. Combined inputs stay within the swim speed cap.
 - Three finite reef guards, ordinary underwater gun/cutlass/heal combat, same-realm 3D revives, and realm-isolated enemy behavior and damage.
 - A wreck chest that becomes collectible after all guards fall, opens once per voyage, and grants shared pearls plus the ordinary shared weapon drop.
 - An exit available at every stage of the expedition. The finale returns the reef crew to shore before its island encounter begins.
@@ -56,7 +56,7 @@ Open `http://127.0.0.1:3401/?test=1` in two browser contexts and verify:
 
 1. Join and launch. Confirm the local player is grounded beside the blue Sunken Reach entrance and that E offers the dive only within range.
 2. Press E. Confirm the view and HUD switch cleanly, with no continued land movement, and the objective reports three reef guards.
-3. Hold WASD, Space, C, and Shift in turn. Confirm horizontal travel, rising, diving, faster travel, and hovering after release. Open Escape and M while holding C and confirm movement stops.
+3. Look up and down while holding W/S and confirm travel follows the view. Confirm A/D stays level, Space/C still changes depth directly, Shift swims faster, and releasing movement hovers. Open Escape and M while holding C and confirm movement stops.
 4. Fire, reload, swap guns, aim or scope, use the cutlass and heal. Confirm reef guards receive hits only with clear wreck sight lines and island enemies never appear as targets.
 5. Leave one browser ashore and send the other below. Confirm the crew list names the other area, while map markers and floating nameplates include only the local realm.
 6. Open M below. Confirm the plan shows the wreck walls, chest, return beacon, local crew and local pings. Return ashore and confirm M restores the island chart with its dive marker.
@@ -95,3 +95,11 @@ git diff --check
 The local full-suite log is `.qa/underwater-final-tests.log` and remains untracked with the other QA output.
 
 The final commit, push, Docker service state, health response, and served-asset comparison are recorded in the delivery report after the standing `AGENTS.md` workflow completes.
+
+### Look-directed swimming follow-up
+
+On 2026-09-13, W/S was changed to follow both yaw and pitch. A/D remains level, Space/C adds direct vertical motion, and combined movement remains capped at normal or surge speed. The same shared movement code runs on the server and in client prediction.
+
+A Chrome headless pass at `1440 x 900` used normal mouse and keyboard inputs at the isolated shore fixture. Forward swimming climbed while looking up and descended while looking down; backward movement reversed the look direction. Level strafing, direct rise/dive, and hover after release also passed, with no console or page errors. Local evidence is `.qa/underwater-look/report.json`, `look-up.png`, and `look-down.png`. The focused movement, network, and prediction tests passed 10 of 10.
+
+The follow-up full suite passed 505 of 505 tests with no failures or skips; `git diff --check` passed. The local suite log is `.qa/underwater-look-tests.log`.
