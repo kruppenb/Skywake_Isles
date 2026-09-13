@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { makePalette, buildPirate } from './models.js';
 import { WEAPONS } from '../shared/weapons.js';
+import { KNOCK_DURATION } from '../shared/encounters.js';
 import { isCrewMaskMaterial, installCrewTint, setCrewTint, crewTintHex, buildPlayerCharacter, NAVIGATOR_URL } from './player-character.js';
 
 const DEFAULT_HERO_URL = NAVIGATOR_URL;
@@ -154,7 +155,7 @@ let baselineStats = null;
 // it) with this player state, the same shape world.js hands to animate().
 const pose = { weapon: 'flintlock', state: 'ground', aiming: false, reload: false, reloadProgress: null, knocked: false, pitch: 0, speed: 0 };
 let gameModel = null;
-let reloadUntil = 0;
+let reloadUntil = 0, knockedUntil = 0;
 const gamePlayer = { mode: 'ground', weapon: 'flintlock', pitch: 0, online: true, reloadUntil: 0, gunId: null, knockedUntil: 0, hp: 10 };
 const gamePose = { dt: 1 / 60, elapsed: 0, aiming: false };
 
@@ -166,7 +167,8 @@ function gamePlayerState(elapsedNow) {
   gamePlayer.mode = pose.state === 'aboard' ? 'aboard' : pose.state;
   gamePlayer.gunId = pose.state === 'aboard' ? 'studio-gun' : null;
   gamePlayer.weapon = pose.weapon; gamePlayer.pitch = pose.pitch;
-  gamePlayer.knockedUntil = pose.knocked ? elapsedNow + 1 : 0;
+  // Knocked keeps the deadline it was pressed with, so the collapse plays once and settles.
+  gamePlayer.knockedUntil = pose.knocked ? knockedUntil : 0;
   gamePlayer.reloadUntil = pose.reload || pose.reloadProgress !== null ? reloadUntil : 0;
   return gamePlayer;
 }
@@ -422,7 +424,10 @@ function applyPose(partial = {}) {
   if (partial.weapon && WEAPONS[partial.weapon]) pose.weapon = partial.weapon;
   if (['ground', 'gliding', 'aboard'].includes(partial.state)) pose.state = partial.state;
   if (typeof partial.aiming === 'boolean') pose.aiming = partial.aiming;
-  if (typeof partial.knocked === 'boolean') pose.knocked = partial.knocked;
+  if (typeof partial.knocked === 'boolean') {
+    if (partial.knocked && !pose.knocked) knockedUntil = elapsed + KNOCK_DURATION;
+    pose.knocked = partial.knocked;
+  }
   if (typeof partial.reload === 'boolean') {
     pose.reload = partial.reload;
     if (partial.reload) reloadUntil = elapsed + (WEAPONS[pose.weapon]?.reload || 1);

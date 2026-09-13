@@ -148,7 +148,7 @@ Run with `node --test test/player-character.test.js`; it is part of `npm test`.
   Cadence uses 3.4 game metres per walk cycle and 5.4 per run cycle, capped at 2.1 cycles/s:
   about three footfalls/s at the normal 8 m/s and four at the 11 m/s sprint. This prioritizes
   readable motion at the game's exaggerated travel speeds; it is not foot-locking IK.
-  Stopping, mounting a cannon, gliding and knockback stop the cycle and fade to idle.
+  Stopping, mounting a cannon, gliding and being downed stop the cycle and fade to idle.
   Idle runs on the clock. Meshy's library idle is a look-around that turns the hips
   54° and the head 56°, so it plays at a quarter of its motion against a hold pose built from its
   own first frame: the pirate keeps facing its aim with breathing and small glances (measured
@@ -167,8 +167,24 @@ Run with `node --test test/player-character.test.js`; it is part of `npm test`.
   orientations with a twist so the elbow crease faces the forearm and the wrist follows the palm,
   and the hand bone given an explicit grip basis (fingers forward-down and palm inward on the
   firing hand; palm up and in on the support hand; palms inward on the glider bars). Head pitch
-  follows `player.pitch`; gliding trails the legs, knockback folds them and tilts the figure, both
-  as additive bone rotations.
+  follows `player.pitch`; gliding trails the legs as additive bone rotations.
+- Downed (`player.knockedUntil`): a timed collapse in the style of Fortnite's down-but-not-out,
+  not a lean. The knees buckle and the pirate drops onto them chin down, hands braced ahead
+  (0.38 s), then topples onto its right side (from 0.26 s, done by 0.74 s) and stays there
+  propped on the right forearm, left hand planted ahead of the chest, chest turned a little
+  skyward and head up looking ahead, breathing with the idle clip. The gun is stowed on the
+  back for the whole state. A revive retraces the path faster: side to knees to feet in 0.55 s.
+  The figure group carries the body transform, pivoting about the hips so the body collapses
+  where the player stands (head forward-right of the facing, feet behind-left, contact shadow
+  stretched along the body); the leg, trunk, spine and head bends are additive rotations and
+  both hands are ground contacts solved by the same arm IK. The timeline is seeded from the
+  server's `knockedUntil` and `KNOCK_DURATION` (shared/encounters.js), so a pirate already down
+  when first seen is drawn settled. A swimming navigator (the mermaid's upper body) has no
+  ground to kneel on: it goes limp and rolls about its hips, sinking a little; the mermaid's
+  tail is anchored to the live hips and rolls with them.
+- Additive bends restart from the mixer's last output whenever the mixer leaves a bone alone:
+  three's mixer only rewrites a bone whose blended value changed, so on a paused clock (the
+  studio at dt 0) the bends would otherwise stack up every frame.
 - The stowed gun (gliding) hangs off a stow rig placed from the `stow_back` socket's rest
   position; weapon visibility, action-mesh reload motion, the contact shadow and `getMuzzle`
   are unchanged from `buildPirate`.
@@ -184,7 +200,8 @@ Controls:
   **Game model** (the live `buildPlayerCharacter` renderer beside the procedural pirate, both
   driven by the Pose panel).
 - **Pose (game model)** — weapon, ground / gliding / aboard-with-gun, aim, reload (a real stroke
-  from the moment pressed), knocked, fire (one recoil kick), aim pitch, speed still/walk/run/sprint
+  from the moment pressed), knocked (plays the collapse once from the moment pressed and stays
+  down), fire (one recoil kick), aim pitch, speed still/walk/run/sprint
   (0 / 3.5 / 8 / 11 m/s; run and sprint match gameplay).
   `window.characterStudio.setPose({ reloadProgress: 0.49 })` pins a stroke for screenshots.
 - **Camera** — Front, Three-quarter, Back, Face, Gameplay distance. Fitted presets are fractions
@@ -243,7 +260,9 @@ Tests: `node --test test/player-character.test.js` (12/12) and the full `npm tes
   coat's front edge and one sleeve seam.
 - The stowed gun while gliding sits behind the shoulder blades from a fixed rest offset; it does
   not follow spine motion.
-- Knockback and the mounted-cannon pose are lean-and-IK approximations with no dedicated clip.
+- The downed collapse and the mounted-cannon pose are procedural (figure transform, additive
+  bends and IK) with no dedicated clip; downed, the propping forearm can sink a little into
+  uneven ground and the body ignores slopes.
 - The idle is Meshy's look-around damped to a quarter; the small glances that remain are the
   intended amount, and the raw clip still plays undamped in the studio's Prototype view.
 - The remaining hue-mask edge cases: a few coral texels on the collar's underside tint with the

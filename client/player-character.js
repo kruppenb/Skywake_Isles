@@ -6,7 +6,7 @@
 // cannot), then the navigator rig takes over inside the same group:
 //
 //   group                      positioned/yawed by world.js
-//   ├─ figure                  glide pitch and knockback roll, as in buildPirate
+//   ├─ figure                  glide pitch, and the downed collapse (kneel, then onto the side)
 //   │  ├─ SkywakeNavigator     the cloned GLB (skinned mesh + 29-joint Mixamo-named skeleton)
 //   │  └─ torso                weapon aim/recoil rig and back stow rig, in buildPirate's torso space
 //   ├─ pirate-glider           the shared crew-coloured glider, grips at (±.70, 2.29, −.17)
@@ -16,8 +16,16 @@
 // a speed-driven cycle at a readable cadence. Everything the gameplay needs a hand for
 // (five weapon stances, reload strokes, recoil, glider grips, mounted cannon rails) is the same
 // analytic two-bone arm IK as buildPirate, now written onto the LeftArm/ForeArm/Hand bones in
-// figure space after the mixer has posed the body. Knockback and gliding bend the leg bones
-// additively; the head follows the aim pitch.
+// figure space after the mixer has posed the body. Gliding bends the leg bones additively; the
+// head follows the aim pitch.
+//
+// Downed: a knock plays a timed collapse rather than a lean. The knees buckle and the pirate drops
+// onto them, then topples onto its right side, where it stays propped on the right forearm with
+// the left hand planted ahead of the chest and the head up, until a crewmate or the safe rescue
+// lifts it; the revive retraces the same path back to the feet. The timeline is seeded from the
+// server's `knockedUntil` so a pirate already down when first seen is drawn settled. The whole
+// pose is the figure group's transform (pivoting about the hips so the body collapses in place)
+// plus additive leg, spine and head bends and the same arm IK aimed at ground contacts.
 //
 // Crew colour: navigator-meshy.glb ships one opaque material whose base-colour PNG carries the
 // accent mask (lapels, cuffs, collar, sash, lining) in its alpha channel; the material extras say
@@ -29,6 +37,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
+import { KNOCK_DURATION } from '../shared/encounters.js';
 import { buildPirate, buildWeapon, buildGlider, WEAPON_HANDLING } from './models.js';
 import { upgradeWeapon } from './weapon-models.js';
 import { sampleReloadAnimation } from './reload-animation.js';
@@ -140,8 +149,45 @@ const IDLE_MOTION = .25;
 // The navigator has rigid hand bones, so curl the fingers with a glide-only morph.
 // This point is the centre of the closed palm in hand space, measured in metres.
 const GLIDER_PALM = new THREE.Vector3(0, .18, .07);
+// Downed timeline, seconds. The drop to the knees and the topple onto the side overlap so the
+// fall reads as one motion; the revive plays it back faster, side to knees to feet.
+const KNEEL_TIME = .38, TOPPLE_START = .26, TOPPLE_TIME = .48;
+const RISE_TOPPLE_TIME = .34, RISE_KNEEL_START = .22, RISE_KNEEL_TIME = .30;
+// Downed poses, in figure/group space. Angles are figure-space additive bends (hip flexion
+// positive, knee flexion negative, as the glide uses); the lying orientation is a roll onto the
+// right side, the chest turned a little skyward, the body headed forward-right of the facing.
+const axisQuaternion = (axis, angle) => new THREE.Quaternion().setFromAxisAngle(axis, angle);
+const DOWNED_GROUND = {
+  kneelQuat: axisQuaternion(new THREE.Vector3(1, 0, 0), -.20), kneelDrop: new THREE.Vector3(0, -.62, -.06),
+  lyingQuat: axisQuaternion(new THREE.Vector3(0, 1, 0), .55).multiply(axisQuaternion(new THREE.Vector3(1, 0, 0), .10))
+    .multiply(axisQuaternion(new THREE.Vector3(0, 0, 1), -1.45)),
+  lyingHips: new THREE.Vector3(0, .28, 0),
+  // [left, right]: the top leg draws up and drops its knee onto the bottom leg, which stays
+  // longer and is pulled in so the idle's spread stance cannot push it into the ground.
+  // Kneeling folds both shins flat behind the thighs.
+  hip: { kneel: [.20, .20], lying: [.60, .45] }, knee: { kneel: [-1.55, -1.55], lying: [-1.30, -.70] },
+  splay: { lying: [.90, -.35] }, shinSplay: { lying: [-.35, .50] },
+  // Trunk (pelvis joint), upper spine and head bends as [about X, about Z, about Y]: the trunk
+  // flexes sideways to lift the chest off the propping forearm and twists it skyward; the head
+  // lifts and looks ahead. Kneeling slumps forward, chin down.
+  trunk: { kneel: [-.20, 0, 0], lying: [0, .35, .35] }, spine: { kneel: [-.15, 0, 0], lying: [.05, .20, .35] },
+  head: { kneel: [-.30, 0, 0], lying: [.20, .45, .25] },
+  shadowStretch: .75,
+};
+// Swimming: no ground to kneel on. The pirate goes limp and rolls onto its side about the hips,
+// sinking a little; the mermaid's tail is anchored to the live hips and rolls with them.
+const DOWNED_SWIMMING = {
+  kneelQuat: new THREE.Quaternion(), kneelDrop: new THREE.Vector3(0, -.04, 0),
+  lyingQuat: axisQuaternion(new THREE.Vector3(0, 1, 0), .25).multiply(axisQuaternion(new THREE.Vector3(1, 0, 0), .30))
+    .multiply(axisQuaternion(new THREE.Vector3(0, 0, 1), -.85)),
+  lyingHips: null, lyingSink: -.18,
+  hip: { kneel: [0, 0], lying: [0, 0] }, knee: { kneel: [0, 0], lying: [0, 0] }, splay: { lying: [0, 0] }, shinSplay: { lying: [0, 0] },
+  trunk: { kneel: [-.10, 0, 0], lying: [-.10, .15, .15] }, spine: { kneel: [-.05, 0, 0], lying: [-.05, .10, .10] },
+  head: { kneel: [-.30, 0, 0], lying: [-.20, .30, .10] },
+  shadowStretch: 0,
+};
 const BONE_NAMES = {
-  hips: 'Hips', spine: 'Spine', head: 'Head', stow: 'stow_back',
+  hips: 'Hips', trunk: 'Spine02', spine: 'Spine', head: 'Head', stow: 'stow_back',
   shoulder: { L: 'LeftShoulder', R: 'RightShoulder' }, upper: { L: 'LeftArm', R: 'RightArm' },
   fore: { L: 'LeftForeArm', R: 'RightForeArm' }, hand: { L: 'LeftHand', R: 'RightHand' },
   thigh: { L: 'LeftUpLeg', R: 'RightUpLeg' }, shin: { L: 'LeftLeg', R: 'RightLeg' },
@@ -275,7 +321,7 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     return found;
   };
   const bones = {
-    hips: bone(BONE_NAMES.hips), spine: bone(BONE_NAMES.spine), head: bone(BONE_NAMES.head), stow: bone(BONE_NAMES.stow),
+    hips: bone(BONE_NAMES.hips), trunk: bone(BONE_NAMES.trunk), spine: bone(BONE_NAMES.spine), head: bone(BONE_NAMES.head), stow: bone(BONE_NAMES.stow),
   };
 
   // Rest-pose measurements in figure space (metres, -Z forward), taken before any clip runs.
@@ -367,16 +413,42 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
   mixer.update(0); figure.updateMatrixWorld(true);
   const idleHips = frameOf(bones.hips, new THREE.Vector3());
   const torsoRest = torso.position.clone(), bodyTravel = new THREE.Vector3();
+  // The collapse pivots the figure about the hips' rest point so the body folds and falls where
+  // the player stands (the mermaid's tail hangs from the live hips and follows them).
+  const downed = swimming ? DOWNED_SWIMMING : DOWNED_GROUND;
+  const pivotRest = idleHips.clone();
+  const kneelPivot = pivotRest.clone().add(downed.kneelDrop);
+  const lyingPivot = downed.lyingHips ? downed.lyingHips.clone() : pivotRest.clone().add(new THREE.Vector3(0, downed.lyingSink, 0));
 
   let cycle = 0, locomotion = 0, sprint = 0, aiming = 0, glideBlend = 0, knockBlend = 0, recoil = 0;
+  let kneel = 0, topple = 0, downTime = 0, riseTime = Infinity, riseFromKneel = 0, riseFromTopple = 0, wasKnocked = false;
   let equipped = 'flintlock', stowed = false;
   let previousReloadUntil = 0, cancelledReloadUntil = 0;
-  const gliderToFigure = new THREE.Matrix4(), figureMatrixInv = new THREE.Matrix4();
+  const gliderToFigure = new THREE.Matrix4(), figureMatrixInv = new THREE.Matrix4(), figureLocalInv = new THREE.Matrix4();
   const parentQuat = new THREE.Quaternion(), workQuat = new THREE.Quaternion(), swing = new THREE.Quaternion(), axisQuat = new THREE.Quaternion();
-  const thighQuat = new THREE.Quaternion(), shinQuat = new THREE.Quaternion(), headQuat = new THREE.Quaternion();
+  const thighQuat = new THREE.Quaternion(), shinQuat = new THREE.Quaternion(), headQuat = new THREE.Quaternion(), spineQuat = new THREE.Quaternion();
+  const poseQuat = new THREE.Quaternion(), glideQuat = new THREE.Quaternion();
   const along = new THREE.Vector3(), reference = new THREE.Vector3(), target = new THREE.Vector3(), basisX = new THREE.Vector3();
   const basis = new THREE.Matrix4();
   const gripTarget = new THREE.Vector3();
+  const pivotTarget = new THREE.Vector3(), pivotNow = new THREE.Vector3(), chestDir = new THREE.Vector3(), headDir = new THREE.Vector3();
+  const chestGround = new THREE.Vector3(), groupPoint = new THREE.Vector3(), bodyAxis = new THREE.Vector3();
+  const downWrist = new THREE.Vector3(), downFingers = new THREE.Vector3(), downPalm = new THREE.Vector3(), downBend = new THREE.Vector3();
+  const lyingWrist = new THREE.Vector3(), lyingFingers = new THREE.Vector3(), lyingPalm = new THREE.Vector3(), lyingBend = new THREE.Vector3();
+  const AXIS_Z = new THREE.Vector3(0, 0, 1), DOWN = new THREE.Vector3(0, -1, 0);
+  const mix3 = (kneelValue, lyingValue) => kneelValue * kneel * (1 - topple) + lyingValue * topple;
+  // The mixer rewrites a bone only when its blended value changed since the last update, so on a
+  // paused clock (the studio at dt 0) the additive bends below would stack up frame after frame.
+  // Each bent bone therefore restarts from the mixer's last output whenever the mixer left it alone.
+  const bent = [...legs.flatMap(leg => [leg.thigh, leg.shin]), bones.trunk, bones.spine, bones.head]
+    .map(node => ({ node, mixed: node.quaternion.clone(), written: node.quaternion.clone() }));
+  function restartBends() {
+    for (const entry of bent) {
+      if (entry.node.quaternion.equals(entry.written)) entry.node.quaternion.copy(entry.mixed);
+      else entry.mixed.copy(entry.node.quaternion);
+    }
+  }
+  function recordBends() { for (const entry of bent) entry.written.copy(entry.node.quaternion); }
 
   // Figure-space quaternion of a bone's parent, from world matrices refreshed after the mixer.
   function parentFrame(boneNode, out) {
@@ -389,6 +461,13 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     axisQuat.setFromAxisAngle(axis, angle); out.premultiply(axisQuat);
     boneNode.quaternion.copy(parentQ).invert().multiply(out);
     return out;
+  }
+  // The downed trunk/spine bends: [about X, about Z, about Y] kneel and lying angles, mixed.
+  function bendInFigure(boneNode, table, out) {
+    parentFrame(boneNode, parentQuat);
+    rotateInFigure(boneNode, parentQuat, AXIS_X, mix3(table.kneel[0], table.lying[0]), out);
+    rotateInFigure(boneNode, parentQuat, AXIS_Z, mix3(table.kneel[1], table.lying[1]), out);
+    rotateInFigure(boneNode, parentQuat, UP, mix3(table.kneel[2], table.lying[2]), out);
   }
   // Point a bone (its +Y runs to the child joint) from its rest orientation toward `dir`, then twist
   // about `dir` so the bone-space `foldLocal` faces `foldDir`. Writes the bone's local rotation.
@@ -420,7 +499,7 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     if (reloadUntil !== previousReloadUntil) cancelledReloadUntil = 0;
     if (!canReload || (nextWeapon !== equipped && reloadUntil === previousReloadUntil)) cancelledReloadUntil = reloadUntil;
     previousReloadUntil = reloadUntil;
-    equipped = nextWeapon; stowed = falling;
+    equipped = nextWeapon;
     const handling = WEAPON_HANDLING[equipped];
     // Wrist anchors only: a gun drawing a GLB carries its own pair (client/weapon-models.js's
     // WEAPON_ASSET_HANDLING), tuned against this character's hands and that mesh's grip. Stance,
@@ -436,8 +515,25 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     sprint = ease(sprint, smooth((motion - SPRINT_FROM) / (SPRINT_TO - SPRINT_FROM)), 8, dt);
     aiming = ease(aiming, pose.aiming ? 1 : 0, 16, dt);
     glideBlend = ease(glideBlend, falling ? 1 : 0, 10, dt);
-    knockBlend = ease(knockBlend, knocked ? 1 : 0, 10, dt);
     recoil *= Math.exp(-18 * dt);
+    // Downed timeline. `downTime` counts up from the knock, seeded from the server deadline so a
+    // pirate already on the ground when first seen is drawn settled; `riseTime` counts up from
+    // the revive and retraces whatever part of the collapse had played.
+    if (knocked) {
+      if (!wasKnocked) {
+        const remaining = Number.isFinite(player.knockedUntil) ? player.knockedUntil - elapsed : KNOCK_DURATION;
+        downTime = THREE.MathUtils.clamp(KNOCK_DURATION - remaining, 0, KNOCK_DURATION);
+      } else downTime += dt;
+      kneel = smooth(downTime / KNEEL_TIME);
+      topple = smooth((downTime - TOPPLE_START) / TOPPLE_TIME);
+    } else {
+      if (wasKnocked) { riseTime = 0; riseFromKneel = kneel; riseFromTopple = topple; } else riseTime += dt;
+      topple = riseFromTopple * (1 - smooth(riseTime / RISE_TOPPLE_TIME));
+      kneel = riseFromKneel * (1 - smooth((riseTime - RISE_KNEEL_START) / RISE_KNEEL_TIME));
+    }
+    wasKnocked = knocked;
+    knockBlend = Math.max(kneel, topple);
+    stowed = falling || knockBlend > 0;
 
     // The game exaggerates travel speed; preserve a readable run instead of
     // accelerating the legs without limit. Both clips share the same footfall.
@@ -447,10 +543,19 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     actions.hold.setEffectiveWeight((1 - locomotion) * (1 - IDLE_MOTION));
     if (actions.walk) { actions.walk.setEffectiveWeight(locomotion * (1 - sprint)); actions.walk.time = clipStarts.walk + cycle * (actions.walk.getClip().duration - clipStarts.walk); }
     if (actions.run) { actions.run.setEffectiveWeight(locomotion * sprint); actions.run.time = clipStarts.run + cycle * (actions.run.getClip().duration - clipStarts.run); }
-    mixer.update(dt);
+    mixer.update(dt); restartBends();
 
-    figure.position.y = -.20 * knockBlend;
-    figure.rotation.set(.07 * glideBlend, 0, .32 * knockBlend);
+    // Body: on the feet, then the kneel, then the side-lying pose, each a figure orientation and a
+    // pivot target in group space, so the pirate collapses in place. The glide pitch stays a
+    // tilt about the feet, exactly as before.
+    poseQuat.identity(); pivotTarget.copy(pivotRest);
+    if (knockBlend > 0) {
+      poseQuat.slerp(downed.kneelQuat, kneel); pivotTarget.lerp(kneelPivot, kneel);
+      poseQuat.slerp(downed.lyingQuat, topple); pivotTarget.lerp(lyingPivot, topple);
+      figure.position.copy(pivotTarget).sub(pivotNow.copy(pivotRest).applyQuaternion(poseQuat));
+    } else figure.position.set(0, 0, 0);
+    glideQuat.setFromAxisAngle(AXIS_X, .07 * glideBlend);
+    figure.quaternion.copy(poseQuat).multiply(glideQuat);
     figure.updateMatrixWorld(true);
     figureMatrixInv.copy(figure.matrixWorld).invert();
     // Carry the gun with the body's rise and fall instead of pinning both wrists
@@ -459,17 +564,36 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     torso.position.copy(torsoRest).addScaledVector(bodyTravel,
       .7 * locomotion * (1 - aiming) * (1 - reload.work) * (1 - glideBlend) * (1 - knockBlend));
 
-    // Legs trail in a glide and fold under a knockback; the head follows the aim pitch.
+    // Legs trail in a glide and fold under the collapse; the head follows the aim pitch on its
+    // feet and lifts to look ahead once down.
     for (let i = 0; i < legs.length; i++) {
       const leg = legs[i];
-      const hipAngle = (i ? .13 : -.24) * glideBlend - .76 * knockBlend;
-      const kneeAngle = -.17 * glideBlend - .36 * knockBlend;
-      if (Math.abs(hipAngle) + Math.abs(kneeAngle) < 1e-4) continue;
+      const hipAngle = (i ? .13 : -.24) * glideBlend + mix3(downed.hip.kneel[i], downed.hip.lying[i]);
+      const kneeAngle = -.17 * glideBlend + mix3(downed.knee.kneel[i], downed.knee.lying[i]);
+      // Lying, the knee's flexion plane is level with the ground, so a sideways bend of the thigh
+      // and shin (about the body's forward axis) is what settles each leg onto it.
+      const splay = downed.splay.lying[i] * topple, shinSplay = downed.shinSplay.lying[i] * topple;
+      if (Math.abs(hipAngle) + Math.abs(kneeAngle) + Math.abs(splay) + Math.abs(shinSplay) < 1e-4) continue;
       rotateInFigure(leg.thigh, parentFrame(leg.thigh, parentQuat), AXIS_X, hipAngle, thighQuat);
+      if (splay) rotateInFigure(leg.thigh, parentQuat, AXIS_Z, splay, thighQuat);
       rotateInFigure(leg.shin, thighQuat, AXIS_X, kneeAngle, shinQuat);
+      if (shinSplay) rotateInFigure(leg.shin, thighQuat, AXIS_Z, shinSplay, shinQuat);
     }
-    const lookPitch = (Number.isFinite(player.pitch) ? player.pitch : 0) * .30 - .09 * knockBlend;
+    if (knockBlend > 0) {
+      // The trunk lifts the chest off the propping forearm and turns it skyward; the shoulders
+      // and neck above are refreshed so the arm IK and the head start from the bent spine.
+      bendInFigure(bones.trunk, downed.trunk, spineQuat);
+      bendInFigure(bones.spine, downed.spine, spineQuat);
+      bones.trunk.updateMatrixWorld(true);
+    }
+    const lookPitch = (Number.isFinite(player.pitch) ? player.pitch : 0) * .30 * (1 - knockBlend)
+      + mix3(downed.head.kneel[0], downed.head.lying[0]) + Math.sin(time * 1.1) * .05 * topple;
     rotateInFigure(bones.head, parentFrame(bones.head, parentQuat), AXIS_X, lookPitch, headQuat);
+    if (knockBlend > 0) {
+      rotateInFigure(bones.head, parentQuat, AXIS_Z, mix3(downed.head.kneel[1], downed.head.lying[1]), headQuat);
+      rotateInFigure(bones.head, parentQuat, UP, mix3(downed.head.kneel[2], downed.head.lying[2]), headQuat);
+    }
+    recordBends();
 
     // Weapon stance, reload work and recoil, exactly as buildPirate, then pulled toward the shoulder
     // line by the arm-reach ratio so the navigator's shorter arms hold every gun.
@@ -528,6 +652,16 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
       }
     }
 
+    if (knockBlend > 0) {
+      // Ground frame of the fallen body, in group space: where the chest faces and where the head
+      // lies, both flattened onto the ground, and the chest's footprint.
+      figureLocalInv.copy(figure.matrix).invert();
+      chestDir.copy(FORWARD).applyQuaternion(poseQuat); chestDir.y = 0;
+      if (chestDir.lengthSq() < 1e-6) chestDir.copy(FORWARD); chestDir.normalize();
+      headDir.copy(UP).applyQuaternion(poseQuat); headDir.y = 0;
+      if (headDir.lengthSq() < 1e-6) headDir.copy(FORWARD); headDir.normalize();
+      chestGround.setFromMatrixPosition(bones.spine.matrixWorld).applyMatrix4(figureMatrixInv).applyMatrix4(figure.matrix);
+    }
     // Arms: each wrist reaches its target exactly (gun anchor, glider grip or cannon rail) through
     // fixed-length two-bone IK, written onto the bones as figure-space orientations.
     for (const arm of arms) {
@@ -554,6 +688,40 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
         workQuat.copy(weaponRig.quaternion).multiply(arm.anchor.quaternion);
         arm.fingers.normalize().applyQuaternion(workQuat); arm.palm.applyQuaternion(workQuat);
       }
+      // Forward is -Z. Outward elbows keep the entire forearm in front of the coat.
+      if (falling) arm.bend.set(arm.side * .7, -.8, -.7);
+      else if (arm.side > 0) arm.bend.set(.82 - aiming * .08, -1.2, -.08);
+      else if (equipped === 'flintlock') arm.bend.set(-.65, -1.1, -.3);
+      else arm.bend.set(-.4 + aiming * .10, -.30, -2.8);
+      if (knockBlend > 0) {
+        // Downed hands, built in group space where the ground is: braced ahead while dropping to
+        // the knees, then the right forearm props the chest off the ground (elbow under the
+        // shoulder, forearm along the ground) and the left hand plants ahead of the chest. In
+        // water both arms simply hang. Blended over the gun grip by the collapse progress.
+        groupPoint.copy(arm.shoulder).add(torso.position).applyMatrix4(figure.matrix);
+        if (swimming) {
+          lyingWrist.set(groupPoint.x, groupPoint.y - .52, groupPoint.z).addScaledVector(chestDir, .10);
+          lyingFingers.copy(DOWN); lyingPalm.copy(chestDir); lyingBend.set(arm.side * .5, -.3, .5);
+          downWrist.copy(lyingWrist); downFingers.copy(lyingFingers); downPalm.copy(lyingPalm); downBend.copy(lyingBend);
+        } else {
+          if (arm.side > 0) {
+            lyingWrist.set(groupPoint.x, .11, groupPoint.z).addScaledVector(chestDir, .40).addScaledVector(headDir, .22);
+            lyingFingers.copy(chestDir).addScaledVector(headDir, .5).normalize(); lyingPalm.copy(DOWN);
+            lyingBend.copy(headDir).multiplyScalar(-.9).addScaledVector(DOWN, .15);
+          } else {
+            lyingWrist.set(chestGround.x, .10, chestGround.z).addScaledVector(chestDir, .42).addScaledVector(headDir, .12);
+            lyingFingers.copy(chestDir).addScaledVector(headDir, .4).normalize(); lyingPalm.copy(DOWN);
+            lyingBend.copy(UP).multiplyScalar(.7).addScaledVector(chestDir, -.5).addScaledVector(headDir, -.2);
+          }
+          downWrist.set(arm.side * .42, .70, -.40).lerp(lyingWrist, topple);
+          downFingers.set(0, .5, -.87).lerp(lyingFingers, topple); downPalm.set(0, -.87, -.5).lerp(lyingPalm, topple);
+          downBend.set(arm.side * .9, -.2, -.4).lerp(lyingBend, topple);
+        }
+        downWrist.applyMatrix4(figureLocalInv).sub(torso.position);
+        downFingers.transformDirection(figureLocalInv); downPalm.transformDirection(figureLocalInv); downBend.transformDirection(figureLocalInv);
+        arm.wrist.lerp(downWrist, knockBlend); arm.bend.lerp(downBend, knockBlend);
+        arm.fingers.lerp(downFingers, knockBlend).normalize(); arm.palm.lerp(downPalm, knockBlend).normalize();
+      }
       arm.direction.copy(arm.wrist).sub(arm.shoulder);
       const distance = Math.max(.001, arm.direction.length());
       arm.direction.multiplyScalar(1 / distance);
@@ -562,11 +730,6 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
       const clamped = Math.min(distance, upperLength + lowerLength - .01);
       const alongReach = (upperLength * upperLength - lowerLength * lowerLength + clamped * clamped) / (2 * clamped);
       const height = Math.sqrt(Math.max(0, upperLength * upperLength - alongReach * alongReach));
-      // Forward is -Z. Outward elbows keep the entire forearm in front of the coat.
-      if (falling) arm.bend.set(arm.side * .7, -.8, -.7);
-      else if (arm.side > 0) arm.bend.set(.82 - aiming * .08, -1.2, -.08);
-      else if (equipped === 'flintlock') arm.bend.set(-.65, -1.1, -.3);
-      else arm.bend.set(-.4 + aiming * .10, -.30, -2.8);
       arm.bend.addScaledVector(arm.direction, -arm.bend.dot(arm.direction)).normalize();
       arm.elbow.copy(arm.shoulder).addScaledVector(arm.direction, alongReach).addScaledVector(arm.bend, height);
       // Upper arm: shoulder -> elbow, crease facing the forearm. Forearm: elbow -> wrist, twisted to
@@ -581,7 +744,11 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
       arm.handQuat.setFromRotationMatrix(basis);
       arm.hand.quaternion.copy(arm.foreQuat).invert().multiply(arm.handQuat);
     }
+    // The contact shadow stays under the hips and stretches along the fallen body.
     shadow.visible = player.mode === 'ground';
+    bodyAxis.copy(UP).applyQuaternion(poseQuat);
+    shadow.rotation.z = topple > 0 ? Math.atan2(-bodyAxis.z, bodyAxis.x) : 0;
+    shadow.scale.set(1 + downed.shadowStretch * topple, 1 - .3 * downed.shadowStretch * topple, 1);
   }
   animate(0, 0, { mode: 'aboard', weapon: 'flintlock' });
   return {

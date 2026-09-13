@@ -2,6 +2,9 @@ import { MAX_PLAYERS, BEACON, CHESTS, SHRINES, SPAWN, OBSTACLES, heightAt } from
 import { resolveWorldCollision } from './collision.js';
 
 export const SAFE_LANDING_RADIUS = 20;
+// Seconds a downed pirate waits for a crewmate before the safe rescue; the client derives the
+// time since the knock from `knockedUntil` with this, so late joiners see the settled pose.
+export const KNOCK_DURATION = 8;
 // Three finite guards per destination, plus one melee crab per extra pirate.
 export const ENCOUNTER_GROUPS = Object.freeze([
   { id: 'saltwind-harbor', zone: 'beach', x: -27, z: 73 },

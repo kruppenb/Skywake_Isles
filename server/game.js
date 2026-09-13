@@ -5,7 +5,7 @@ import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { DIVE_ENTRANCE, REEF_SPAWN, REEF_EXIT, REEF_CHEST, reefLineOfSight, resolveReefCollision, realmOf, sameRealm } from '../shared/underwater.js';
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
-import { encounterSpawns, inSafeLanding } from '../shared/encounters.js';
+import { encounterSpawns, inSafeLanding, KNOCK_DURATION } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
 import { FINALE_STAGES, FINALE_STAGE_DELAY, FINALE_FRONT, FINALE_ELITE_FRONT, FINALE_ARC, FINALE_RANK_SIZE, FINALE_DIRECTION_DELAY, shardBearing, finaleStageRoster } from '../shared/finale.js';
@@ -1044,7 +1044,7 @@ export class Game {
     p.hp = Math.max(0, p.hp - amount); p._damageAt = this.elapsed;
     this.emit({ kind: 'hit', targetId: p.id, damage: amount, x: p.x, y: p.y + 1, z: p.z, sourceId, realm: realmOf(p) });
     if (!p.hp) {
-      p.knockedUntil = this.elapsed + 8; p._input = restInput(p); p._burst = null;
+      p.knockedUntil = this.elapsed + KNOCK_DURATION; p._input = restInput(p); p._burst = null;
       this.emit({ kind: 'downed', playerId: p.id });
     }
   }
