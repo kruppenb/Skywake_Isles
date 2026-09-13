@@ -80,6 +80,9 @@ window.shipQa = {
       side: [[40, 10, 4], [0, 4, 0], 53],
       deck: [[0, 31, 12], [0, 1, 0], 53],
       cannon: [[12, 5.7, -12], [4.2, 1.2, -5.2], 30],
+      fittings: [[10.2, 4.3, -5.2], [5.5, 1.65, -9], 40],
+      rail: [[11, 4.0, 13.5], [6.2, .80, 10.4], 40],
+      port: [[-10.2, 3.6, 3.3], [-5.6, 1.35, 0], 40],
     };
     const [position, target, fov] = poses[name] || poses.full;
     camera.position.set(...position); camera.fov = fov; camera.lookAt(...target); camera.updateProjectionMatrix();
@@ -151,10 +154,24 @@ const shots = [];
 for (const [label, camera, navigatorShown] of [
   ['01-full-three-quarter', 'full', false], ['02-front-bow', 'front', false], ['03-stern', 'stern', false],
   ['04-starboard-side', 'side', false], ['05-deck-top', 'deck', false], ['06-cannon-closeup', 'cannon', true],
+  ['07-cannon-fittings', 'fittings', false], ['08-rail-joinery', 'rail', false], ['09-port-cannon', 'port', false],
 ]) {
   const render = await page.evaluate(({ camera, navigatorShown }) => { window.shipQa.showNavigator(navigatorShown); window.shipQa.setCamera(camera); return window.shipQa.render(); }, { camera, navigatorShown });
   const filePath = path.join(OUT, `${label}.png`); await canvas.screenshot({ path: filePath });
   shots.push({ label, path: filePath, camera, navigatorShown, render });
+}
+
+// Review the moving barrel and fixed yoke under both legal pitch extremes.
+for (const [label, pitch, recoil] of [['10-cannon-depressed', -.55, false], ['11-cannon-elevated-recoil', .8, true]]) {
+  const render = await page.evaluate(({ pitch, recoil }) => {
+    const qa = window.shipQa, gun = qa.state.ship.guns.get('gun-starboard-fore');
+    qa.showNavigator(false); qa.setCamera('fittings');
+    gun.animate(1, -Math.PI / 2, pitch);
+    if (recoil) gun.fire();
+    return qa.render();
+  }, { pitch, recoil });
+  const filePath = path.join(OUT, `${label}.png`); await canvas.screenshot({ path: filePath });
+  shots.push({ label, path: filePath, camera: 'fittings', navigatorShown: false, pitch, recoil, render });
 }
 
 const consoleErrors = consoleLog.filter(entry => entry.type === 'error');

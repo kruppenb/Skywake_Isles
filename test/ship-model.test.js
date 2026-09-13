@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { makePalette, buildGalleon } from '../client/models.js';
+import { makePalette, buildGalleon, buildDeckCannon } from '../client/models.js';
 import { gunCameraPose } from '../client/airship.js';
-import { SHIP_GUNS, SHIP_JUMP_POINTS } from '../shared/airship.js';
+import { SHIP_GUNS, SHIP_JUMP_POINTS, GUN_MUZZLE_LENGTH } from '../shared/airship.js';
 
 function shipFixture() {
   const palette = makePalette(), ship = buildGalleon(palette);
@@ -63,15 +63,40 @@ test('full ship legal cannon rays clear every other rendered ship mesh', () => {
   for (const gun of SHIP_GUNS) {
     const cannonRoot = ship.guns.get(gun.id).group;
     const obstacles = allShipMeshes(ship).filter(mesh => !descendantsOf(cannonRoot, mesh));
-    for (let step = 0; step <= 20; step++) {
-      const yaw = gun.yaw - 1.25 + step / 20 * 2.5;
-      for (const pitch of [-.55, 0, .8]) {
+    for (let step = 0; step <= 80; step++) {
+      const yaw = gun.yaw - 1.25 + step / 80 * 2.5;
+      for (const pitch of [-.55, -.4, -.3, -.2, -.1, 0, .2, .4, .8]) {
         const camera = gunCameraPose(gun, { x: 0, y: 0, z: 0 }, yaw, pitch);
         const ray = new THREE.Raycaster(new THREE.Vector3(camera.origin.x, camera.origin.y, camera.origin.z),
           new THREE.Vector3(camera.direction.x, camera.direction.y, camera.direction.z), .01, 30);
         const hits = ray.intersectObjects(obstacles, false);
         assert.equal(hits.length, 0, `${gun.id} yaw ${(yaw - gun.yaw).toFixed(2)} pitch ${pitch} clips ${hits[0]?.object.name || 'ship'}`);
       }
+    }
+  }
+});
+
+test('cannon barrel has an outward-facing closed shell and an open recessed bore, including recoil', () => {
+  const cannon = buildDeckCannon(makePalette(), SHIP_GUNS[0]);
+  const mesh = cannon.group.getObjectByName('cannon-barrel-detail');
+  assert.equal(mesh.material.side, THREE.FrontSide, 'surface winding is not hidden by double-sided rendering');
+  for (const recoiling of [false, true]) {
+    if (recoiling) cannon.fire();
+    cannon.group.updateMatrixWorld(true);
+    const cast = (origin, direction) => new THREE.Raycaster(
+      new THREE.Vector3(...origin).applyMatrix4(mesh.matrixWorld),
+      new THREE.Vector3(...direction).transformDirection(mesh.matrixWorld), .001, 2).intersectObject(mesh, false)[0];
+    for (const z of [.25, -.55, -1.25, -2.1]) for (let i = 0; i < 16; i++) {
+      const a = i / 16 * Math.PI * 2, x = Math.cos(a), y = Math.sin(a);
+      const hit = cast([x, y, z], [-x, -y, 0]);
+      assert.ok(hit && hit.distance > .5 && hit.distance < .8, `solid near barrel face at z=${z}, angle=${i}, recoil=${recoiling}`);
+    }
+    const bore = cast([0, 0, -GUN_MUZZLE_LENGTH - .2], [0, 0, 1]);
+    assert.ok(bore && Math.abs(bore.distance - .66) < .002, 'bore is open to its recessed dark backing');
+    for (let i = 0; i < 16; i++) {
+      const a = i / 16 * Math.PI * 2;
+      const rim = cast([Math.cos(a) * .26, Math.sin(a) * .26, -GUN_MUZZLE_LENGTH - .2], [0, 0, 1]);
+      assert.ok(rim && Math.abs(rim.distance - .2) < .002, 'annular muzzle has a continuous front-facing lip');
     }
   }
 });

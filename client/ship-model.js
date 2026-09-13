@@ -23,6 +23,11 @@ function patternTexture(kind) {
     if (kind === 'sail') {
       const thread = x % 8 === 0 || y % 8 === 0 ? -2 : 1;
       value = 241 + thread + ((x * 5 + y * 3) % 5 - 2);
+    } else if (kind === 'metal') {
+      // Broad oxidation with small hammer marks; deliberately no high-contrast
+      // pixel noise so the finish remains readable on a moving deck.
+      value = 225 + Math.sin(x * .55 + Math.sin(y * .4)) * 9
+        + Math.cos(y * .71 - x * .21) * 6 + ((x * 13 + y * 7) % 7 - 3);
     } else {
       // Neutral hand-painted tooth works on paint, wood and metal. Directional
       // wood marks are authored only on selected boards below.
@@ -47,15 +52,15 @@ function shipMaterial(kind = 'paint', { transparent = false, side = THREE.FrontS
   return new THREE.MeshStandardMaterial({
     vertexColors: true,
     map: patternTexture(kind),
-    roughness: kind === 'sail' ? .9 : .78,
-    metalness: 0,
+    roughness: kind === 'sail' ? .9 : kind === 'metal' ? .62 : .78,
+    metalness: kind === 'metal' ? .42 : 0,
     side,
     transparent,
   });
 }
 
-// GeoBatch deliberately drops UVs because the rest of the island uses flat toon
-// colour.  This local batch keeps them and provides stable planar UVs for custom
+// GeoBatch deliberately drops UVs for the original procedural scenery.
+// This local batch keeps them and provides stable planar UVs for custom
 // geometry, while retaining the same single-draw batching strategy.
 class ShipBatch {
   constructor(palette, material) {
@@ -145,20 +150,47 @@ function addBeveledBox(batch, position, dimensions, color, bevel = .035, rotatio
   batch.add(geometry, position, [1, 1, 1], rotation, color); geometry.dispose();
 }
 
-function cannonMuzzleShell() {
-  // One closed radial profile joins barrel, rolled lip, mouth and inner bore.
-  // This cannot reveal daylight between independently scaled primitive rings.
+function fittingBox(batch, position, dimensions, color, bevel = .025, rotation = [0, 0, 0]) {
+  const geometry = beveledBox(...dimensions, bevel);
+  const p = geometry.attributes.position, n = geometry.attributes.normal, colors = [];
+  for (let i = 0; i < p.count; i++) {
+    // Exposed chamfers polish lighter, with broad uneven grain on the faces.
+    // Position-based variation gives duplicated face vertices matching wear.
+    const edge = 1 - Math.max(Math.abs(n.getX(i)), Math.abs(n.getY(i)), Math.abs(n.getZ(i)));
+    const grain = Math.sin(p.getX(i) * 49 + p.getZ(i) * 5 + position[2] * 3) * .045;
+    const shade = .87 + edge * .8 + grain + Math.min(.07, Math.max(-.06, p.getY(i) * .09));
+    colors.push(shade, shade * .99, shade * .97);
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  batch.add(geometry, position, [1, 1, 1], rotation, color); geometry.dispose();
+}
+
+function fittingBeam(batch, a, b, width, height, color, bevel = .025) {
+  const dx = b[0] - a[0], dz = b[2] - a[2];
+  fittingBox(batch, [(a[0] + b[0]) / 2, a[1], (a[2] + b[2]) / 2],
+    [width, height, Math.hypot(dx, dz) + .025], color, bevel, [0, Math.atan2(dx, dz), 0]);
+}
+
+function cannonTubeGeometry(brass) {
   const muzzle = -GUN_MUZZLE_LENGTH;
-  const profile = [[.29, muzzle + .30], [.30, muzzle + .15], [.35, muzzle + .07], [.35, muzzle],
-    [.20, muzzle], [.20, muzzle + .26], [.29, muzzle + .30]].map(([radius, z]) => new THREE.Vector2(radius, z));
-  const geometry = new THREE.LatheGeometry(profile, 16);
-  const position = geometry.attributes.position, colors = [];
-  const brass = new THREE.Color(INK.brassLight), dark = new THREE.Color('#0a2230');
-  // LatheGeometry revolves around Y before the caller rotates that axis to Z.
-  for (let i = 0; i < position.count; i++) {
-    const radius = Math.hypot(position.getX(i), position.getZ(i));
-    const color = radius < .24 ? dark : brass;
-    colors.push(color.r, color.g, color.b);
+  // One continuous turned profile, including reinforcing rings, rolled lip,
+  // inner bore and recessed backing. No overlapping capped cylinders in the bore.
+  const steel = '#3b505c', edge = '#637580', soot = '#1c2a31';
+  const profile = [
+    [0, .52, steel], [.24, .52, steel], [.36, .40, edge], [.39, .29, steel],
+    [.39, -.25, steel], [.405, -.29, brass], [.405, -.39, brass], [.35, -.44, steel],
+    [.31, -.86, steel], [.35, -.90, edge], [.35, -1.04, steel], [.30, -1.08, steel],
+    [.27, -1.77, steel], [.30, -1.81, brass], [.30, -1.91, brass], [.265, -1.95, steel],
+    [.26, muzzle + .30, soot], [.31, muzzle + .20, steel], [.345, muzzle + .13, edge],
+    [.345, muzzle + .045, brass], [.32, muzzle, brass], [.215, muzzle, edge],
+    [.20, muzzle + .08, '#111d24'], [.20, muzzle + .46, '#080f14'], [0, muzzle + .46, '#080f14'],
+  ].reverse(); // Lathe exterior winding runs from muzzle towards breech (+Z).
+  const geometry = new THREE.LatheGeometry(profile.map(([r, z]) => new THREE.Vector2(r, z)), 20);
+  const p = geometry.attributes.position, colors = [], tint = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const row = profile[i % profile.length];
+    const shade = .94 + .07 * Math.sin(Math.atan2(p.getX(i), p.getZ(i)) * 3 + row[1] * 2.1);
+    tint.set(row[2]).multiplyScalar(shade); colors.push(tint.r, tint.g, tint.b);
   }
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   return geometry;
@@ -245,7 +277,12 @@ function addDeckPlanking(batch, rows) {
 function addRailSections(batch, rows) {
   for (const side of [-1, 1]) {
     const rawPorts = SHIP_GUNS.filter(gun => Math.sign(gun.x) === side)
-      .map(gun => [(gun.z - 4.25) / SHIP_SCALE.z, (gun.z + 4.25) / SHIP_SCALE.z]);
+      // The wider aft deck needs more longitudinal room for the full oblique
+      // cone to clear solid balusters; the narrowing bow clears sooner.
+      .map(gun => {
+        const clearance = gun.z < -4 ? 4.6 : 6.8;
+        return [(gun.z - clearance) / SHIP_SCALE.z, (gun.z + clearance) / SHIP_SCALE.z];
+      });
     const ports = [];
     for (const interval of rawPorts.sort((a, b) => a[0] - b[0])) {
       const previous = ports.at(-1);
@@ -253,20 +290,47 @@ function addRailSections(batch, rows) {
       else ports.push([...interval]);
     }
     const insidePort = z => ports.some(([low, high]) => z >= low && z <= high);
+    const posts = new Set();
+    const post = (z, x, heading) => {
+      const key = z.toFixed(4);
+      if (posts.has(key)) return;
+      posts.add(key);
+      const turn = [0, heading, 0];
+      fittingBox(batch, [x, .60, z], [.22, .85, .25], side < 0 ? INK.blue : INK.teal, .025, turn);
+      fittingBox(batch, [x, .29, z], [.28, .25, .31], INK.ironDark, .02, turn);
+      fittingBox(batch, [x, .87, z], [.26, .09, .29], INK.walnut, .018, turn);
+      // Broad iron shoes and a paired pin on the inside face read from the deck.
+      for (const y of [.30, .79]) batch.add('cylinder', [x - side * .145, y, z],
+        [.035, .026, .035], [0, 0, Math.PI / 2], INK.brass);
+    };
     for (let j = 0; j < rows.length - 1; j++) {
       const [az, aw] = rows[j], [bz, bw] = rows[j + 1];
       const cuts = [az, bz, ...ports.flat().filter(z => z > az && z < bz)].sort((a, b) => a - b);
       const railWidth = z => THREE.MathUtils.lerp(aw, bw, (z - az) / (bz - az));
-      batch.line([side * aw, .16, az], [side * bw, .16, bz], .19, INK.walnut, 1, 10);
+      const heading = Math.atan2(side * (bw - aw), bz - az);
+      fittingBeam(batch, [side * aw, .16, az], [side * bw, .16, bz], .34, .29, INK.walnut, .035);
+      fittingBeam(batch, [side * aw, .31, az], [side * bw, .31, bz], .29, .045, INK.honey, .01);
       batch.line([side * aw * .99, -1.03, az], [side * bw * .99, -1.03, bz], .095, INK.brass, 1, 9);
       for (let k = 0; k < cuts.length - 1; k++) {
         const start = cuts[k], end = cuts[k + 1];
         if (!insidePort((start + end) / 2)) {
-          batch.line([side * railWidth(start), 1.03, start], [side * railWidth(end), 1.03, end], .14, '#bd9955', 1, 10);
-          if (end - start > 1.2) {
-            const mid = (start + end) / 2, w = railWidth(mid);
-            batch.line([side * w, .2, mid], [side * w, .98, mid], .09, INK.walnut, 1, 8);
+          fittingBeam(batch, [side * railWidth(start), 1.04, start], [side * railWidth(end), 1.04, end],
+            .34, .17, INK.wood, .035);
+          fittingBeam(batch, [side * railWidth(start), 1.127, start], [side * railWidth(end), 1.127, end],
+            .26, .025, INK.honey, .008);
+          fittingBeam(batch, [side * railWidth(start), .55, start], [side * railWidth(end), .55, end],
+            .15, .13, INK.blue, .018);
+          const count = Math.max(1, Math.ceil((end - start) / 1.65));
+          for (let p = 0; p <= count; p++) {
+            // Keep the shoes inside the port cut, including their full thickness.
+            const z = THREE.MathUtils.lerp(start + .15, end - .15, p / count);
+            if (end - start < .4) continue;
+            post(z, side * railWidth(z), heading);
           }
+          // Iron scarf plates join the timber caps, with a warm worn pin head.
+          const z = (start + end) / 2, x = side * railWidth(z);
+          fittingBox(batch, [x, 1.147, z], [.30, .025, .20], INK.iron, .008, [0, heading, 0]);
+          batch.add('cylinder', [x, 1.168, z], [.035, .016, .035], [0, 0, 0], INK.brass);
         }
       }
     }
@@ -446,13 +510,14 @@ export function buildGalleon(palette, { buildJumpGate, addDeckChevron } = {}) {
       hullBatch.add('sphere', [x + Math.sin(a) * .51, .94, z + Math.cos(a) * .51], [.04, .04, .04], [0, 0, 0], INK.brass);
     }
   }
-  // Lanterns hang outside walk lanes and use opaque glass to stay in the one hull draw.
+  // Rail lanterns hang below the gunwale, beneath the complete depressed shot
+  // cone as well as outside the walk lanes. Opaque glass stays in the hull draw.
   for (const side of [-1, 1]) for (const z of [-7, 3, 9]) {
-    hullBatch.line([side * widthAt(rows, z) * .95, .88, z], [side * 5.0, 1.55, z], .06, INK.brass, 1, 7);
-    hullBatch.add('cylinder', [side * 5, 1.38, z], [.18, .12, .18], [0, 0, 0], INK.iron);
-    hullBatch.add('cylinder', [side * 5, .86, z], [.18, .12, .18], [0, 0, 0], INK.ironDark);
-    hullBatch.add('sphere', [side * 5, 1.12, z], [.15, .25, .15], [0, 0, 0], '#efce84');
-    for (const dx of [-.16, .16]) hullBatch.line([side * 5 + dx, .87, z], [side * 5 + dx, 1.37, z], .025, INK.brass, 1, 6);
+    hullBatch.line([side * widthAt(rows, z), .18, z], [side * 5.0, .02, z], .06, INK.iron, 1, 7);
+    hullBatch.add('cylinder', [side * 5, -.05, z], [.18, .12, .18], [0, 0, 0], INK.iron);
+    hullBatch.add('cylinder', [side * 5, -.57, z], [.18, .12, .18], [0, 0, 0], INK.ironDark);
+    hullBatch.add('sphere', [side * 5, -.31, z], [.15, .25, .15], [0, 0, 0], '#efce84');
+    for (const dx of [-.16, .16]) hullBatch.line([side * 5 + dx, -.56, z], [side * 5 + dx, -.06, z], .025, INK.brass, 1, 6);
   }
   const hullMesh = hullBatch.mesh(); hullMesh.name = 'airship-hull-and-deck';
   const sails = sailBatch.mesh(); sails.name = 'airship-sails';
@@ -494,48 +559,88 @@ export function buildDeckCannon(palette, gun) {
   group.name = gun.id; group.userData.gunId = gun.id; group.position.set(gun.x, 0, gun.z);
   swivel.name = 'cannon-swivel'; elevation.name = 'cannon-elevation'; barrel.name = 'cannon-recoil-barrel';
   const port = gun.x < 0, fore = gun.z < -4;
-  const wood = port ? '#805238' : '#95603c', brass = fore ? INK.brassLight : INK.brass;
-  const material = shipMaterial('paint', { side: THREE.DoubleSide });
+  const wood = port ? '#805238' : '#95603c', brass = fore ? '#b39563' : '#a78a59';
+  const material = shipMaterial('metal'), timberMaterial = shipMaterial('paint');
   const base = new ShipBatch(palette, material);
-  // Broad bevel-like tiering reads as a built pedestal while retaining the exact pivot.
-  base.add('cylinder', [0, .10, 0], [.60, .20, .60], [0, 0, 0], INK.ironDark);
-  base.add('cylinder', [0, .22, 0], [.52, .10, .52], [0, 0, 0], brass);
-  base.add('cylinder', [0, .25 + (GUN_PIVOT_HEIGHT - .72) / 2, 0], [.40, GUN_PIVOT_HEIGHT - .72, .40], [0, 0, 0], wood);
-  for (const y of [.48, 1.0, GUN_PIVOT_HEIGHT - .48]) base.add('cylinder', [0, y, 0], [.43, .105, .43], [0, 0, 0], brass);
-  for (let k = 0; k < 6; k++) {
-    const a = k * Math.PI / 3;
-    base.add('sphere', [Math.sin(a) * .48, .21, Math.cos(a) * .48], [.055, .045, .055], [0, 0, 0], INK.brassLight);
+  const timber = new ShipBatch(palette, timberMaterial);
+  fittingBox(base, [0, .12, 0], [1.12, .17, 1.12], INK.ironDark, .065);
+  fittingBox(timber, [0, .25, 0], [1.01, .16, 1.01], wood, .04);
+  // Eight separate staves and bolted vertical straps give the post real joinery.
+  const postHeight = GUN_PIVOT_HEIGHT - .72;
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4, sin = Math.sin(a), cos = Math.cos(a);
+    fittingBox(timber, [sin * .30, .31 + postHeight / 2, cos * .30], [.245, postHeight, .19],
+      k % 3 === 0 ? INK.honey : wood, .022, [0, a, 0]);
+    if (k % 2 === 0) {
+      fittingBox(base, [sin * .415, .82, cos * .415], [.10, 1.10, .045], INK.iron, .012, [0, a, 0]);
+      for (const y of [.42, 1.19]) base.add('sphere', [sin * .448, y, cos * .448], [.036, .036, .036], [0, 0, 0], brass);
+    }
   }
-  base.add('cylinder', [0, GUN_PIVOT_HEIGHT - .29, 0], [.51, .22, .51], [0, 0, 0], INK.iron);
+  for (const y of [.36, 1.35]) {
+    base.add('cylinder', [0, y, 0], [.455, .10, .455], [0, 0, 0], INK.ironDark);
+    base.add('cylinder', [0, y + .055, 0], [.458, .025, .458], [0, 0, 0], brass);
+  }
+  for (const x of [-.43, .43]) for (const z of [-.43, .43]) {
+    base.add('cylinder', [x, .355, z], [.071, .035, .071], [0, 0, 0], INK.ironDark);
+    base.add('cylinder', [x, .38, z], [.045, .037, .045], [0, 0, 0], brass);
+  }
+  base.add('cylinder', [0, GUN_PIVOT_HEIGHT - .35, 0], [.50, .15, .50], [0, 0, 0], '#4d626c');
+  base.add('cylinder', [0, GUN_PIVOT_HEIGHT - .23, 0], [.46, .09, .46], [0, 0, 0], brass);
+  // Repeated lugs describe the swivel race without an extra mesh per fitting.
+  for (let k = 0; k < 12; k++) {
+    const a = k * Math.PI / 6;
+    fittingBox(base, [Math.sin(a) * .49, GUN_PIVOT_HEIGHT - .35, Math.cos(a) * .49],
+      [.095, .12, .075], INK.ironDark, .01, [0, a, 0]);
+  }
   const pedestal = base.mesh(); pedestal.name = 'cannon-pedestal'; group.add(pedestal, swivel);
+  const pedestalTimber = timber.mesh(); pedestalTimber.name = 'cannon-pedestal-timber'; group.add(pedestalTimber);
   swivel.position.y = GUN_PIVOT_HEIGHT;
   const fork = new ShipBatch(palette, material);
   for (const side of [-1, 1]) {
-    addBeveledBox(fork, [side * .43, -.11, 0], [.18, .60, .67], INK.iron, .04, [0, 0, side * -.11]);
-    addBeveledBox(fork, [side * .43, .18, 0], [.23, .10, .72], '#456273', .028, [0, 0, side * -.11]);
-    fork.add('cylinder', [side * .50, 0, 0], [.19, .16, .19], [0, 0, Math.PI / 2], brass);
-    fork.add('sphere', [side * .59, 0, 0], [.08, .13, .13], [0, 0, 0], INK.brassLight);
+    fittingBox(fork, [side * .46, -.12, 0], [.18, .61, .69], port ? INK.blue : INK.teal, .045, [0, 0, side * -.11]);
+    fittingBox(fork, [side * .46, .18, 0], [.23, .09, .70], '#64757c', .025, [0, 0, side * -.11]);
+    fittingBox(fork, [side * .568, -.12, .02], [.045, .35, .47], INK.ironDark, .02);
+    fork.add('cylinder', [side * .55, 0, 0], [.185, .15, .185], [0, 0, Math.PI / 2], brass);
+    fork.add('cylinder', [side * .64, 0, 0], [.12, .045, .12], [0, 0, Math.PI / 2], '#556671');
+    fittingBox(fork, [side * .67, 0, 0], [.025, .036, .14], INK.ironDark, .008);
+    for (const z of [-.24, .25]) fork.add('sphere', [side * .58, -.19, z], [.028, .035, .035], [0, 0, 0], brass);
   }
-  const forkMesh = fork.mesh(); forkMesh.name = 'cannon-yoke'; swivel.add(forkMesh, elevation); elevation.add(barrel);
+  fittingBox(fork, [0, -.29, .02], [1.0, .14, .64], INK.ironDark, .03);
+  // Outboard adjustment wheel is fixed to the yoke, clear of the recoil slide.
+  const wheel = new THREE.TorusGeometry(.22, .029, 6, 16);
+  fork.add(wheel, [.76, -.02, .18], [1, 1, 1], [0, Math.PI / 2, 0], brass); wheel.dispose();
+  fork.line([.55, -.02, .18], [.79, -.02, .18], .045, INK.iron, 1, 8);
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2;
+    fork.line([.76, -.02, .18], [.76, -.02 + Math.sin(a) * .20, .18 + Math.cos(a) * .20], .019, brass, 1, 6);
+  }
+  swivel.add(elevation); elevation.add(barrel);
   const tube = new ShipBatch(palette, material);
-  // A broad faceted breech echoes the oversized octagonal receivers of the GLBs.
-  tube.add('cylinder', [0, 0, .12], [.39, .72, .39], [Math.PI / 2, 0, 0], INK.iron);
-  tube.add('sphere', [0, 0, .43], [.31, .31, .30], [0, 0, 0], '#263f4f');
-  tube.line([0, 0, .12], [0, 0, -GUN_MUZZLE_LENGTH + .09], .29, INK.iron, .86, 12, true);
-  // Faceted blue-steel highlights and chunky brass reinforce the handheld GLB language.
-  tube.line([0, .245, -.18], [0, .20, -2.34], .045, '#587486', .7, 7);
-  for (const z of [-.14, -.72, -1.67])
-    tube.add('cylinder', [0, 0, z], [.325, .14, .325], [Math.PI / 2, 0, 0], brass);
-  // Contiguous profiled lip and bore; source vertex colours darken only its inner wall.
-  const muzzleShell = cannonMuzzleShell();
-  tube.add(muzzleShell, [0, 0, 0], [1, 1, 1], [Math.PI / 2, 0, 0]); muzzleShell.dispose();
-  tube.add('cylinder', [0, 0, -GUN_MUZZLE_LENGTH + .33], [.19, .018, .19], [Math.PI / 2, 0, 0], '#061721');
-  tube.add('box', [0, .33, -1.38], [.075, .14, .14], [0, 0, 0], brass);
-  tube.add('sphere', [0, .40, -1.38], [.09, .08, .09], [0, 0, 0], INK.brassLight);
-  tube.line([0, -.1, .40], [0, -.25, .83], .082, wood, .82, 8);
-  tube.line([-.34, -.25, .83], [.34, -.25, .83], .075, wood, .78, 8);
-  for (const side of [-1, 1]) tube.add('sphere', [side * .35, -.25, .83], [.095, .095, .095], [0, 0, 0], brass);
+  const tubeGeometry = cannonTubeGeometry(brass);
+  tube.add(tubeGeometry, [0, 0, 0], [1, 1, 1], [Math.PI / 2, 0, 0]); tubeGeometry.dispose();
+  // Breech cheek plates and rubbed edges echo the handheld weapon receivers.
+  for (const side of [-1, 1]) {
+    fittingBox(tube, [side * .345, 0, .035], [.09, .34, .49], INK.iron, .025);
+    fittingBox(tube, [side * .398, .06, .025], [.02, .045, .25], '#809095', .006);
+    for (const z of [-.13, .20]) tube.add('sphere', [side * .406, -.08, z], [.025, .032, .032], [0, 0, 0], brass);
+    tube.line([side * .19, .18, -1.14], [side * .165, .16, -1.66], .009, '#75838a', .45, 5);
+  }
+  tube.add('cylinder', [0, 0, .58], [.11, .18, .11], [Math.PI / 2, 0, 0], brass);
+  tube.add('sphere', [0, 0, .69], [.15, .15, .14], [0, 0, 0], INK.iron);
+  fittingBox(tube, [0, .36, -.04], [.16, .10, .18], INK.ironDark, .02);
+  fittingBox(tube, [0, .26, -1.99], [.065, .10, .14], brass, .012);
+  // Handling grips belong to the fixed yoke; pitching/recoiling the barrel must
+  // not drive the controls down through the timber pedestal.
+  for (const side of [-1, 1]) fork.line([side * .46, -.24, .29], [side * .46, -.30, 1.0], .045, INK.iron, 1, 8);
+  fork.line([-.46, -.30, 1.0], [.46, -.30, 1.0], .055, brass, 1, 10);
+  const grips = new ShipBatch(palette, timberMaterial);
+  for (const side of [-1, 1]) {
+    fittingBox(grips, [side * .30, -.30, 1.0], [.23, .13, .14], wood, .025);
+    for (const x of [.195, .405]) fork.add('cylinder', [side * x, -.30, 1.0], [.083, .028, .083], [0, 0, Math.PI / 2], brass);
+  }
+  const forkMesh = fork.mesh(); forkMesh.name = 'cannon-yoke'; swivel.add(forkMesh);
   const barrelMesh = tube.mesh(); barrelMesh.name = 'cannon-barrel-detail'; barrel.add(barrelMesh);
+  const gripMesh = grips.mesh(); gripMesh.name = 'cannon-timber-grips'; swivel.add(gripMesh);
   const muzzle = new THREE.Object3D(); muzzle.name = 'cannon-muzzle'; muzzle.position.z = -GUN_MUZZLE_LENGTH; elevation.add(muzzle);
   let recoil = 0;
   function animate(dt, yaw = gun.yaw, pitch = .1, occupantId = null) {
