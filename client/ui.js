@@ -11,6 +11,7 @@ import { SKY_BOSSES, SKY_GROUND_WAVES } from '../shared/sky-finale.js';
 import { skyState } from './sky-finale.js';
 import { createLootReveal } from './loot-reveal.js';
 import { DIVE_ENTRANCE, REEF_EXIT, REEF_CHEST, REEF_BOUNDS, REEF_SOLIDS, reefLineOfSight, realmOf, sameRealm } from '../shared/underwater.js';
+import { REEF_REGIONS, REEF_DISCOVERIES, REEF_CACHES, REEF_EVENTS, REEF_LANDMARK_SOLIDS, reefRegionAt } from '../shared/underwater-content.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -95,7 +96,7 @@ export function jumpGateLabel(state) {
 // deck, a skycrab on its lane — mark that exact point. Everything standing on the
 // island keeps its terrain-relative offset, including the Tempest, whose y is a
 // feet position. A new kind opts in here explicitly.
-const ABSOLUTE_MARKER_KINDS = new Set(['jump-gate', 'cannon', 'sky-boss', 'reef-guard', 'reef-chest', 'reef-exit']);
+const ABSOLUTE_MARKER_KINDS = new Set(['jump-gate', 'cannon', 'sky-boss', 'reef-guard', 'reef-chest', 'reef-exit', 'reef-cache', 'reef-event', 'reef-node', 'reef-discovery']);
 export function objectiveMarkerHeight(objective) {
   if (ABSOLUTE_MARKER_KINDS.has(objective?.kind) && Number.isFinite(objective.y)) return objective.y;
   return heightAt(objective.x, objective.z) + (objective.kind === 'boss' ? 4 : 9);
@@ -157,6 +158,34 @@ export function findInteractable(state, player) {
       if (friend.id !== player.id && friend.online && sameRealm(player, friend) && friend.knockedUntil > state.elapsed
         && distance3(player, friend) <= 3.5 && reefLineOfSight(eye, { x: friend.x, y: friend.y + .7, z: friend.z }, .08)) {
         options.push({ id: friend.id, kind: 'revive', label: `Help ${friend.name} up`, distance: distance3(player, friend) - 10 });
+      }
+    }
+    // The server remains the authority for every reef interaction. These are
+    // only the same close, clear routes rendered as an E affordance.
+    const underwater = state.underwater || {};
+    const cacheState = new Map((underwater.caches || []).map(entry => [entry.id, entry]));
+    const encounterState = new Map((underwater.encounters || []).map(entry => [entry.id, entry]));
+    const eventState = new Map((underwater.events || []).map(entry => [entry.id, entry]));
+    for (const cache of REEF_CACHES) {
+      const current = cacheState.get(cache.id);
+      if (current?.opened || distance3(player, cache) > 3.5 || !reefLineOfSight(eye, { x: cache.x, y: cache.y, z: cache.z }, .08)) continue;
+      const guards = cache.encounterId ? encounterState.get(cache.encounterId)?.remaining || 0 : 0;
+      options.push({ ...cache, kind: 'reef-cache', disabled: guards > 0,
+        label: guards > 0 ? `${cache.name} · ${guards} guard${guards === 1 ? '' : 's'} remain` : `Open ${cache.name}`,
+        color: guards > 0 ? '#b7a27a' : '#ffd16c', distance: distance3(player, cache) - 3 });
+    }
+    if (!underwater.chestOpened && !underwater.remaining && distance3(player, REEF_CHEST) <= 3.5
+      && reefLineOfSight(eye, { x: REEF_CHEST.x, y: REEF_CHEST.y, z: REEF_CHEST.z }, .08)) {
+      options.push({ ...REEF_CHEST, kind: 'reef-chest', label: 'Open wreck treasure', color: '#ffd16c', distance: distance3(player, REEF_CHEST) - 3.25 });
+    }
+    for (const event of REEF_EVENTS) {
+      const current = eventState.get(event.id) || { status: 'available', progress: [] };
+      if (current.status === 'completed') continue;
+      const node = current.status === 'active' && event.nodes.find(entry => !(current.progress || []).includes(entry.id)
+        && distance3(player, entry) <= entry.range && reefLineOfSight(eye, { x: entry.x, y: entry.y, z: entry.z }, .08));
+      if (node) options.push({ ...node, eventId: event.id, kind: 'reef-node', label: `${event.kind === 'rescue' ? 'Free' : 'Ring'} ${node.name}`, color: '#9be6da', distance: distance3(player, node) - 4 });
+      else if (current.status === 'available' && distance3(player, event) <= event.range && reefLineOfSight(eye, { x: event.x, y: event.y, z: event.z }, .08)) {
+        options.push({ ...event, kind: 'reef-event', label: `Begin ${event.name}`, color: '#f5d277', distance: distance3(player, event) - 4 });
       }
     }
     const exitDistance = distance3(player, REEF_EXIT);
@@ -400,15 +429,67 @@ export function skyObjective(state, player) {
 export function underwaterHud(state, player) {
   if (!player || realmOf(player) !== 'reef') return null;
   const underwater = state.underwater || {};
+  const hasExpansion = ['discoveries', 'caches', 'events'].some(key => Array.isArray(underwater[key]));
+  if (!hasExpansion) {
+    const remaining = Math.max(0, Number(underwater.remaining) || 0);
+    if (remaining > 0) return { stage: 'guards', title: 'Clear the Sunken Reach', detail: `${remaining} reef guard${remaining === 1 ? '' : 's'} remaining` };
+    if (!underwater.chestOpened) return { stage: 'chest', title: 'Search the wreck', detail: 'The treasure chest is unlocked. Swim inside to collect it.' };
+    return { stage: 'return', title: 'Return to shore', detail: 'The wreck is secured. Follow the cyan beacon and press E.' };
+  }
+  const region = reefRegionAt(player.x, player.z);
+  const discoveries = new Set(underwater.discoveries || []);
+  const caches = new Map((underwater.caches || []).map(entry => [entry.id, entry]));
+  const events = new Map((underwater.events || []).map(entry => [entry.id, entry]));
+  const activeDefinition = REEF_EVENTS.filter(event => events.get(event.id)?.status === 'active' && distance3(player, event) <= 48)
+    .sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  const active = activeDefinition && { ...activeDefinition, ...events.get(activeDefinition.id) };
+  const nearby = [
+    ...REEF_DISCOVERIES.filter(entry => !discoveries.has(entry.id) && distance3(player, entry) <= 38).map(entry => ({ ...entry, kind: 'discovery' })),
+    ...REEF_CACHES.filter(entry => !caches.get(entry.id)?.opened && distance3(player, entry) <= 38).map(entry => ({ ...entry, kind: 'cache' })),
+  ].sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  const visited = discoveries.size, opened = [...caches.values()].filter(entry => entry.opened).length;
+  if (active) {
+    const done = active.kind === 'defense' ? Math.max(0, 4 - (active.remaining || 0)) : (active.progress || []).length;
+    const total = active.kind === 'defense' ? 4 : REEF_EVENTS.find(entry => entry.id === active.id)?.nodes.length || 3;
+    return { stage: 'event', title: active.name, detail: `${active.kind === 'defense' ? 'Defeat the guards' : 'Press E at each glowing node'} · ${done}/${total}`, region, visited, opened };
+  }
+  if (nearby) return { stage: nearby.kind, title: nearby.kind === 'cache' ? `Nearby treasure: ${nearby.name}` : `Nearby discovery: ${nearby.name}`,
+    detail: nearby.kind === 'cache' ? 'Approach it and press E to open.' : nearby.description, region, visited, opened };
+  const available = REEF_EVENTS.filter(event => events.get(event.id)?.status !== 'completed').sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  if (available) return { stage: 'event', title: `${available.name} awaits`, detail: `${available.description} · ${Math.round(distance3(player, available))} m away`, region, visited, opened };
   const remaining = Math.max(0, Number(underwater.remaining) || 0);
-  if (remaining > 0) return { stage: 'guards', title: 'Clear the Sunken Reach', detail: `${remaining} reef guard${remaining === 1 ? '' : 's'} remaining` };
-  if (!underwater.chestOpened) return { stage: 'chest', title: 'Search the wreck', detail: 'The treasure chest is unlocked. Swim inside to collect it.' };
-  return { stage: 'return', title: 'Return to shore', detail: 'The wreck is secured. Follow the cyan beacon and press E.' };
+  if (!underwater.chestOpened) return { stage: remaining ? 'guards' : 'chest', title: remaining ? 'Explore the old wreck' : 'Search the wreck', detail: remaining ? `${remaining} wreck guard${remaining === 1 ? '' : 's'} remain · treasure is optional` : 'The original wreck chest is unlocked.', region, visited, opened };
+  return { stage: 'return', title: 'Keep exploring Sunken Reach', detail: `The old wreck is secure. ${REEF_REGIONS.length} regions and ${REEF_DISCOVERIES.length - visited} discoveries remain · cyan beacon returns to shore.`, region, visited, opened };
 }
 
 export function underwaterObjective(state, player) {
   const hud = underwaterHud(state, player);
   if (!hud) return null;
+  if (!['discoveries', 'caches', 'events'].some(key => Array.isArray(state.underwater?.[key]))) {
+    if (hud.stage === 'guards') {
+      const enemies = (state.enemies || []).filter(enemy => enemy.hp > 0 && sameRealm(player, enemy));
+      const target = enemies.sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+      return target ? { ...target, name: 'Reef guard', kind: 'reef-guard' } : { ...REEF_CHEST, name: 'Sunken wreck', kind: 'reef-chest' };
+    }
+    return hud.stage === 'chest' ? { ...REEF_CHEST, name: 'Wreck treasure', kind: 'reef-chest' } : { ...REEF_EXIT, kind: 'reef-exit' };
+  }
+  const underwater = state.underwater || {};
+  const discoveries = new Set(underwater.discoveries || []);
+  const caches = new Map((underwater.caches || []).map(entry => [entry.id, entry]));
+  const events = new Map((underwater.events || []).map(entry => [entry.id, entry]));
+  const activeDefinition = REEF_EVENTS.filter(event => events.get(event.id)?.status === 'active' && distance3(player, event) <= 48)
+    .sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  const active = activeDefinition && { ...activeDefinition, ...events.get(activeDefinition.id) };
+  if (active) {
+    const progress = events.get(active.id)?.progress || [];
+    const node = active.nodes.filter(entry => !progress.includes(entry.id)).sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+    return node ? { ...node, name: node.name, kind: 'reef-node' } : { ...active, kind: 'reef-event' };
+  }
+  const exploration = [...REEF_DISCOVERIES.filter(entry => !discoveries.has(entry.id)).map(entry => ({ ...entry, kind: 'reef-discovery' })), ...REEF_CACHES.filter(entry => !caches.get(entry.id)?.opened).map(entry => ({ ...entry, kind: 'reef-cache' }))]
+    .sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  if (exploration && distance3(player, exploration) <= 42) return exploration;
+  const available = REEF_EVENTS.filter(event => events.get(event.id)?.status !== 'completed').sort((a, b) => distance3(player, a) - distance3(player, b))[0];
+  if (available) return { ...available, kind: 'reef-event' };
   if (hud.stage === 'guards') {
     const enemies = (state.enemies || []).filter(enemy => enemy.hp > 0 && sameRealm(player, enemy));
     const target = enemies.sort((a, b) => distance3(player, a) - distance3(player, b))[0];
@@ -444,6 +525,7 @@ export function nearestObjective(state, player) {
 // drops never appear as if they occupy the same chart.
 export function mapEntries(state, player) {
   const realm = realmOf(player);
+  const expandedReef = Array.isArray(state.underwater?.caches) || Array.isArray(state.underwater?.events);
   const players = (state.players || []).filter(entry => entry.online && realmOf(entry) === realm);
   const playerIds = new Set(players.map(entry => entry.id));
   return {
@@ -452,7 +534,7 @@ export function mapEntries(state, player) {
     pings: (state.pings || []).filter(entry => entry.realm ? realmOf(entry) === realm : playerIds.has(entry.playerId)),
     drops: (state.drops || []).filter(entry => realmOf(entry) === realm),
     landmarks: realm === 'reef'
-      ? [{ ...REEF_EXIT, kind: 'reef-exit' }, { ...REEF_CHEST, name: 'Wreck treasure', kind: 'reef-chest' }]
+        ? [{ ...REEF_EXIT, kind: 'reef-exit' }, { ...REEF_CHEST, name: 'Wreck treasure', kind: 'reef-chest' }, ...(expandedReef ? [...REEF_CACHES.map(entry => ({ ...entry, kind: 'reef-cache' })), ...REEF_EVENTS.map(entry => ({ ...entry, kind: 'reef-event' }))] : [])]
       : [{ ...DIVE_ENTRANCE, kind: 'dive-entrance' }],
   };
 }
@@ -551,6 +633,14 @@ function createMapPainter() {
     gradient.addColorStop(0, '#176b76'); gradient.addColorStop(1, '#062f47');
     ctx.fillStyle = '#082d41'; ctx.fillRect(0, 0, width, height);
     ctx.fillStyle = gradient; ctx.fillRect(ox, oy, size, size);
+    // This is the complete 276 × 276 reef chart. Region disks are deliberately
+    // transparent so the routes and the individual discoveries stay legible.
+    for (const region of REEF_REGIONS) {
+      const center = point(region), radius = region.radius * Math.min(scaleX, scaleZ);
+      ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = `${region.color}38`; ctx.fill(); ctx.strokeStyle = `${region.accent}b0`; ctx.lineWidth = large ? 1.6 : .8; ctx.stroke();
+      if (large) { ctx.font = 'bold 11px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = region.accent; ctx.fillText(region.name, center.x, center.y - radius - 6); }
+    }
     ctx.strokeStyle = '#89e7df22'; ctx.lineWidth = 1;
     for (let i = 1; i < 8; i++) { ctx.beginPath(); ctx.moveTo(ox, oy + size * i / 8); ctx.lineTo(ox + size, oy + size * i / 8); ctx.stroke(); }
     // Broken hull boxes are drawn from the exact collision plan shared with the server.
@@ -563,10 +653,15 @@ function createMapPainter() {
       ctx.strokeRect(center.x - solid.width * scaleX / 2, center.y - solid.depth * scaleZ / 2,
         solid.width * scaleX, solid.depth * scaleZ);
     }
+    for (const solid of REEF_LANDMARK_SOLIDS) {
+      const center = point(solid);
+      ctx.fillStyle = solid.material === 'basalt' ? '#513842' : solid.material === 'wood' ? '#73523f' : '#6b8379';
+      ctx.fillRect(center.x - solid.width * scaleX / 2, center.y - solid.depth * scaleZ / 2, solid.width * scaleX, solid.depth * scaleZ);
+    }
     if (large) {
       ctx.font = 'bold 12px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#dcf8ed';
       const wreck = point(REEF_CHEST); ctx.fillText('Sunken wreck', wreck.x, wreck.y - 18);
-      ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.fillStyle = '#9ed7d3'; ctx.fillText(`Depth ${Math.max(0, Math.round(18 - player.y))} m`, ox + size - 43, oy + 17);
+      ctx.font = '11px "Trebuchet MS",sans-serif'; ctx.fillStyle = '#9ed7d3'; ctx.fillText(`Depth ${Math.max(0, Math.round(REEF_BOUNDS.maxY - player.y))} m`, ox + size - 43, oy + 17);
     }
     const exit = point(REEF_EXIT);
     ctx.beginPath(); ctx.arc(exit.x, exit.y, large ? 9 : 5, 0, Math.PI * 2); ctx.fillStyle = '#79f5ff'; ctx.fill();
@@ -575,6 +670,28 @@ function createMapPainter() {
     const chest = point(REEF_CHEST);
     if (!state.underwater?.chestOpened) {
       ctx.fillStyle = '#ffd16c'; ctx.fillRect(chest.x - (large ? 5 : 3), chest.y - (large ? 4 : 2), large ? 10 : 6, large ? 8 : 4);
+    }
+    const cacheStates = new Map((state.underwater?.caches || []).map(entry => [entry.id, entry]));
+    const eventStates = new Map((state.underwater?.events || []).map(entry => [entry.id, entry]));
+    const discoveries = new Set(state.underwater?.discoveries || []);
+    for (const discovery of REEF_DISCOVERIES) {
+      const marker = point(discovery); ctx.beginPath(); ctx.arc(marker.x, marker.y, large ? 3.5 : 2, 0, Math.PI * 2);
+      ctx.fillStyle = discoveries.has(discovery.id) ? '#d8fff0' : '#86c7be'; ctx.fill();
+    }
+    for (const cache of REEF_CACHES) {
+      if (cacheStates.get(cache.id)?.opened) continue;
+      const marker = point(cache); ctx.fillStyle = '#ffd16c'; ctx.fillRect(marker.x - 3, marker.y - 2, 6, 4);
+    }
+    for (const event of REEF_EVENTS) {
+      const current = eventStates.get(event.id); const marker = point(event);
+      ctx.beginPath(); ctx.arc(marker.x, marker.y, large ? 6 : 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = current?.status === 'completed' ? '#708d8d' : current?.status === 'active' ? '#fff0a0' : '#f5d277'; ctx.fill();
+      if (large) { ctx.font = '10px "Trebuchet MS",sans-serif'; ctx.fillStyle = '#e9fffb'; ctx.textAlign = 'center'; ctx.fillText(event.name, marker.x, marker.y + 15); }
+      if (current?.status === 'active') for (const node of event.nodes) {
+        if ((current.progress || []).includes(node.id)) continue;
+        const nodePoint = point(node); ctx.beginPath(); ctx.arc(nodePoint.x, nodePoint.y, large ? 4 : 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff5b7'; ctx.fill(); ctx.strokeStyle = '#6e5032'; ctx.lineWidth = 1; ctx.stroke();
+      }
     }
     const objective = nearestObjective(state, player);
     if (large && objective) {
@@ -1083,7 +1200,7 @@ export function createUI(callbacks = {}) {
       if (won) { victory(state, player); return; }
       if (!playing) return;
       const reef = realmOf(player) === 'reef';
-      const region = reef ? null : regionAt(player.x, player.z);
+      const region = reef ? reefRegionAt(player.x, player.z) : regionAt(player.x, player.z);
       const place = player.mode === 'ground' ? pointOfInterestAt(player.x, player.z) : null;
       if (place && player.grounded && player.knockedUntil <= state.elapsed && !paused && !mapOpen && !discoveries.has(place.id)) {
         discoveries.add(place.id); updateDiscoveries(); mapAt = 0;
@@ -1153,7 +1270,16 @@ export function createUI(callbacks = {}) {
           detail = 'The shrine captures automatically when its last defender falls.';
         }
       }
-      text(refs['quest-region'], reef ? 'Beneath Sunwake Strand' : player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
+      text(refs['quest-region'], reef ? `${region.name} · Sunken Reach` : player.mode === 'aboard' ? 'Aboard the Skywake' : place?.name || region.name);
+      if (reef) {
+        const underwaterState = state.underwater || {};
+        const discovered = new Set(underwaterState.discoveries || []).size;
+        const opened = (underwaterState.caches || []).filter(entry => entry.opened).length;
+        text(refs['reef-map-region'], region.name);
+        text(refs['reef-map-status'], `${region.description} Return beacon: ${Math.round(distance3(player, REEF_EXIT))} m away.`);
+        text(refs['reef-map-discoveries'], `${discovered} / ${REEF_DISCOVERIES.length}`);
+        text(refs['reef-map-caches'], `${opened} / ${REEF_CACHES.length}`);
+      }
       text(refs['quest-title'], title); text(refs['quest-detail'], detail); text(refs['pearl-count'], `${state.pearls} shared pearls`);
       refs['shard-slots'].setAttribute('aria-label', `${state.shards} of 3 compass shards`);
       [...refs['shard-slots'].children].forEach((slot, index) => slot.classList.toggle('collected', index < state.shards));
@@ -1195,9 +1321,9 @@ export function createUI(callbacks = {}) {
         refs['minimap-caption'].replaceChildren(document.createTextNode(reef ? 'Sunken Reach map ' : 'Island map '), Object.assign(document.createElement('kbd'), { textContent: 'M' }));
         refs['minimap-button'].setAttribute('aria-label', `Open ${reef ? 'Sunken Reach' : 'island'} map (M)`);
         text(refs['map-title'], reef ? 'The Sunken Reach' : 'Chart the isles.');
-        text(refs['map-kicker'], reef ? 'A wreck below the safe beach' : 'Your shared adventure');
+        text(refs['map-kicker'], reef ? 'Six regions below the safe beach' : 'Your shared adventure');
         refs['large-map'].setAttribute('aria-label', reef
-          ? 'Sunken Reach chart showing the wreck, treasure chest, return beacon, and nearby crew'
+          ? 'Sunken Reach chart showing all six named regions, discoveries, caches, events, the return beacon, and nearby crew'
           : 'Island chart showing regions, paths, buildings, places, shrines, lighthouse, lifts, dive entrance, and nearby crew');
       }
       const hp = Math.max(0, Math.ceil(player.hp));

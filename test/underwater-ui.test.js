@@ -4,6 +4,7 @@ import { crewLocationLabel, findInteractable, mapEntries, nearestObjective, obje
 import { weaponPresentation } from '../client/weapon-presentation.js';
 import { createInput } from '../client/input.js';
 import { DIVE_ENTRANCE, REEF_CHEST, REEF_EXIT } from '../shared/underwater.js';
+import { REEF_CACHES, REEF_DISCOVERIES, REEF_EVENTS, REEF_REGIONS } from '../shared/underwater-content.js';
 import { heightAt } from '../shared/world.js';
 
 const landPlayer = (overrides = {}) => ({ id: 'local', name: 'Local', color: '#65d7c5', online: true, hp: 100, maxHp: 100,
@@ -106,4 +107,50 @@ test('all carried weapons, reload feedback and Longshot scope remain active whil
   player.weapon = 'scatter'; player.reloadUntil = state.elapsed + .5;
   const reload = weaponPresentation(state, player, controls);
   assert.equal(reload.active, true); assert.equal(reload.reloading, true); assert.ok(reload.reloadProgress >= 0);
+});
+
+test('expanded reef guidance prioritizes an active event node, then nearby cache or discovery over the old wreck', () => {
+  const event = REEF_EVENTS.find(entry => entry.id === 'sanctuary-chimes');
+  const node = event.nodes[0];
+  const player = reefPlayer({ x: node.x, y: node.y, z: node.z });
+  const state = fixture(player);
+  state.underwater = { ...state.underwater, discoveries: [], caches: [], encounters: [], events: [{ id: event.id, status: 'active', progress: [], remaining: 0 }] };
+  const active = underwaterHud(state, player);
+  assert.equal(active.stage, 'event');
+  assert.match(active.detail, /0\/3/);
+  assert.equal(nearestObjective(state, player).id, node.id);
+
+  state.underwater.events = REEF_EVENTS.map(entry => ({ id: entry.id, status: 'completed', progress: entry.nodes.map(node => node.id), remaining: 0 }));
+  const cache = REEF_CACHES[0]; Object.assign(player, { x: cache.x, y: cache.y, z: cache.z });
+  assert.equal(underwaterHud(state, player).stage, 'cache');
+  assert.equal(nearestObjective(state, player).id, cache.id);
+  state.underwater.caches = REEF_CACHES.map(entry => ({ id: entry.id, opened: true }));
+  const discovery = REEF_DISCOVERIES[0]; Object.assign(player, { x: discovery.x, y: discovery.y, z: discovery.z });
+  assert.equal(underwaterHud(state, player).stage, 'discovery');
+});
+
+test('the expanded chart retains all six named areas and local-only markers', () => {
+  const player = reefPlayer({ x: REEF_REGIONS[4].x, z: REEF_REGIONS[4].z });
+  const state = fixture(player);
+  state.underwater = { ...state.underwater, discoveries: [], caches: [], encounters: [], events: [] };
+  const entries = mapEntries(state, player);
+  assert.equal(REEF_REGIONS.length, 6);
+  assert.equal(entries.landmarks.filter(entry => entry.kind === 'reef-cache').length, REEF_CACHES.length);
+  assert.equal(entries.landmarks.filter(entry => entry.kind === 'reef-event').length, REEF_EVENTS.length);
+  assert.equal(underwaterHud(state, player).region.id, 'ember-vents');
+});
+
+test('event HUD progress is taken from the authoritative snapshot and guarded caches do not offer E', () => {
+  const defense = REEF_EVENTS.find(entry => entry.kind === 'defense');
+  const player = reefPlayer({ x: defense.x, y: defense.y, z: defense.z });
+  const state = fixture(player);
+  state.underwater = { ...state.underwater, discoveries: [], caches: [], encounters: [], events: [{ id: defense.id, status: 'active', progress: [], remaining: 4 }] };
+  assert.match(underwaterHud(state, player).detail, /0\/4/);
+
+  const guarded = REEF_CACHES.find(entry => entry.encounterId);
+  Object.assign(player, { x: guarded.x, y: guarded.y, z: guarded.z });
+  state.underwater.events = [];
+  state.underwater.encounters = [{ id: guarded.encounterId, remaining: 2 }];
+  assert.equal(findInteractable(state, player)?.disabled, true);
+  assert.match(findInteractable(state, player)?.label, /2 guards remain/);
 });

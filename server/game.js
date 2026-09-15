@@ -4,6 +4,7 @@ import { canReturnAtShrine, SHRINE_RETURN_RANGE } from '../shared/shrines.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
 import { resolveWorldCollision, hasWorldLineOfSight } from '../shared/collision.js';
 import { DIVE_ENTRANCE, REEF_SPAWN, REEF_EXIT, REEF_CHEST, reefLineOfSight, resolveReefCollision, realmOf, sameRealm } from '../shared/underwater.js';
+import { REEF_DISCOVERIES, REEF_CACHES, REEF_ENCOUNTERS, REEF_EVENTS } from '../shared/underwater-content.js';
 import { WEAPONS, RARITIES, SALVAGE_PEARLS, weaponStats, rollWeapon } from '../shared/weapons.js';
 import { encounterSpawns, inSafeLanding, KNOCK_DURATION } from '../shared/encounters.js';
 import { enemyStats } from '../shared/enemies.js';
@@ -261,7 +262,10 @@ export class Game {
     this.sideEvents = SIDE_EVENTS.map(event => ({ id: event.id, status: 'available', wave: 0, remaining: 0,
       integrity: 100, maxIntegrity: 100, startedAt: 0, endsAt: 0, finishedAt: 0 }));
     this.chests = CHESTS.map(c => ({ id: c.id, opened: false }));
-    this.underwater = { entered: false, completed: false, remaining: 0, chestOpened: false };
+    this.underwater = { entered: false, completed: false, remaining: 0, chestOpened: false,
+      discoveries: [], caches: REEF_CACHES.map(cache => ({ id: cache.id, opened: false })),
+      encounters: REEF_ENCOUNTERS.map(encounter => ({ id: encounter.id, remaining: 0 })),
+      events: REEF_EVENTS.map(event => ({ id: event.id, status: 'available', progress: [], remaining: 0 })) };
     // Stage 0 means the beacon is unlit; `stages` travels in the snapshot so a
     // client can label "stage 2/4" without importing the stage table. `_sky`
     // holds the airship stage's private lifecycle while it runs, and nothing
@@ -660,7 +664,13 @@ export class Game {
     // stage wins in the same call.
     if (e._shrine) this.settleShrine(this.shrines.find(shrine => shrine.id === e._shrine));
     if (e._finale) this.settleFinale();
-    if (realmOf(e) === 'reef') this.underwater.remaining = [...this.enemies.values()].filter(other => realmOf(other) === 'reef' && other.hp > 0).length;
+    if (realmOf(e) === 'reef') {
+      // The old wreck treasure is gated by only its own three guards; distant
+      // optional pockets never turn exploration into a whole-realm clear.
+      this.underwater.remaining = [...this.enemies.values()].filter(other => other._reefOriginal && other.hp > 0).length;
+      if (e._reefEncounter) this.settleReefEncounter(e._reefEncounter);
+      if (e._reefEvent) this.settleReefEvent(e._reefEvent, sourceId);
+    }
   }
 
   heal(p) {
@@ -693,7 +703,7 @@ export class Game {
     p._input = restInput(p); p._inputAt = this.clock;
     if (!this.underwater.entered) {
       this.underwater.entered = true;
-      for (const point of [{ x: 0, y: 8, z: 3 }, { x: 17, y: 8, z: -7 }, { x: 8, y: 8, z: -17 }]) this.spawnReefEnemy(point);
+      for (const point of [{ x: 0, y: 8, z: 3 }, { x: 17, y: 8, z: -7 }, { x: 8, y: 8, z: -17 }]) this.spawnReefEnemy(point, { original: true });
       this.underwater.remaining = 3;
     }
     this.emit({ kind: 'dive', playerId: p.id, realm: 'reef', id: DIVE_ENTRANCE.id });
@@ -721,14 +731,21 @@ export class Game {
     for (const p of this.players.values()) if (realmOf(p) === 'reef') this.placeOnIsland(p);
     for (const e of [...this.enemies.values()]) if (realmOf(e) === 'reef') this.enemies.delete(e.id);
     this.underwater.remaining = 0;
+    for (const encounter of this.underwater.encounters) encounter.remaining = 0;
+    for (const event of this.underwater.events) if (event.status === 'active') {
+      event.status = 'available'; event.progress = []; event.remaining = 0;
+      const definition = REEF_EVENTS.find(item => item.id === event.id);
+      this.emit({ kind: 'reef-event', id: event.id, status: 'available', name: definition?.name, realm: 'reef' });
+    }
   }
 
-  spawnReefEnemy({ x, y, z }) {
+  spawnReefEnemy({ x, y, z }, { original = false, encounterId = null, eventId = null } = {}) {
     const stats = enemyStats('reef-guard'), point = resolveReefCollision({ x, y, z }, stats.radius);
     const hp = stats.hp + (stats.hpPerExtraPlayer ?? 0) * Math.max(0, this.onlineCount - 1);
     const e = { id: `enemy-${this.nextEnemyId++}`, type: 'reef-guard', x: point.x, y: point.y, z: point.z, yaw: 0,
       hp, maxHp: hp, radius: stats.radius, scale: stats.scale, attackRadius: stats.attackRadius, zone: 'sunken-reach', realm: 'reef',
-      state: 'idle', attackAt: 0, _home: { x: point.x, y: point.y, z: point.z }, _nextAttack: this.elapsed + 1.2, _attack: null, _endAttack: 0 };
+      state: 'idle', attackAt: 0, _home: { x: point.x, y: point.y, z: point.z }, _nextAttack: this.elapsed + 1.2, _attack: null, _endAttack: 0,
+      _reefOriginal: original, _reefEncounter: encounterId, _reefEvent: eventId, _reefLeash: eventId ? 20 : 18 };
     this.enemies.set(e.id, e);
     return e;
   }
@@ -745,6 +762,90 @@ export class Game {
     return true;
   }
 
+  reefCacheState(id) { return this.underwater.caches.find(cache => cache.id === id); }
+  reefEncounterState(id) { return this.underwater.encounters.find(encounter => encounter.id === id); }
+  reefEventState(id) { return this.underwater.events.find(event => event.id === id); }
+
+  spawnReefEncounter(id) {
+    const definition = REEF_ENCOUNTERS.find(encounter => encounter.id === id), state = this.reefEncounterState(id);
+    if (!definition || !state || state._spawned) return;
+    state._spawned = true;
+    for (const guard of definition.guards) this.spawnReefEnemy(guard, { encounterId: id });
+    state.remaining = definition.guards.length;
+  }
+
+  settleReefEncounter(id) {
+    const state = this.reefEncounterState(id);
+    if (state) state.remaining = [...this.enemies.values()].filter(enemy => enemy._reefEncounter === id && enemy.hp > 0).length;
+  }
+
+  openReefCache(p, id) {
+    const cache = REEF_CACHES.find(item => item.id === id), state = this.reefCacheState(id);
+    if (!cache || !state || state.opened || this.phase !== 'voyage' || this.players.get(p?.id) !== p || !p.online || p.hp <= 0 || p.knockedUntil || realmOf(p) !== 'reef' || p.mode !== 'swimming' ||
+      Math.hypot(p.x - cache.x, p.y - cache.y, p.z - cache.z) > 3.5 || !reefLineOfSight(p, cache)) return false;
+    const encounter = cache.encounterId ? this.reefEncounterState(cache.encounterId) : null;
+    if (cache.encounterId && !encounter?._spawned) this.spawnReefEncounter(cache.encounterId);
+    if (encounter && (!encounter._spawned || encounter.remaining)) return false;
+    state.opened = true; p.chests++; this.pearls += cache.pearls;
+    const rolled = rollWeapon(this.random), drop = { id: `drop-${this.round}-${cache.id}`, ...rolled, x: cache.x, y: cache.y, z: cache.z, realm: 'reef' };
+    this.drops.push(drop);
+    this.emit({ kind: 'chest', id: cache.id, playerId: p.id, pearls: cache.pearls, ...rolled, dropId: drop.id, realm: 'reef' });
+    return true;
+  }
+
+  startReefEvent(p, id) {
+    const definition = REEF_EVENTS.find(event => event.id === id), state = this.reefEventState(id);
+    if (!definition || !state || state.status !== 'available' || this.phase !== 'voyage' || this.players.get(p?.id) !== p || !p.online || p.hp <= 0 || p.knockedUntil || realmOf(p) !== 'reef' || p.mode !== 'swimming' ||
+      Math.hypot(p.x - definition.x, p.y - definition.y, p.z - definition.z) > definition.range || !reefLineOfSight(p, definition)) return false;
+    state.status = 'active'; state.progress = []; state.remaining = 0;
+    if (definition.kind === 'defense') {
+      for (const guard of definition.guards) this.spawnReefEnemy(guard, { eventId: id });
+      state.remaining = definition.guards.length;
+    }
+    this.emit({ kind: 'reef-event', id, status: 'active', name: definition.name, playerId: p.id, pearls: 0, realm: 'reef' });
+    return true;
+  }
+
+  progressReefEvent(p, eventId, nodeId) {
+    const definition = REEF_EVENTS.find(event => event.id === eventId), state = this.reefEventState(eventId), node = definition?.nodes.find(item => item.id === nodeId);
+    if (!definition || !state || state.status !== 'active' || !node || state.progress.includes(nodeId) || this.phase !== 'voyage' || this.players.get(p?.id) !== p || !p.online || p.hp <= 0 || p.knockedUntil || realmOf(p) !== 'reef' || p.mode !== 'swimming' ||
+      Math.hypot(p.x - node.x, p.y - node.y, p.z - node.z) > node.range || !reefLineOfSight(p, node)) return false;
+    state.progress.push(nodeId);
+    this.emit({ kind: 'reef-event', id: eventId, status: 'progress', name: definition.name, playerId: p.id, nodeId,
+      progress: state.progress.length, total: definition.nodes.length, pearls: 0, realm: 'reef' });
+    if (state.progress.length === definition.nodes.length) this.finishReefEvent(eventId, p.id);
+    return true;
+  }
+
+  settleReefEvent(id, playerId = undefined) {
+    const definition = REEF_EVENTS.find(event => event.id === id), state = this.reefEventState(id);
+    if (!definition || !state || state.status !== 'active' || definition.kind !== 'defense') return;
+    state.remaining = [...this.enemies.values()].filter(enemy => enemy._reefEvent === id && enemy.hp > 0).length;
+    if (!state.remaining) this.finishReefEvent(id, playerId);
+  }
+
+  finishReefEvent(id, playerId = undefined) {
+    const definition = REEF_EVENTS.find(event => event.id === id), state = this.reefEventState(id);
+    if (!definition || !state || state.status !== 'active') return;
+    state.status = 'completed'; state.remaining = 0; this.pearls += definition.pearls;
+    const rolled = rollWeapon(this.random), drop = { id: `drop-${this.round}-${definition.id}`, ...rolled, x: definition.x, y: definition.y, z: definition.z, realm: 'reef' };
+    this.drops.push(drop);
+    this.emit({ kind: 'reef-event', id, status: 'completed', name: definition.name, ...(playerId ? { playerId } : {}), pearls: definition.pearls, realm: 'reef' });
+    this.emit({ kind: 'chest', id: definition.id, ...(playerId ? { playerId } : {}), pearls: definition.pearls, ...rolled, dropId: drop.id, realm: 'reef' });
+  }
+
+  tickReefContent() {
+    if (this.phase !== 'voyage') return;
+    const swimmers = [...this.players.values()].filter(player => player.online && player.hp > 0 && realmOf(player) === 'reef' && player.mode === 'swimming');
+    for (const encounter of REEF_ENCOUNTERS) if (swimmers.some(player => Math.hypot(player.x - encounter.guards[0].x, player.y - encounter.guards[0].y, player.z - encounter.guards[0].z) < 22)) this.spawnReefEncounter(encounter.id);
+    for (const player of swimmers) for (const discovery of REEF_DISCOVERIES) if (!this.underwater.discoveries.includes(discovery.id) &&
+      Math.hypot(player.x - discovery.x, player.y - discovery.y, player.z - discovery.z) <= discovery.range && reefLineOfSight(player, discovery)) {
+      this.underwater.discoveries.push(discovery.id); this.pearls += discovery.pearls;
+      this.emit({ kind: 'reef-discovery', id: discovery.id, playerId: player.id, name: discovery.name, pearls: discovery.pearls, realm: 'reef' });
+    }
+    for (const event of this.underwater.events) this.settleReefEvent(event.id);
+  }
+
   interact(p, target) {
     if (p.mode === 'aboard') return this.interactAboard(p, target);
     if (realmOf(p) === 'reef') {
@@ -755,7 +856,16 @@ export class Game {
       if (ally) { this.revive(ally, p); return good(); }
       if ((!target || target === REEF_EXIT.id) && Math.hypot(p.x - REEF_EXIT.x, p.y - REEF_EXIT.y, p.z - REEF_EXIT.z) <= REEF_EXIT.range && reefLineOfSight(p, REEF_EXIT)) return this.returnFromReef(p);
       if ((!target || target === REEF_CHEST.id) && this.openReefChest(p)) return good();
-      return bad('Swim closer to the return current, treasure, or a fallen crewmate.', 'TOO_FAR');
+      if (target && this.openReefCache(p, target)) return good();
+      for (const cache of REEF_CACHES) if (!target && this.openReefCache(p, cache.id)) return good();
+      if (target && this.startReefEvent(p, target)) return good();
+      for (const event of REEF_EVENTS) if (!target && this.startReefEvent(p, event.id)) return good();
+      for (const event of REEF_EVENTS) {
+        const node = event.nodes.find(item => item.id === target);
+        if (node && this.progressReefEvent(p, event.id, node.id)) return good();
+        if (!target) for (const nearby of event.nodes) if (this.progressReefEvent(p, event.id, nearby.id)) return good();
+      }
+      return bad('Swim closer to a reef landmark, cache, event, return current, or fallen crewmate.', 'TOO_FAR');
     }
     if (p.mode !== 'ground') return bad('Land near the treasure to interact.', 'TOO_FAR');
     const options = [];
@@ -1103,6 +1213,7 @@ export class Game {
       }
       if (this.phase === 'voyage' && p.hp > 0 && realmOf(p) === 'reef' && p.mode === 'swimming') {
         this.openReefChest(p);
+        for (const cache of REEF_CACHES) this.openReefCache(p, cache.id);
         for (const drop of this.drops) if (sameRealm(p, drop) && Math.hypot(p.x - drop.x, p.y - drop.y, p.z - drop.z) <= PICKUP_RADIUS && reefLineOfSight(p, drop)) this.pickupWeapon(p, drop);
       }
       if (p._burst && (p.weapon !== p._burst.weapon || p.rarity !== p._burst.rarity || p.mode === 'aboard')) p._burst = null;
@@ -1117,6 +1228,7 @@ export class Game {
     this.resetAbandonedRound();
     if (this.phase !== 'voyage' && this.phase !== 'finale') return;
     this.tickFlyingTargets();
+    this.tickReefContent();
     this.tickSideEvents(false);
     for (const e of [...this.enemies.values()]) this.tickEnemy(e, dt);
     this.tickFinale();
@@ -1243,7 +1355,7 @@ export class Game {
     // left it and are still within its bounded wreck patrol.
     const living = [...this.players.values()].filter(p => p.online && p.hp > 0 && !p.knockedUntil && sameRealm(p, e) &&
       Math.hypot(p.x - REEF_SPAWN.x, p.y - REEF_SPAWN.y, p.z - REEF_SPAWN.z) > 8 &&
-      Math.hypot(p.x - e._home.x, p.y - e._home.y, p.z - e._home.z) < 28);
+      Math.hypot(p.x - e._home.x, p.y - e._home.y, p.z - e._home.z) < (e._reefLeash ?? 28));
     living.sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z));
     const target = living[0];
     if (e.state === 'windup') {
@@ -1308,6 +1420,9 @@ export class Game {
       shrines: this.shrines.map(s => ({ ...s })), chests: this.chests.map(c => ({ ...c })), drops: this.drops.map(drop => cleanObject(drop, ['id', 'weapon', 'rarity', 'x', 'y', 'z', 'realm'])),
       pearls: this.pearls, shards: this.shards, bossId: this.bossId,
       pings: this.pings.map(p => ({ ...p })), underwater: { entered: !!this.underwater.entered, completed: !!this.underwater.completed,
-        remaining: Math.max(0, this.underwater.remaining | 0), chestOpened: !!this.underwater.chestOpened }, stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };
+        remaining: Math.max(0, this.underwater.remaining | 0), chestOpened: !!this.underwater.chestOpened,
+        discoveries: [...this.underwater.discoveries], caches: this.underwater.caches.map(cache => ({ id: cache.id, opened: !!cache.opened })),
+        encounters: this.underwater.encounters.map(encounter => ({ id: encounter.id, remaining: Math.max(0, encounter.remaining | 0) })),
+        events: this.underwater.events.map(event => ({ id: event.id, status: event.status, progress: [...event.progress], remaining: Math.max(0, event.remaining | 0) })) }, stats: { ...this.stats }, victory: this.victory ? { ...this.victory } : null };
   }
 }

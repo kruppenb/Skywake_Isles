@@ -19,7 +19,7 @@ const previewState = () => ({
   phase: 'lobby', elapsed: 0, seed: SEED, round: 0, hostId: null,
   players: [], enemies: [], shipGuns: [], flyingTargets: [], shrines: SHRINES.map((shrine) => ({ id: shrine.id, status: 'dormant', charge: 0, remaining: 0 })),
   chests: CHESTS.map((chest) => ({ id: chest.id, opened: false })), pearls: 0, shards: 0, bossId: null,
-  underwater: { entered: false, completed: false, remaining: 0, chestOpened: false },
+  underwater: { entered: false, completed: false, remaining: 0, chestOpened: false, discoveries: [], caches: [], encounters: [], events: [] },
   pings: [], drops: [], stats: { wins: 0, voyages: 0, bestPearls: 0 }, victory: null,
 });
 let state = previewState();
@@ -275,6 +275,19 @@ function receiveEvent(event) {
       // on the same tick; only crewmates need directions to it.
       if (mine) ui.toast(`You found ${event.pearls || 0} shared pearls!${gun ? ` A ${gun} tumbles out.` : ''}`);
       else ui.toast(`${name} found ${event.pearls || 0} shared pearls${place}!${gun ? nearbyRealm ? ` Walk over the ${gun} to equip it. Your copy disappears; the crew's stays.` : ` The ${gun} waits there for the crew.` : ''}`);
+      break;
+    }
+    case 'reef-discovery': {
+      if (mine || nearbyRealm) audio.play('collect', { distant: !mine });
+      ui.toast(mine ? `Discovery: ${event.name || 'A new reef landmark'} · +${event.pearls || 0} shared pearls.`
+        : `${name} charted ${event.name || 'a reef landmark'} in Sunken Reach.`);
+      break;
+    }
+    case 'reef-event': {
+      const title = event.name || 'Reef event';
+      if (event.status === 'active') { if (mine || nearbyRealm) audio.play('surge', { distant: !mine }); ui.toast(`${title} is active. ${event.detail || 'Follow the glowing objective and press E.'}`); }
+      else if (event.status === 'completed') { if (mine || nearbyRealm) audio.play('collect', { distant: !mine }); ui.toast(`${title} complete! +${event.pearls || 24} shared pearls for the crew.`); }
+      else if (event.status === 'progress') ui.toast(`${title}: ${event.nodeId ? `${event.nodeId.replaceAll('-', ' ')} answered` : 'A node answered'}${Number.isFinite(event.progress) ? ` · ${event.progress}/${event.total || '?'}` : ''}.`);
       break;
     }
     case 'salvage': {

@@ -1,3 +1,5 @@
+import { REEF_LANDMARK_SOLIDS } from './underwater-content.js';
+
 // Sunken Reach is a separate, bounded 3D realm.  This module is deliberately
 // renderer-free: the client builds its wreck from these same boxes while the
 // server uses them for movement and sight checks.
@@ -5,7 +7,7 @@ export const DIVE_ENTRANCE = Object.freeze({ id: 'sunken-reach-dive', name: 'Sun
 export const REEF_SPAWN = Object.freeze({ x: -18, y: 6, z: 20 });
 export const REEF_EXIT = Object.freeze({ id: 'sunken-reach-return', name: 'Return to shore', ...REEF_SPAWN, range: 4 });
 export const REEF_CHEST = Object.freeze({ id: 'sunken-reach-chest', x: 8, y: 2, z: -15 });
-export const REEF_BOUNDS = Object.freeze({ minX: -32, maxX: 32, minZ: -36, maxZ: 32, minY: 1, maxY: 18 });
+export const REEF_BOUNDS = Object.freeze({ minX: -138, maxX: 138, minZ: -138, maxZ: 138, minY: 1, maxY: 42 });
 // Player coordinates are at the avatar origin. The visible swimmer spans
 // y-0.4 through y+2.8, so this five-sphere capsule protects the full model.
 export const REEF_SWIMMER_BODY = Object.freeze({ radius: .6, centerOffsetY: 1.2, minOffsetY: -.4, maxOffsetY: 2.8 });
@@ -13,7 +15,7 @@ export const REEF_SWIMMER_BODY = Object.freeze({ radius: .6, centerOffsetY: 1.2,
 // The hull is a 24 by 18 wreck centred around (8, -10).  Its south face has
 // a wide, low entrance, while the open top lets swimmers enter above the deck.
 // Boxes are centred AABBs, all in reef-local world coordinates.
-export const REEF_SOLIDS = Object.freeze([
+export const REEF_WRECK_SOLIDS = Object.freeze([
   { id: 'wreck-deck', x: 8, y: .5, z: -10, width: 24, height: 1, depth: 18 },
   { id: 'wreck-west-wall', x: -4, y: 4, z: -10, width: 1, height: 6, depth: 18 },
   { id: 'wreck-east-wall', x: 20, y: 4, z: -10, width: 1, height: 6, depth: 18 },
@@ -25,6 +27,8 @@ export const REEF_SOLIDS = Object.freeze([
   { id: 'wreck-rib-a', x: 5, y: 6.2, z: -10, width: 2, height: .8, depth: 15 },
   { id: 'wreck-rib-b', x: 13, y: 6.2, z: -10, width: 2, height: .8, depth: 15 },
 ].map(Object.freeze));
+
+export const REEF_SOLIDS = Object.freeze([...REEF_WRECK_SOLIDS, ...REEF_LANDMARK_SOLIDS]);
 
 const finitePoint = point => !!point && ['x', 'y', 'z'].every(axis => Number.isFinite(point[axis]));
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));

@@ -6,6 +6,7 @@ import { buildPlayerCharacter } from './player-character.js';
 import { buildMermaid } from './mermaid.js';
 import { createUnderwaterPresentation } from './underwater.js';
 import { realmOf, sameRealm } from '../shared/underwater.js';
+import { reefRegionAt } from '../shared/underwater-content.js';
 import { upgradeWeapon } from './weapon-models.js';
 import { WEAPONS, RARITIES } from '../shared/weapons.js';
 import { isLootVisible } from './loot-visibility.js';
@@ -523,6 +524,14 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const reefHemisphere = new THREE.HemisphereLight('#b9fbef', '#275b56', 2.25);
   const reefSun = new THREE.DirectionalLight('#d9fff2', 1.8); reefSun.position.set(-18, 30, 12); reefSun.target.position.set(0, 0, -8);
   reefScene.add(reefHemisphere, reefSun, reefSun.target);
+  const reefLightProfiles = {
+    'sunken-reach': { fog: '#246b78', near: 18, far: 72, sky: '#b9fbef', ground: '#275b56', intensity: 2.25, sun: '#d9fff2' },
+    'coral-gardens': { fog: '#487a88', near: 20, far: 82, sky: '#ffd1c1', ground: '#487874', intensity: 2.42, sun: '#ffe2cf' },
+    'kelp-hollows': { fog: '#315f56', near: 14, far: 57, sky: '#a8d79c', ground: '#183f38', intensity: 2.0, sun: '#d4e89e' },
+    'bell-sanctuary': { fog: '#334f78', near: 17, far: 67, sky: '#baccef', ground: '#263d62', intensity: 2.18, sun: '#d9e7ff' },
+    'ember-vents': { fog: '#67463d', near: 12, far: 51, sky: '#e2a06d', ground: '#382d2d', intensity: 2.02, sun: '#ffc27a' },
+    'crown-graveyard': { fog: '#4b4665', near: 14, far: 58, sky: '#c7bde8', ground: '#29283e', intensity: 2.08, sun: '#ddd2ff' },
+  };
   scene.add(buildTerrain(palette));
   const ocean = buildOcean(palette, random), scenery = buildScenery(palette, random), sky = buildSky(palette, random);
   scene.add(ocean.group, scenery.group, sky.group);
@@ -1118,11 +1127,22 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     const time = Number.isFinite(view.time) ? view.time : clockTime;
     const shipPose = shipAt(state?.phase === 'lobby' || !state ? 0 : elapsed);
     const reefActive = activeRealm() === 'reef';
+    if (reefActive) {
+      const profile = reefLightProfiles[reefRegionAt(localPlayer.x, localPlayer.z).id] || reefLightProfiles['sunken-reach'];
+      reefScene.background.lerp(new THREE.Color(profile.fog), Math.min(1, dt * 2.6));
+      reefScene.fog.color.lerp(new THREE.Color(profile.fog), Math.min(1, dt * 2.6));
+      reefScene.fog.near += (profile.near - reefScene.fog.near) * Math.min(1, dt * 2.6);
+      reefScene.fog.far += (profile.far - reefScene.fog.far) * Math.min(1, dt * 2.6);
+      reefHemisphere.color.lerp(new THREE.Color(profile.sky), Math.min(1, dt * 2.6));
+      reefHemisphere.groundColor.lerp(new THREE.Color(profile.ground), Math.min(1, dt * 2.6));
+      reefHemisphere.intensity += (profile.intensity - reefHemisphere.intensity) * Math.min(1, dt * 2.6);
+      reefSun.color.lerp(new THREE.Color(profile.sun), Math.min(1, dt * 2.6));
+    }
     if (!reefActive) {
       ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time, reducedMotionPreference.matches);
       updateDeckCannons(ship, state, localPlayer, view, dt); ocean.animate(time); sky.animate(time);
     }
-    underwater.update(time, state, { lowQuality, reducedMotion: reducedMotionPreference.matches });
+    underwater.update(time, state, { lowQuality, reducedMotion: reducedMotionPreference.matches, player: localPlayer });
     updateCamera(dt, localPlayer, view, shipPose);
     if (!reefActive) {
       airship.update(dt, state, time, camera, reducedMotionPreference.matches, clockTime);

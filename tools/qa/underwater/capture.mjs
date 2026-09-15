@@ -8,6 +8,8 @@
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { REEF_EVENTS, REEF_REGIONS, reefRegionAt } from '../../../shared/underwater-content.js';
+import { REEF_CHEST, REEF_EXIT } from '../../../shared/underwater.js';
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : fallback; };
@@ -15,10 +17,13 @@ const ORIGIN = opt('--origin', 'http://127.0.0.1:3401');
 const OUT = path.resolve(process.cwd(), opt('--out', path.join('.qa', 'underwater')));
 const PAGE_URL = `${ORIGIN}/?test=1`;
 const FULL = args.includes('--full');
+const TOUR = args.includes('--tour');
+const EVENTS = args.includes('--events');
+const BROWSER = opt('--browser', 'chrome');
 if (new URL(ORIGIN).port === '3400') throw new Error('Refusing to run browser QA against production port 3400.');
 
 async function loadPlaywright() {
-  const candidates = [process.env.PLAYWRIGHT_INDEX, 'playwright',
+  const candidates = [process.env.PLAYWRIGHT_INDEX, 'playwright', 'playwright-core',
     'C:/Users/nicho/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs'].filter(Boolean);
   const errors = [];
   for (const candidate of candidates) {
@@ -35,7 +40,7 @@ try { health = await fetch(`${ORIGIN}/health`); } catch (error) { throw new Erro
 if (!health.ok) throw new Error(`${ORIGIN}/health returned ${health.status}`);
 mkdirSync(OUT, { recursive: true });
 const { chromium } = await loadPlaywright();
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch({ channel: BROWSER, headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 const captain = await context.newPage();
 const consoleLog = [], pageErrors = [];
@@ -85,11 +90,65 @@ async function swimToward(page, target, stop = 1.5) {
 async function hold(page, key, milliseconds) {
   await focusGame(page); await page.keyboard.down(key); await page.waitForTimeout(milliseconds); await page.keyboard.up(key); await page.waitForTimeout(150);
 }
+async function setDepth(page, y, tolerance = 1.5) {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const current = await player(page);
+    if (Math.abs(current.y - y) <= tolerance) return current;
+    const key = current.y < y ? 'Space' : 'KeyC';
+    await hold(page, key, Math.min(900, Math.max(180, Math.abs(y - current.y) / 7 * 1000)));
+  }
+  throw new Error(`Could not reach safe tour depth ${y}.`);
+}
+async function swimHighway(page, target, { altitude = 35, stop = 7 } = {}) {
+  await setDepth(page, altitude);
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const current = await player(page), remaining = Math.hypot(target.x - current.x, target.z - current.z);
+    if (remaining <= stop) return current;
+    if (!(current.hp > 0)) throw new Error('Tour swimmer was knocked down.');
+    await aimAt(page, { x: target.x, y: altitude, z: target.z });
+    await focusGame(page); await page.keyboard.down('KeyW'); await page.keyboard.down('ShiftLeft');
+    await page.waitForTimeout(Math.min(1250, Math.max(300, (remaining - stop) / 12 * 1000)));
+    await page.keyboard.up('ShiftLeft'); await page.keyboard.up('KeyW');
+  }
+  const current = await player(page);
+  throw new Error(`Could not reach ${target.id || 'tour waypoint'}; stopped at ${current.x.toFixed(1)}, ${current.z.toFixed(1)}.`);
+}
+async function tourRegion(page, region, index) {
+  const viewpoints = {
+    'sunken-reach': { x: 12, z: 17 }, 'coral-gardens': { x: -53, z: 81 }, 'kelp-hollows': { x: -76, z: -11 },
+    'bell-sanctuary': { x: 14, z: -86 }, 'ember-vents': { x: 77, z: -55 }, 'crown-graveyard': { x: 88, z: 58 },
+  };
+  const viewpoint = { ...region, ...viewpoints[region.id] };
+  await swimHighway(page, viewpoint);
+  await setDepth(page, 10);
+  const current = await player(page), arrived = reefRegionAt(current.x, current.z).id;
+  if (arrived !== region.id) throw new Error(`Tour expected ${region.id}, reached ${arrived}.`);
+  await aimAt(page, { x: region.x, y: 12, z: region.z });
+  await shot(page, `reef-${String(index + 1).padStart(2, '0')}-${region.id}`);
+  return current;
+}
+async function completeNodeEvent(page, event, label) {
+  await swimHighway(page, event, { altitude: Math.min(35, event.y + 3), stop: 2 });
+  await setDepth(page, event.y);
+  await focusGame(page); await page.keyboard.press('KeyE');
+  await page.waitForFunction(id => window.SKY.state().underwater.events.find(entry => entry.id === id)?.status === 'active', event.id);
+  for (const node of event.nodes) {
+    await swimHighway(page, node, { altitude: Math.min(35, node.y + 2), stop: 2 });
+    await setDepth(page, node.y);
+    await focusGame(page); await page.keyboard.press('KeyE');
+    await page.waitForFunction(({ id, nodeId }) => window.SKY.state().underwater.events.find(entry => entry.id === id)?.progress.includes(nodeId), { id: event.id, nodeId: node.id });
+  }
+  await page.waitForFunction(id => window.SKY.state().underwater.events.find(entry => entry.id === id)?.status === 'completed', event.id);
+  await shot(page, `event-${label}-${event.id}`);
+}
 async function clearReef(page) {
   let stalled = 0, previous = Infinity;
   for (let attempt = 0; attempt < 10; attempt++) {
     const state = await page.evaluate(() => window.SKY.state());
-    const enemies = state.enemies.filter(enemy => enemy.realm === 'reef' && enemy.hp > 0);
+    // Full smoke owns only the original wreck defenders. Optional pockets wake
+    // when explored, so a later region tour cannot turn this into a realm wipe.
+    const enemies = state.enemies.filter(enemy => enemy.realm === 'reef' && enemy.hp > 0
+      && Math.hypot(enemy.x - REEF_CHEST.x, enemy.z - REEF_CHEST.z) < 42);
     if (!enemies.length) return;
     const current = await player(page);
     enemies.sort((a, b) => Math.hypot(a.x - current.x, a.y - current.y, a.z - current.z) - Math.hypot(b.x - current.x, b.y - current.y, b.z - current.z));
@@ -103,7 +162,7 @@ async function clearReef(page) {
   throw new Error('Could not clear all reef guards through normal controls.');
 }
 
-let report;
+let report, tourPoses = null;
 try {
 await join(captain, 'Deep Current');
 await captain.bringToFront();
@@ -143,13 +202,37 @@ if (FULL) {
   if (current.y > 6.2) await hold(captain, 'KeyC', Math.min(1800, (current.y - 6) / 8 * 1000));
 }
 
+let completedEvents = [];
+if (EVENTS) {
+  for (const event of REEF_EVENTS.filter(entry => ['chimes', 'rescue'].includes(entry.kind))) {
+    await completeNodeEvent(captain, event, String(completedEvents.length + 1).padStart(2, '0'));
+    completedEvents.push(event.id);
+  }
+}
+
+// This is a normal swim from the shore fixture. It records each authored
+// biome without relying on browser-side teleportation or production debug APIs.
+if (TOUR) {
+  tourPoses = [];
+  for (let index = 0; index < REEF_REGIONS.length; index++) {
+    const region = REEF_REGIONS[index];
+    tourPoses.push(await tourRegion(captain, region, index));
+  }
+  await focusGame(captain); await captain.keyboard.press('KeyM');
+  await captain.waitForFunction(() => !document.querySelector('#map-overlay').hidden);
+  await shot(captain, 'reef-07-full-region-chart');
+  await captain.keyboard.press('KeyM');
+  await swimHighway(captain, REEF_EXIT, { stop: 3 });
+  await setDepth(captain, REEF_EXIT.y);
+}
+
 await focusGame(captain); await captain.keyboard.press('KeyE');
 await captain.waitForFunction(() => window.SKY.player()?.realm !== 'reef' && window.SKY.player()?.mode === 'ground');
 await shot(captain, FULL ? '06-returned-to-shore' : '05-returned-to-shore');
 
 const finalCaptain = await player(captain), finalScout = await player(scout);
 report = {
-  generatedAt: new Date().toISOString(), url: PAGE_URL, viewport: { width: 1440, height: 900 },
+  generatedAt: new Date().toISOString(), url: PAGE_URL, viewport: { width: 1440, height: 900 }, tour: TOUR, events: EVENTS, browser: BROWSER,
   health: await health.json(),
   checks: {
     enteredByKeyboard: beforeDive.realm === 'reef' && beforeDive.mode === 'swimming',
@@ -157,8 +240,10 @@ report = {
     returnedByKeyboard: finalCaptain.realm !== 'reef' && finalCaptain.mode === 'ground',
     secondBrowserStayedAshore: finalScout.realm !== 'reef' && finalScout.mode === 'ground',
     ...(FULL ? { guardsClearedAndChestOpened: chestOpened === true } : {}),
+    ...(TOUR ? { sixRegionsReached: tourPoses?.length === REEF_REGIONS.length } : {}),
+    ...(EVENTS ? { nodeEventsCompleted: completedEvents.length === 2 } : {}),
   },
-  poses: { beforeDive, afterDive, finalCaptain, finalScout }, shots,
+  poses: { beforeDive, afterDive, ...(TOUR ? { tour: tourPoses } : {}), finalCaptain, finalScout }, completedEvents, shots,
   console: consoleLog, pageErrors,
 };
 writeFileSync(path.join(OUT, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
