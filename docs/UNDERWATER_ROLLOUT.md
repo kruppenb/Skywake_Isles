@@ -194,3 +194,40 @@ The final repository suite passed 532 of 532 tests with zero failures, skips,
 or cancellations. The log is `.qa/underwater-quality-final-tests.log`, and
 `git diff --check` passed. Commit, GitHub push, and Docker health details are
 recorded in the final delivery report after the standing repository workflow.
+
+### Final reef wayfinding and fish presentation evidence
+
+The final presentation review records 23 authored routes, 133 pearl cues, and
+6 landmark beacons fading over 48–92 m. The reef retains its regional fog
+profiles. Six schools contain 64 cosmetic fish; schools alarm within 7 m,
+cruise at 1.55 m/s, flee at 7.8 m/s, and smoothly spread and regroup. Reduced motion
+freezes their centers. This is presentation evidence and makes no hardware
+performance claim.
+
+Twelve high/low art views at `1440x900` are in `.qa/reef-guidance-final-art`
+with zero errors. The focused wayfinding capture produced 14 high/low frames at
+`1024x768`, and the low reduced-motion capture produced 7 frames; all bounded
+checks passed with zero errors. Compared with the same baseline views, the
+change added 9–13 calls and 19,750–34,076 triangles at high quality, and 7–9
+calls and 19,206–32,648 triangles at low quality. QA output remains ignored
+under `.qa`.
+
+Run a fresh socketless capture against Docker:
+
+```powershell
+node tools/qa/underwater/wayfinding-capture.mjs --origin http://localhost:3400 --quality both --viewport 1024x768 --out .qa/underwater-wayfinding
+node tools/qa/underwater/wayfinding-capture.mjs --origin http://localhost:3400 --quality low --reduced-motion --viewport 1024x768 --out .qa/underwater-wayfinding-low-reduced
+```
+
+The harness loads the production import map through a synthetic page, waits
+for assets, captures entry/fork/vertical route frames and calm/approach/
+scatter/regroup school frames, and fails on missing diagnostics, behavior
+assertion failures, or browser errors. It opens no gameplay socket.
+
+An additional low-quality, reduced-motion actual-input smoke against the local
+fixture passed the four default entry/depth/return/split-crew checks with zero
+console or page errors; evidence is `.qa/reef-guidance-gameplay/report.json`.
+
+The final full suite passed 539 of 539 tests with zero failures, skips, or
+cancellations; the log is `.qa/reef-guidance-final-tests.log`, and
+`git diff --check` passed.

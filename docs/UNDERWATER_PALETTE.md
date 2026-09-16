@@ -47,3 +47,18 @@ Bell Sanctuary towers ashlar and bronze, the Ember Vents chimney porous basalt,
 and the Crown Graveyard hulls visibly distinct from both the wreck and the
 stone landmarks. This verifies the Area identity contract: shared construction
 and weathering quality, with no single reef-wide colour scheme.
+
+## Navigation cue pass
+
+The authored swim network starts at the return current and reaches each of the
+six regions through clear, body-width corridors. Its short-range marks are
+shell and silt disturbances, with irregular clusters of sea-glass kelp and
+occasional pearl glints at swimmer height. These cues use each region's existing
+accent family--turquoise and shell in the Reach, rose and saffron in the
+Gardens, jade in the Hollows, moon-cyan and brass near the bells, amber by the
+vents, and muted lilac-copper in the Graveyard--so they read as local growth,
+not a repeated LED runway. Higher discoveries receive a sparse rising branch of
+glints that begins from a collision-clear approach rather than pointing into the
+landmark. Each region has one larger, subdued landmark beacon that fades over a
+finite distance and remains depth-tested; it confirms a bearing through haze
+without changing the water fog, lighting, or occluding intervening reef.
