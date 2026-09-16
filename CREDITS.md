@@ -20,6 +20,18 @@ Moonwatch Observatory and the Moonbloom Grove's silvered stave drum on its ashla
 
 The island-wide kit's leaning coconut palms, surf-worn coastal rocks and clinker fishing skiffs are original geometry from `tools/build-island.py`. Its shrine-landmark extension adds the carved jungle-stone Palmheart gate, the segmented lunar-stone ring and orb, oversized Moonbloom mushrooms and cyan crystals, fractured basalt caldera ridges, amber clusters, shallow magma core and its ring rocks. It ships its deterministic Blender source, GLB and validation manifest together and borrows the same original stone, timber, bark, earth, foliage, iron and amber materials with recorded linear material tints and cyan/amber emissive bindings; it adds no texture images, no scene lights and no external art dependencies. All original coast and shrine-landmark geometry stays in the game as the kit's fallback. Every collider, chest, route and random draw is unchanged, as are the shrine dais, objectives, encounters and motes.
 
+The underwater presentation in `client/underwater-materials.js`,
+`client/underwater-habitat.js`, and `client/underwater.js` is original,
+deterministic runtime geometry and procedural material data authored for
+Skywake Isles. It uses no external art files, network asset downloads, scans,
+or copied game resources; the only external rendering dependency is the
+MIT-licensed Three.js package listed below. The generated resources are created
+offline in the browser and disposed with the presentation module.
+
+The landmark geometry and support structures in
+`client/underwater-landmarks.js` are also original deterministic runtime
+geometry authored for Skywake Isles under the same no-external-art policy.
+
 The following general-purpose open-source packages are included in the pinned dependency lockfile:
 
 | Package | Version | License | Use |

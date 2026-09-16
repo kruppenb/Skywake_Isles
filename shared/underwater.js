@@ -1,4 +1,4 @@
-import { REEF_LANDMARK_SOLIDS } from './underwater-content.js';
+import { REEF_LANDMARK_SOLIDS, REEF_LANDMARK_SUPPORTS } from './underwater-content.js';
 
 // Sunken Reach is a separate, bounded 3D realm.  This module is deliberately
 // renderer-free: the client builds its wreck from these same boxes while the
@@ -28,7 +28,7 @@ export const REEF_WRECK_SOLIDS = Object.freeze([
   { id: 'wreck-rib-b', x: 13, y: 6.2, z: -10, width: 2, height: .8, depth: 15 },
 ].map(Object.freeze));
 
-export const REEF_SOLIDS = Object.freeze([...REEF_WRECK_SOLIDS, ...REEF_LANDMARK_SOLIDS]);
+export const REEF_SOLIDS = Object.freeze([...REEF_WRECK_SOLIDS, ...REEF_LANDMARK_SOLIDS, ...REEF_LANDMARK_SUPPORTS]);
 
 const finitePoint = point => !!point && ['x', 'y', 'z'].every(axis => Number.isFinite(point[axis]));
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));

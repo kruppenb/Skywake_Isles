@@ -71,6 +71,17 @@ export const REEF_LANDMARK_SOLIDS = Object.freeze([
   { id: 'crown-rib', region: 'crown-graveyard', x: 89, y: 24, z: 45, width: 20, height: 3, depth: 3, material: 'wood' },
 ].map(Object.freeze));
 
+// Narrow art/physical alignment supports. These are separate from the primary
+// landmark envelopes so gameplay and interaction coordinates remain stable.
+export const REEF_LANDMARK_SUPPORTS = Object.freeze([
+  { id: 'ember-bridge-a-west', region: 'ember-vents', x: 77, y: 3.25, z: -70, width: 1.6, height: 6.5, depth: 3, material: 'basalt' },
+  { id: 'ember-bridge-a-east', region: 'ember-vents', x: 87, y: 3.25, z: -70, width: 1.6, height: 6.5, depth: 3, material: 'basalt' },
+  { id: 'ember-bridge-b-west', region: 'ember-vents', x: 89.5, y: 8.25, z: -66, width: 1.8, height: 16.5, depth: 3, material: 'basalt' },
+  { id: 'ember-bridge-b-east', region: 'ember-vents', x: 98.5, y: 8.25, z: -66, width: 1.8, height: 16.5, depth: 3, material: 'basalt' },
+  { id: 'crown-rib-buttress', region: 'crown-graveyard', x: 78, y: 20.5, z: 44.5, width: 3, height: 7, depth: 2, material: 'wood' },
+  { id: 'crown-rib-mast-joint', region: 'crown-graveyard', x: 99.5, y: 23.5, z: 46.75, width: 1.5, height: 3, depth: 1.5, material: 'wood' },
+].map(Object.freeze));
+
 export function reefRegionAt(x, z) {
   let closest = REEF_REGIONS[0], distance = Infinity;
   for (const region of REEF_REGIONS) {

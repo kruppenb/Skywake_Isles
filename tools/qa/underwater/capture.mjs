@@ -20,6 +20,11 @@ const FULL = args.includes('--full');
 const TOUR = args.includes('--tour');
 const EVENTS = args.includes('--events');
 const BROWSER = opt('--browser', 'chrome');
+const QUALITY = opt('--quality', null);
+const REDUCED_MOTION = args.includes('--reduced-motion');
+const viewportParts = opt('--viewport', '1440x900').split('x').map(Number);
+const VIEWPORT = { width: viewportParts[0] || 1440, height: viewportParts[1] || 900 };
+if (QUALITY && !['high', 'low'].includes(QUALITY)) throw new Error('--quality must be high or low');
 if (new URL(ORIGIN).port === '3400') throw new Error('Refusing to run browser QA against production port 3400.');
 
 async function loadPlaywright() {
@@ -41,7 +46,7 @@ if (!health.ok) throw new Error(`${ORIGIN}/health returned ${health.status}`);
 mkdirSync(OUT, { recursive: true });
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch({ channel: BROWSER, headless: true });
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, reducedMotion: REDUCED_MOTION ? 'reduce' : 'no-preference' });
 const captain = await context.newPage();
 const consoleLog = [], pageErrors = [];
 function watch(label, page) {
@@ -63,6 +68,23 @@ async function focusGame(page) {
   await page.bringToFront();
   if (await page.locator('#pause-overlay').isVisible()) await page.locator('#resume-button').click();
   await page.locator('#world').focus();
+}
+async function setQuality(page, quality) {
+  if (!quality) return;
+  await page.bringToFront();
+  if (!(await page.locator('#pause-overlay').isVisible())) await page.keyboard.press('Escape');
+  await page.locator('#quality-select').selectOption(quality);
+  await page.locator('#resume-button').click();
+  await page.locator('#world').focus();
+}
+async function waitForMapPaint(page) {
+  await page.waitForFunction(() => {
+    const canvas = document.querySelector('#large-map');
+    if (!canvas || canvas.width < 2 || canvas.height < 2) return false;
+    const pixels = canvas.getContext('2d')?.getImageData(0, 0, Math.min(canvas.width, 8), Math.min(canvas.height, 8)).data;
+    return !!pixels && pixels.some(value => value !== 0);
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(40);
 }
 const wrap = angle => Math.atan2(Math.sin(angle), Math.cos(angle));
 async function aimAt(page, target) {
@@ -167,8 +189,9 @@ try {
 await join(captain, 'Deep Current');
 await captain.bringToFront();
 await captain.waitForFunction(() => !document.querySelector('#launch-button').hidden);
-await captain.locator('#launch-button').click();
+await captain.locator('#launch-button').click({ force: true });
 await captain.waitForFunction(() => window.SKY.state().phase === 'voyage' && window.SKY.player()?.mode === 'ground');
+await setQuality(captain, QUALITY);
 await shot(captain, '01-shore-dive-prompt');
 
 const scout = await context.newPage(); watch('scout', scout);
@@ -182,10 +205,10 @@ await shot(captain, '02-sunken-reach-objective');
 const beforeDive = await player(captain);
 await focusGame(captain); await captain.keyboard.down('KeyC'); await captain.waitForTimeout(350); await captain.keyboard.up('KeyC'); await captain.waitForTimeout(150);
 const afterDive = await player(captain);
-await focusGame(captain); await captain.keyboard.press('KeyM'); await captain.waitForFunction(() => !document.querySelector('#map-overlay').hidden);
+await focusGame(captain); await captain.keyboard.press('KeyM'); await captain.waitForFunction(() => !document.querySelector('#map-overlay').hidden); await waitForMapPaint(captain);
 await shot(captain, '03-sunken-reach-map');
 await captain.keyboard.press('KeyM');
-await focusGame(scout); await scout.keyboard.press('KeyM'); await scout.waitForFunction(() => !document.querySelector('#map-overlay').hidden);
+await focusGame(scout); await scout.keyboard.press('KeyM'); await scout.waitForFunction(() => !document.querySelector('#map-overlay').hidden); await waitForMapPaint(scout);
 await shot(scout, '04-island-map-split-crew');
 await scout.keyboard.press('KeyM');
 
@@ -219,7 +242,7 @@ if (TOUR) {
     tourPoses.push(await tourRegion(captain, region, index));
   }
   await focusGame(captain); await captain.keyboard.press('KeyM');
-  await captain.waitForFunction(() => !document.querySelector('#map-overlay').hidden);
+  await captain.waitForFunction(() => !document.querySelector('#map-overlay').hidden); await waitForMapPaint(captain);
   await shot(captain, 'reef-07-full-region-chart');
   await captain.keyboard.press('KeyM');
   await swimHighway(captain, REEF_EXIT, { stop: 3 });
@@ -232,7 +255,7 @@ await shot(captain, FULL ? '06-returned-to-shore' : '05-returned-to-shore');
 
 const finalCaptain = await player(captain), finalScout = await player(scout);
 report = {
-  generatedAt: new Date().toISOString(), url: PAGE_URL, viewport: { width: 1440, height: 900 }, tour: TOUR, events: EVENTS, browser: BROWSER,
+  generatedAt: new Date().toISOString(), url: PAGE_URL, viewport: VIEWPORT, quality: QUALITY || 'high', reducedMotion: REDUCED_MOTION, tour: TOUR, events: EVENTS, browser: BROWSER,
   health: await health.json(),
   checks: {
     enteredByKeyboard: beforeDive.realm === 'reef' && beforeDive.mode === 'swimming',

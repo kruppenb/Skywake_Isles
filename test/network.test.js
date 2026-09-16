@@ -69,7 +69,7 @@ test('real five-client voyage, reconnect/late join, guarded progression, victory
     const url = `ws://127.0.0.1:${server.port}`;
     const health = await request(server.port, '/health');
     assert.equal(health.status, 200); assert.equal(JSON.parse(health.body).game, 'Skywake Isles');
-    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/shared/shrines.js', '/vendor/three.module.js', '/vendor/three.core.js', '/vendor/addons/loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js']) {
+    for (const route of ['/shared/world.js', '/shared/movement.js', '/shared/collision.js', '/shared/weapons.js', '/shared/encounters.js', '/shared/shrines.js', '/vendor/three.module.js', '/vendor/three.core.js', '/vendor/addons/loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js', '/vendor/addons/geometries/RoundedBoxGeometry.js']) {
       const response = await request(server.port, route); assert.equal(response.status, 200, route); assert.equal(response.headers['cache-control'], 'no-cache');
     }
     const kit = await request(server.port, '/assets/old-watch/kit.glb');

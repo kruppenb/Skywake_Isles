@@ -8,7 +8,7 @@ import { createUnderwaterPresentation } from '../client/underwater.js';
 import { buildMermaid } from '../client/mermaid.js';
 import { reefCameraFraction } from '../client/camera.js';
 import { REEF_BOUNDS, REEF_CHEST, REEF_EXIT, REEF_SOLIDS, REEF_WRECK_SOLIDS } from '../shared/underwater.js';
-import { REEF_CACHES, REEF_DISCOVERIES, REEF_ENCOUNTERS, REEF_EVENTS, REEF_LANDMARK_SOLIDS, REEF_REGIONS } from '../shared/underwater-content.js';
+import { REEF_CACHES, REEF_DISCOVERIES, REEF_ENCOUNTERS, REEF_EVENTS, REEF_LANDMARK_SOLIDS, REEF_LANDMARK_SUPPORTS, REEF_REGIONS } from '../shared/underwater-content.js';
 
 // GLTFLoader's image path uses the browser spelling even though this fixture is
 // embedded; Node supplies Blob/createImageBitmap but not `self`.
@@ -29,9 +29,17 @@ function disposePalette(palette) { Object.values(palette.geometry).forEach(geome
 
 test('Sunken Reach renders all authored exploration content across its expanded realm', () => {
   const palette = makePalette(), reef = createUnderwaterPresentation({ palette, heightAt: () => 3 });
-  assert.equal(reef.group.getObjectByName('sunken-reach-wreck-solid-hull')?.children.length, 2);
+  assert.ok(reef.group.getObjectByName('sunken-reach-wreck-solid-hull')?.children.length >= 3, 'plank hull, fittings, and attached growth each keep their material pass');
   assert.ok(reef.group.getObjectByName('sunken-reach-six-biome-seabed'));
   const authoredSolids = reef.group.getObjectByName('sunken-reach-authored-landmark-solids'); assert.ok(authoredSolids);
+  const authoredSupports = reef.group.getObjectByName('sunken-reach-authored-landmark-supports'); assert.ok(authoredSupports);
+  assert.deepEqual(authoredSupports.userData.solidIds, REEF_LANDMARK_SUPPORTS.map(support => support.id));
+  for (const support of REEF_LANDMARK_SUPPORTS) {
+    const family = reef.group.getObjectByName(`sunken-reach-${support.material}-collision-supports`);
+    assert.ok(family, `support family ${support.material} has a renderer pass`);
+    const art = reef.group.getObjectByName(`sunken-reach-support-${support.id}`);
+    assert.ok(art?.children[0]?.geometry?.attributes.position.count > 10, `support ${support.id} renders connected geometry`);
+  }
   assert.ok(reef.group.getObjectByName('sunken-reach-biome-compositions'));
   assert.ok(reef.group.getObjectByName('sunken-reach-return-current'));
   assert.ok(reef.group.getObjectByName('sunken-reach-guarded-chest'));
@@ -39,7 +47,7 @@ test('Sunken Reach renders all authored exploration content across its expanded 
   const seabed = reef.group.getObjectByName('sunken-reach-six-biome-seabed'), seabedBounds = new THREE.Box3().setFromObject(seabed);
   assert.ok(seabedBounds.min.x <= REEF_BOUNDS.minX && seabedBounds.max.x >= REEF_BOUNDS.maxX, 'seabed reaches the expanded collision border');
   assert.ok(seabedBounds.min.z <= REEF_BOUNDS.minZ && seabedBounds.max.z >= REEF_BOUNDS.maxZ, 'seabed reaches the expanded collision border');
-  for (const solid of REEF_LANDMARK_SOLIDS) { assert.ok(reef.group.getObjectByName(`sunken-reach-${solid.material}-collision-landmarks`), `solid material ${solid.id} has a renderer pass`); assert.ok(authoredSolids.userData.solidIds.includes(solid.id), `solid ${solid.id} is baked into its matching visual batch`); const art = reef.group.getObjectByName(`sunken-reach-solid-${solid.id}`); assert.ok(art?.children[0]?.geometry?.attributes.position.count > 30, `solid ${solid.id} renders as detailed authored geometry rather than an envelope box`); }
+  for (const solid of REEF_LANDMARK_SOLIDS) { assert.ok(reef.group.getObjectByName(`sunken-reach-${solid.material}-collision-landmarks`), `solid material ${solid.id} has a renderer pass`); assert.ok(authoredSolids.userData.solidIds.includes(solid.id), `solid ${solid.id} is baked into its matching visual batch`); const art = reef.group.getObjectByName(`sunken-reach-solid-${solid.id}`), mesh = art?.children[0]; assert.ok(mesh?.geometry?.attributes.position.count > 30, `solid ${solid.id} renders as detailed authored geometry rather than an envelope box`); assert.ok(mesh.material?.map && mesh.material?.normalMap && mesh.material?.roughnessMap, `solid ${solid.id} uses the reef's owned weathered material maps`); }
   for (const point of REEF_CACHES) assert.ok(reef.group.getObjectByName(`sunken-reach-cache-${point.id}-marker`), `cache ${point.id} has a renderer marker`);
   for (const point of REEF_DISCOVERIES) assert.ok(reef.group.getObjectByName(`sunken-reach-discovery-${point.id}-art`), `discovery ${point.id} has named physical art`);
   for (const point of REEF_EVENTS) assert.ok(reef.group.getObjectByName(point.kind === 'defense' ? `sunken-reach-event-${point.id}-salvage-crown` : `sunken-reach-event-${point.id}-marker`), `event ${point.id} has a physical station`);
@@ -53,12 +61,44 @@ test('Sunken Reach renders all authored exploration content across its expanded 
   assert.notEqual(reef.group.getObjectByName(`sunken-reach-chime-${REEF_EVENTS[0].nodes[0].id}-clapper`).rotation.z, 0, 'completed chime visibly rings');
   assert.equal(reef.group.getObjectByName(`sunken-reach-ray-cage-${REEF_EVENTS[1].nodes[0].id}-door`).rotation.y, 1.35, 'freed ray cage opens');
   const stats = reef.getStats();
-  assert.deepEqual({ wreckSolids: stats.wreckSolids, landmarkSolids: stats.landmarkSolids, regions: stats.regions, discoveries: stats.discoveries, caches: stats.caches, encounters: stats.encounters, events: stats.events }, { wreckSolids: REEF_WRECK_SOLIDS.length, landmarkSolids: REEF_LANDMARK_SOLIDS.length, regions: REEF_REGIONS.length, discoveries: REEF_DISCOVERIES.length, caches: REEF_CACHES.length, encounters: REEF_ENCOUNTERS.length, events: REEF_EVENTS.length });
+  assert.deepEqual({ wreckSolids: stats.wreckSolids, landmarkSolids: stats.landmarkSolids, landmarkSupports: stats.landmarkSupports, regions: stats.regions, discoveries: stats.discoveries, caches: stats.caches, encounters: stats.encounters, events: stats.events }, { wreckSolids: REEF_WRECK_SOLIDS.length, landmarkSolids: REEF_LANDMARK_SOLIDS.length, landmarkSupports: REEF_LANDMARK_SUPPORTS.length, regions: REEF_REGIONS.length, discoveries: REEF_DISCOVERIES.length, caches: REEF_CACHES.length, encounters: REEF_ENCOUNTERS.length, events: REEF_EVENTS.length });
   assert.ok(stats.bubbles >= 50 && stats.fish >= 20, 'atmosphere is rich but batched'); assert.equal(stats.chest, REEF_CHEST.id);
+  assert.equal(stats.resources.materials, 8, 'reef-owned textured materials are accounted for'); assert.equal(stats.habitat.regions, REEF_REGIONS.length, 'habitat accounts for all six regions');
   reef.update(2, {}, { lowQuality: true, reducedMotion: true });
   assert.equal(reef.getStats().lowQuality, true, 'low graphics state is retained'); assert.equal(current.position.y, REEF_EXIT.y - 1.45, 'reduced motion holds the return beacon steady');
   assert.doesNotThrow(() => reef.update(0, null), 'initial renderer frame accepts a null network snapshot');
-  reef.group.traverse(object => { object.geometry?.dispose(); if (object.material?.dispose) object.material.dispose(); }); disposePalette(palette);
+  assert.doesNotThrow(() => { reef.dispose(); reef.dispose(); }, 'reef resource teardown is idempotent before generic scene disposal'); reef.group.traverse(object => { object.geometry?.dispose(); if (object.material?.dispose) object.material.dispose(); }); disposePalette(palette);
+});
+
+test('reef ambience freezes fish and bubbles under reduced motion', () => {
+  const palette = makePalette(), reef = createUnderwaterPresentation({ palette, heightAt: () => 3 });
+  const bubbles = reef.group.getObjectByName('sunken-reach-batched-bubbles');
+  const fish = reef.group.getObjectByName('sunken-reach-batched-fish');
+  assert.ok(bubbles?.isInstancedMesh && fish?.isInstancedMesh);
+  reef.update(1.25, { underwater: {} }, { lowQuality: false, reducedMotion: true, player: { realm: 'reef', x: 0, y: 6, z: 8 } });
+  const frozenBubble = bubbles.instanceMatrix.array.slice(), frozenFish = fish.instanceMatrix.array.slice();
+  reef.update(9.75, { underwater: {} }, { lowQuality: false, reducedMotion: true, player: { realm: 'reef', x: 0, y: 6, z: 8 } });
+  assert.deepEqual(Array.from(bubbles.instanceMatrix.array), Array.from(frozenBubble));
+  assert.deepEqual(Array.from(fish.instanceMatrix.array), Array.from(frozenFish));
+  reef.update(1.25, { underwater: {} }, { lowQuality: false, reducedMotion: false, player: { realm: 'reef', x: 0, y: 6, z: 8 } });
+  const movingBubble = bubbles.instanceMatrix.array.slice(), movingFish = fish.instanceMatrix.array.slice();
+  reef.update(9.75, { underwater: {} }, { lowQuality: false, reducedMotion: false, player: { realm: 'reef', x: 0, y: 6, z: 8 } });
+  assert.notDeepEqual(Array.from(bubbles.instanceMatrix.array), Array.from(movingBubble));
+  assert.notDeepEqual(Array.from(fish.instanceMatrix.array), Array.from(movingFish));
+  reef.dispose(); disposePalette(palette);
+});
+
+test('reef light shaft alpha textures are released exactly once', () => {
+  const palette = makePalette(), reef = createUnderwaterPresentation({ palette, heightAt: () => 3 });
+  const shafts = reef.group.getObjectByName('sunken-reach-regional-light-shafts');
+  const alphaMaps = [];
+  shafts.traverse(object => { const map = object.material?.alphaMap; if (map && !alphaMaps.includes(map)) alphaMaps.push(map); });
+  assert.equal(alphaMaps.length, 6, 'one owned alpha texture per regional shaft');
+  const calls = new Map(alphaMaps.map(map => [map, 0]));
+  for (const map of alphaMaps) { const dispose = map.dispose.bind(map); map.dispose = () => { calls.set(map, calls.get(map) + 1); dispose(); }; }
+  reef.dispose(); reef.dispose();
+  assert.deepEqual([...calls.values()], Array(6).fill(1));
+  disposePalette(palette);
 });
 
 test('mermaid swaps in a leg-trimmed navigator upper body, preserving the pirate weapon rig without glider or boots', async () => {

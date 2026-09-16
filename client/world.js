@@ -522,15 +522,15 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 10, far: 360 });
   sun.shadow.camera.updateProjectionMatrix(); scene.add(sun, sun.target);
   const reefHemisphere = new THREE.HemisphereLight('#b9fbef', '#275b56', 2.25);
-  const reefSun = new THREE.DirectionalLight('#d9fff2', 1.8); reefSun.position.set(-18, 30, 12); reefSun.target.position.set(0, 0, -8);
+  const reefSun = new THREE.DirectionalLight('#d9fff2', 1.8); reefSun.position.set(-18, 30, 12); reefSun.target.position.set(0, 0, -8); reefSun.castShadow = quality !== 'low'; reefSun.shadow.mapSize.set(1024, 1024); reefSun.shadow.bias = -.00035; reefSun.shadow.normalBias = .045; Object.assign(reefSun.shadow.camera, { left: -42, right: 42, top: 42, bottom: -42, near: 4, far: 105 }); reefSun.shadow.camera.updateProjectionMatrix();
   reefScene.add(reefHemisphere, reefSun, reefSun.target);
   const reefLightProfiles = {
-    'sunken-reach': { fog: '#246b78', near: 18, far: 72, sky: '#b9fbef', ground: '#275b56', intensity: 2.25, sun: '#d9fff2' },
-    'coral-gardens': { fog: '#487a88', near: 20, far: 82, sky: '#ffd1c1', ground: '#487874', intensity: 2.42, sun: '#ffe2cf' },
-    'kelp-hollows': { fog: '#315f56', near: 14, far: 57, sky: '#a8d79c', ground: '#183f38', intensity: 2.0, sun: '#d4e89e' },
-    'bell-sanctuary': { fog: '#334f78', near: 17, far: 67, sky: '#baccef', ground: '#263d62', intensity: 2.18, sun: '#d9e7ff' },
-    'ember-vents': { fog: '#67463d', near: 12, far: 51, sky: '#e2a06d', ground: '#382d2d', intensity: 2.02, sun: '#ffc27a' },
-    'crown-graveyard': { fog: '#4b4665', near: 14, far: 58, sky: '#c7bde8', ground: '#29283e', intensity: 2.08, sun: '#ddd2ff' },
+    'sunken-reach': { fog: '#246b78', near: 20, far: 94, sky: '#b9fbef', ground: '#275b56', intensity: 2.25, sun: '#d9fff2' },
+    'coral-gardens': { fog: '#487a88', near: 22, far: 104, sky: '#ffd1c1', ground: '#487874', intensity: 2.42, sun: '#ffe2cf' },
+    'kelp-hollows': { fog: '#315f56', near: 16, far: 68, sky: '#a8d79c', ground: '#183f38', intensity: 2.0, sun: '#d4e89e' },
+    'bell-sanctuary': { fog: '#334f78', near: 20, far: 86, sky: '#baccef', ground: '#263d62', intensity: 2.18, sun: '#d9e7ff' },
+    'ember-vents': { fog: '#67463d', near: 15, far: 66, sky: '#e2a06d', ground: '#382d2d', intensity: 2.02, sun: '#ffc27a' },
+    'crown-graveyard': { fog: '#4b4665', near: 17, far: 73, sky: '#c7bde8', ground: '#29283e', intensity: 2.08, sun: '#ddd2ff' },
   };
   scene.add(buildTerrain(palette));
   const ocean = buildOcean(palette, random), scenery = buildScenery(palette, random), sky = buildSky(palette, random);
@@ -1137,6 +1137,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       reefHemisphere.groundColor.lerp(new THREE.Color(profile.ground), Math.min(1, dt * 2.6));
       reefHemisphere.intensity += (profile.intensity - reefHemisphere.intensity) * Math.min(1, dt * 2.6);
       reefSun.color.lerp(new THREE.Color(profile.sun), Math.min(1, dt * 2.6));
+      reefSun.castShadow = !lowQuality; reefSun.position.set(localPlayer.x - 26, localPlayer.y + 38, localPlayer.z + 20); reefSun.target.position.set(localPlayer.x, Math.max(0, localPlayer.y - 3), localPlayer.z); reefSun.target.updateMatrixWorld();
     }
     if (!reefActive) {
       ship.group.position.set(shipPose.x, shipPose.y, shipPose.z); ship.group.rotation.y = shipPose.yaw || 0; ship.animate(time, reducedMotionPreference.matches);
@@ -1183,7 +1184,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowQuality ? 1 : 1.5)); renderer.setSize(width, height, false);
     camera.aspect = width / height; camera.updateProjectionMatrix();
   }
-  function setQuality(value) { lowQuality = value === 'low'; renderer.shadowMap.enabled = !lowQuality; resize(); }
+  function setQuality(value) { lowQuality = value === 'low'; renderer.shadowMap.enabled = !lowQuality; reefSun.castShadow = !lowQuality; resize(); }
   function project(point) {
     projectVector.set(point.x, point.y, point.z).project(camera);
     return { x: (projectVector.x * .5 + .5) * width, y: (-projectVector.y * .5 + .5) * height, visible: projectVector.z > -1 && projectVector.z < 1 && Math.abs(projectVector.x) < 1.15 && Math.abs(projectVector.y) < 1.15 };
@@ -1202,6 +1203,7 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     for (const model of players.values()) model.dispose?.();
     oldWatch.dispose(); airship.dispose();
     windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
+    underwater.dispose();
     disposeObject(scene, preserve); disposeObject(reefScene, preserve); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     skyFinale.dispose();
     renderer.dispose(); players.clear(); enemies.clear(); chestModels.clear(); shrineModels.clear(); sideEventModels.clear(); pingModels.clear(); dropModels.clear(); effects.length = 0; pendingSurges.length = 0; remotePlayers.clear(); discharges.clear(); pendingImpacts.clear();

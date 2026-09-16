@@ -4,7 +4,7 @@ This handoff tracks the underwater environment separately from the island enviro
 
 ## Current scope: Sunken Reach exploration expansion
 
-Status: the wreck milestone is retained as the entry experience, but the explicit exploration expansion supersedes its former one-milestone limit. The shared realm now spans `x/z -138..138` and has six named areas: Sunken Reach, Coral Gardens, Kelp Hollows, Bell Sanctuary, Ember Vents, and Crown Graveyard.
+Status: the wreck milestone is retained as the entry experience, but the explicit exploration expansion supersedes its former one-milestone limit. The shared realm now spans `x/z -138..138` and has six named areas: Sunken Reach, Coral Gardens, Kelp Hollows, Bell Sanctuary, Ember Vents, and Crown Graveyard. The six-region quality pass is complete, supported by reviewed high/low presentation evidence, gameplay tour evidence, low/reduced-motion verification, and the full repository test suite. The final commit, push, and Docker state are recorded in the delivery report.
 
 Sunken Reach is a bounded realm below the safe landing beach. Its shore entrance is at `(14, 106)` and its reef spawn and always-available return beacon are at `(-18, 6, 20)`. Players enter only during the voyage while healthy, grounded, within four metres, and on a clear route. Starting the lighthouse finale returns all reef players to shore and prevents another dive that voyage.
 
@@ -132,3 +132,65 @@ On 2026-09-13, W/S was changed to follow both yaw and pitch. A/D remains level, 
 A Chrome headless pass at `1440 x 900` used normal mouse and keyboard inputs at the isolated shore fixture. Forward swimming climbed while looking up and descended while looking down; backward movement reversed the look direction. Level strafing, direct rise/dive, and hover after release also passed, with no console or page errors. Local evidence is `.qa/underwater-look/report.json`, `look-up.png`, and `look-down.png`. The focused movement, network, and prediction tests passed 10 of 10.
 
 The follow-up full suite passed 505 of 505 tests with no failures or skips; `git diff --check` passed. The local suite log is `.qa/underwater-look-tests.log`.
+
+### Final gameplay evidence
+
+The final two-browser high-quality `1440 × 900` fixture run completed with
+`--full --events --tour` at `.qa/underwater-quality-final-gameplay/report.json`.
+All seven checks passed with zero console or page errors: keyboard entry,
+    C-driven depth change, beacon return, split-realm crew state, original
+wreck guards and chest, six-region tour, and both chime and ray-rescue events.
+The lead reviewed the six-region gameplay frames and full region chart. This
+evidence covers normal gameplay controls and authored route reachability; it
+does not make a multiplayer load or hardware performance claim.
+
+### Final presentation art evidence
+
+The final bounded art capture completed against fixture `http://127.0.0.1:3407`
+and is recorded at `.qa/underwater-quality-final-art/report.json`. It contains
+28 high/low views covering the entry wreck front and interior, all six regions,
+close material views, and the fixed Old Watch comparison, with zero console,
+page, or failed-request errors. The capture is presentation evidence and does
+not certify gameplay or hardware performance.
+
+Measured renderer ranges across the reef views were 44–122 calls and
+164,894–205,328 triangles at high quality, and 41–119 calls and 158,198–198,632
+triangles at low quality. High quality was 9.6–18.5% below the baseline's reef
+triangle counts while textured passes and support geometry increased calls.
+The fixed Old Watch comparison remained 74 calls and 447,626 triangles. Timing
+samples were 16.66–16.67 ms mean and 16.8–16.9 ms p95; these values are near a
+vsync floor and make no hardware performance guarantee.
+
+Run the bounded art capture against the current Docker service:
+
+```powershell
+node tools/qa/underwater/art-capture.mjs --origin http://localhost:3400 --out .qa/underwater-art --browser msedge
+```
+
+It creates deterministic high and low 1440 × 900 views for the entry wreck
+front/interior and all six regions, close material views, and the fixed Old
+Watch comparison at `x=-64,z=-76`, `yaw=.6`, `pitch=.03`. Use
+`--quality high|low|both`, `--viewport 1440x900`, or
+`--views coral-gardens,ember-vents-close` for a targeted rerender. Use
+`--no-overworld` to omit that comparison and `--timing --reduced-motion` for
+per-view update/camera/render telemetry. The report records each view's
+camera, region diagnostic, calls, triangles, full `world.getStats()` payload,
+console/page/network errors, and the explicit presentation-only disclaimer.
+The synthetic snapshot is made server-side with `Game`; the capture does not
+connect to the origin or invoke gameplay actions. Set `PLAYWRIGHT_INDEX` to a
+Playwright `index.mjs` when automatic discovery is unavailable.
+
+### Final low and repository verification
+
+On 2026-09-15 local time (2026-09-16 UTC), the verified low-quality
+`1024 × 768` reduced-motion capture at
+`.qa/underwater-quality-final-low-verified` passed all four checks with zero
+console or page errors. The lead inspected the populated reef and island map
+frames (`03-sunken-reach-map.png` and `04-island-map-split-crew.png`); both
+panels fit within the viewport. The run recorded `quality: low` and
+`reducedMotion: true`.
+
+The final repository suite passed 532 of 532 tests with zero failures, skips,
+or cancellations. The log is `.qa/underwater-quality-final-tests.log`, and
+`git diff --check` passed. Commit, GitHub push, and Docker health details are
+recorded in the final delivery report after the standing repository workflow.
