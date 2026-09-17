@@ -85,7 +85,7 @@ const manifest = {
     'idle/walk/run are Meshy library clips; runtime overrides both arms, head pitch and legs during glide and knockback.',
     'The crew mask is a hue classification of the Meshy atlas, carried in base-colour alpha.',
     'Meshy compressed the concept ponytail into short tied-back hair; loose locks retain the female silhouette.',
-    'A narrow cheek plate projection and split-normal averaging reduce faceting; a small dark side lock and collar flecks remain.',
+    'Clean cheek and chin skin from the concept repairs facial-hair artifacts, including the jaw underside and UV seams; loose side locks and collar flecks remain.',
   ] : [
     'No finger or toe bones: hands are rigid to LeftHand/RightHand, so grips are posed by the runtime IK, not by finger curls.',
     'idle/walk/run are Meshy library clips; the runtime overrides both arms, the head pitch and the legs during glide and knockback.',

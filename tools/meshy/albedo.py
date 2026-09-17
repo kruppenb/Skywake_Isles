@@ -170,46 +170,63 @@ def plate_silhouette(plate):
 
 
 def project_female_face(albedo, geometry, coverage, plate_path, debug_dir=None):
-    """Use the female front concept to soften Meshy's cheek colour and dark artifact.
+    """Restore clean skin on the female cheeks and jaw from the front concept.
 
-    The projection is deliberately restricted to the central, forward-facing skin surface. Its
-    metre-to-pixel mapping was measured against this concept plate's eye and chin landmarks; hair,
-    hat, collar and ears keep Meshy's own atlas and geometry.
+    The generated face is wider than the concept, so an unrestricted projection samples the
+    plate's side locks and neck shadow onto the jaw like a beard. Sample only clean cheek/chin
+    skin, including downward-facing jaw texels, while preserving the actual facial features.
     """
     plate = np.asarray(Image.open(plate_path).convert('RGB')).astype(np.float32)
     ph, pw = plate.shape[:2]
     pos, nrm, head = geometry[..., :3], geometry[..., 3:6], geometry[..., 6]
     scale_x = pw / 1024
     scale_y = ph / 1536
-    px = (512 + pos[..., 0] * 650) * scale_x
-    py = (100 + (1.70 - pos[..., 1]) * 875) * scale_y
-    fx = np.clip(px, 0, pw - 1.001); fy = np.clip(py, 0, ph - 1.001)
-    ix = np.floor(fx).astype(int); iy = np.floor(fy).astype(int)
-    tx = (fx - ix)[..., None]; ty = (fy - iy)[..., None]
-    sample = ((plate[iy, ix] * (1 - tx) + plate[iy, ix + 1] * tx) * (1 - ty)
-              + (plate[iy + 1, ix] * (1 - tx) + plate[iy + 1, ix + 1] * tx) * ty)
+    lower_face = 1 - smoothstep(1.57, 1.585, pos[..., 1])
+    cheek_x = np.where(pos[..., 0] < 0, 480, 530) + np.clip(pos[..., 0] * 50, -4, 4)
+    chin_x = 500 + np.clip(pos[..., 0] * 180, -15, 15)
+    cheek_y = np.clip(100 + (1.70 - pos[..., 1]) * 875, 156, 180)
+    chin_y = np.clip(213 + (1.56 - pos[..., 1]) * 160, 211, 221)
+    def skin_sample(px, py):
+        fx = np.clip(px * scale_x, 0, pw - 1.001)
+        fy = np.clip(py * scale_y, 0, ph - 1.001)
+        ix = np.floor(fx).astype(int); iy = np.floor(fy).astype(int)
+        tx = (fx - ix)[..., None]; ty = (fy - iy)[..., None]
+        return ((plate[iy, ix] * (1 - tx) + plate[iy, ix + 1] * tx) * (1 - ty)
+                + (plate[iy + 1, ix] * (1 - tx) + plate[iy + 1, ix + 1] * tx) * ty)
+    # Blend sampled colours, not coordinates: the lips lie between these two skin patches.
+    sample = (skin_sample(cheek_x, cheek_y) * (1 - lower_face[..., None])
+              + skin_sample(chin_x, chin_y) * lower_face[..., None])
     # Preserve Meshy's eye, brow, nose and lip charts: the plate's facial landmarks do not land
     # exactly on the generated geometry and would otherwise create doubled features. This pass
-    # treats the cheek skin, especially the dark patch left by the generator, only.
-    cheek = (smoothstep(1.57, 1.59, pos[..., 1])
-             * (1 - smoothstep(1.64, 1.655, pos[..., 1]))
-             * smoothstep(0.045, 0.07, np.abs(pos[..., 0]))
-             * (1 - smoothstep(0.105, 0.125, np.abs(pos[..., 0]))))
-    chin = (smoothstep(1.53, 1.55, pos[..., 1])
-            * (1 - smoothstep(1.575, 1.59, pos[..., 1]))
-            * (1 - smoothstep(0.095, 0.12, np.abs(pos[..., 0]))))
-    weight = (smoothstep(0.55, 0.85, head) * smoothstep(0.2, 0.55, nrm[..., 2])
-              * np.maximum(cheek, chin) * smoothstep(0.025, 0.055, pos[..., 2]) * coverage)
+    # treats skin beside the mouth and below the lower lip, including the curved jaw underside.
+    cheek = (smoothstep(1.55, 1.57, pos[..., 1])
+             * (1 - smoothstep(1.61, 1.62, pos[..., 1]))
+             * smoothstep(0.035, 0.05, np.abs(pos[..., 0]))
+             * (1 - smoothstep(0.077, 0.09, np.abs(pos[..., 0]))))
+    chin = (smoothstep(1.50, 1.525, pos[..., 1])
+            * (1 - smoothstep(1.568, 1.579, pos[..., 1]))
+            * (1 - smoothstep(0.055, 0.075, np.abs(pos[..., 0]))))
+    skin_depth = 0.085 - np.abs(pos[..., 0]) * 0.15
+    cheek *= smoothstep(0.2, 0.55, nrm[..., 2])
+    # Depth and head weights isolate the jaw; a forward-normal test would leave a dark beard
+    # underneath it, where the skin naturally faces down and partly back.
+    weight = (smoothstep(0.55, 0.85, head) * np.maximum(cheek, chin)
+              * smoothstep(skin_depth - 0.015, skin_depth, pos[..., 2]) * coverage)
     # The plate is a softly lit painting. Keep its warm skin detail while aligning its median
     # brightness to Meshy's surrounding skin so the face does not become an unlit patch.
     central = weight > 0.9
     if central.any():
         source_lum = np.median(luminance(sample[central]))
         target_lum = np.median(luminance(albedo[central]))
-        gain = np.clip(target_lum / max(source_lum, 1), 0.85, 1.07)
+        gain = np.clip(target_lum / max(source_lum, 1), 0.95, 1.07)
     else:
         gain = 1.0
     sample = np.clip(sample * gain, 0, 255)
+    # Fill chart gutters too: otherwise mip filtering brings the old dark colour back at seams.
+    gutter = ~coverage
+    sample, grown = dilate(sample, weight > 0.02, 6, allowed=gutter)
+    gutter_weight, _ = dilate(weight[..., None], weight > 0.02, 6, allowed=gutter)
+    weight = np.where(coverage, weight, gutter_weight[..., 0] * grown)
     result = albedo * (1 - weight[..., None]) + sample * weight[..., None]
     print(f'female face plate: {int(central.sum())} central texels, brightness gain {gain:.3f}')
     if debug_dir:

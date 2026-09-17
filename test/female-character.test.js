@@ -191,6 +191,35 @@ test('crew tint uses an embedded RGBA atlas on opaque material', () => {
   assert.equal(manifest.crewTint.convention, 'baseColorAlpha');
 });
 
+test('female chin and jaw texture stay clean-shaven', () => {
+  const head = json.skins[0].joints.findIndex(i => json.nodes[i].name === 'Head');
+  let samples = 0;
+  for (const mesh of json.meshes) for (const primitive of mesh.primitives) {
+    const material = json.materials[primitive.material];
+    const texture = json.textures[material.pbrMetallicRoughness.baseColorTexture.index];
+    const { width, height, pixels } = decodePngRgba(json.images[texture.source]);
+    const positions = accessor(primitive.attributes.POSITION);
+    const joints = accessor(primitive.attributes.JOINTS_0);
+    const weights = accessor(primitive.attributes.WEIGHTS_0);
+    const uvs = accessor(primitive.attributes.TEXCOORD_0);
+    for (let i = 0; i < positions.length; i++) {
+      const [x, y, z] = positions[i];
+      const headWeight = joints[i].reduce((sum, joint, slot) => sum + (joint === head ? weights[i][slot] : 0), 0);
+      // Measured skin below the lower lip in the shipped 2.75 m asset, including the jaw's
+      // downward-facing polygons. Keep lips, side locks and neckline out of this sample.
+      if (headWeight < .8 || Math.abs(x) > .07 || y < 2.24 || y > 2.28 || z > -.12) continue;
+      const u = Math.min(width - 1, Math.max(0, Math.floor(uvs[i][0] * width)));
+      const v = Math.min(height - 1, Math.max(0, Math.floor(uvs[i][1] * height)));
+      const at = (v * width + u) * 4;
+      const brightness = pixels[at] * .299 + pixels[at + 1] * .587 + pixels[at + 2] * .114;
+      assert.ok(brightness > 135, `dark facial-hair patch at chin vertex ${i}: ${brightness}`);
+      assert.ok(pixels[at + 3] < 16, 'crew colour must not turn the chin into a beard');
+      samples++;
+    }
+  }
+  assert.ok(samples > 30, `expected a useful chin sample, got ${samples}`);
+});
+
 test('idle, walk and run clips animate the character', () => {
   assert.deepEqual(json.animations.map(a => a.name).sort(), ['idle', 'run', 'walk']);
   for (const animation of json.animations) {

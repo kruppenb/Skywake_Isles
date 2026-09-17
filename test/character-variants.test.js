@@ -8,6 +8,30 @@ import { makePalette } from '../client/models.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { navigatorAsset } from './helpers/navigator.js';
 
+test('female land and swimming fallbacks have no moustache', () => {
+  const palette = makePalette();
+  const moustacheColor = new THREE.Color('#6d4936');
+  for (const build of [buildPlayerCharacter, buildMermaid]) {
+    for (const character of ['male', 'female']) {
+      const model = build(palette, '#55c9ba', { character });
+      const face = model.group.getObjectByName('face-hair-and-tricorn');
+      assert.ok(face, 'the procedural face is visible before the asset loads');
+      const positions = face.geometry.getAttribute('position');
+      const colors = face.geometry.getAttribute('color');
+      let moustacheVertices = 0;
+      for (let i = 0; i < positions.count; i++) {
+        if (Math.abs(positions.getX(i)) > .09 || positions.getY(i) < -.09
+            || positions.getY(i) > -.04 || positions.getZ(i) > -.24) continue;
+        const difference = Math.abs(colors.getX(i) - moustacheColor.r)
+          + Math.abs(colors.getY(i) - moustacheColor.g) + Math.abs(colors.getZ(i) - moustacheColor.b);
+        if (difference < .001) moustacheVertices++;
+      }
+      assert.equal(moustacheVertices > 0, character === 'male', `${character} fallback facial hair`);
+      model.dispose();
+    }
+  }
+});
+
 test('navigator asset cache isolates variant URLs and evicts only a failed URL', async () => {
   const originalLoad = GLTFLoader.prototype.loadAsync;
   const originalWindow = globalThis.window, originalDocument = globalThis.document;

@@ -274,7 +274,7 @@ export function buildPlayerCharacter(palette, color = '#eb785d', { character = '
   const variant = normalizeCharacter(character);
   const assetUrl = typeof url === 'string' && url ? url : variant === 'female' ? FEMALE_NAVIGATOR_URL : NAVIGATOR_URL;
   const group = new THREE.Group(); group.name = 'pirate'; group.userData.kind = 'pirate'; group.userData.character = variant;
-  let fallback = buildPirate(palette, color); group.add(fallback.group);
+  let fallback = buildPirate(palette, color, { character: variant }); group.add(fallback.group);
   if (swimming) {
     fallback.group.getObjectByName('left-hip')?.removeFromParent();
     fallback.group.getObjectByName('right-hip')?.removeFromParent();

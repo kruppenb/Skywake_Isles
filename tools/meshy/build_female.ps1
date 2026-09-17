@@ -2,7 +2,7 @@
 Rebuild navigator-female.glb from the recorded Meshy tasks.
 Run in the repository root with a working Meshy API key registered as documented in meshy.mjs.
 The original Meshy input views are represented by the recorded multi-image-to-3D task. The
-tracked front plate is used for the small cheek repair. Temporary downloads stay under .qa.
+tracked front plate supplies clean cheek and chin skin. Temporary downloads stay under .qa.
 #>
 param(
   [string]$Scratch = '.qa/female-character/build',

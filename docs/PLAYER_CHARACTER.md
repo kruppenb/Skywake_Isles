@@ -25,18 +25,23 @@ choice. The character studio can open the female pirate directly at
 `tools/meshy/female-tasks.json` records the Meshy mesh, rig, and idle task IDs. Once those task
 downloads are available, `tools/meshy/build_female.ps1` rebuilds the shipped GLB and measured
 `female-manifest.json` through the same `albedo.py` and `build_navigator.py` used by the male.
-The tracked `tools/meshy/plates/navigator-female-front.png` is the imagegen source plate used by a
-small cheek projection that cleans Meshy's dark face artifact while leaving eyes, nose and lips
-aligned to the geometry. Its back/side source plates and the visual review renders are ignored QA
-artifacts in `.qa/female-character/`; the task IDs identify Meshy's generated inputs.
+The tracked `tools/meshy/plates/navigator-female-front.png` supplies clean cheek and chin skin,
+leaving eyes, nose and lips aligned to the geometry. Sampling stays inside those skin patches so
+the concept's hair and neck shadows cannot project onto the jaw as a beard. The repair includes
+the jaw underside and UV chart gutters. Her procedural loading/failure fallback also omits the
+male moustache, both on land and while swimming. Back/side source plates are ignored QA artifacts
+in `.qa/female-character/`; the task IDs identify Meshy's generated inputs. Beard-repair close-ups
+are in `.qa/female-no-beard/`; geometry, rig and animation buffers are unchanged by this repair.
 The build also averages split normals at duplicate coordinates on forward facial skin only,
 keeping the coat and hat creases intact.
 The crew's coral accent is stored in the embedded RGBA albedo's alpha channel and marked with
 `crewMask: "baseColorAlpha"` and `crewReference` on the opaque material, matching the male shader.
 `test/female-character.test.js` checks the binary rig, sockets, clips, skinned mesh, dimensions,
-embedded texture, and real crew-mask coverage. The final GLB has 40,918 triangles, 29 joints,
-one 2048² RGBA atlas, three clips, and a 7.28 MiB file (7,636,076 bytes). The visual residuals
-are a small dark side lock patch at the cheek, softly baked collar flecks, and the shorter tied
+embedded texture, real crew-mask coverage, and clean, untinted skin below the lower lip.
+`test/character-variants.test.js` also checks that both female fallbacks omit facial hair while
+the male keeps his moustache. The GLB has 40,918 triangles, 29 joints, one 2048² RGBA atlas and
+three clips; `female-manifest.json` records its current size and hash. Visual residuals
+are loose side locks at the cheek, softly baked collar flecks, and the shorter tied
 hair silhouette. The concept's long ponytail was deliberately not added as lower-detail geometry.
 Browser acceptance covered the female lobby choice, another player's snapshot, reconnect
 preservation, mermaid preview, and a live shore-to-reef dive/swim/sprint/scatter/return route.

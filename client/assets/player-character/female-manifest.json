@@ -3,8 +3,8 @@
   "id": "skywake-navigator-female",
   "generator": "imagegen multiview concept plates; Meshy 7 multi-image-to-3D and auto-rig; tools/meshy/albedo.py and build_navigator.py (Blender 5.2.1)",
   "glb": "navigator-female.glb",
-  "sha256": "d4baf840534e4ebd11615720f31be4ca6bfc7878bef5b36bcc98f863e8caf06e",
-  "bytes": 7636076,
+  "sha256": "828a46411abdcfc5542910a858c72faa411f267371c7ba30f2f6a8cea99f4fe5",
+  "bytes": 7623232,
   "units": "meters",
   "forward": "-Z",
   "up": "+Y",
@@ -31,7 +31,7 @@
       "width": 2048,
       "height": 2048,
       "channels": 4,
-      "embeddedBytes": 4590577,
+      "embeddedBytes": 4577736,
       "decodedBytes": 22369620
     }
   ],
@@ -189,6 +189,6 @@
     "idle/walk/run are Meshy library clips; runtime overrides both arms, head pitch and legs during glide and knockback.",
     "The crew mask is a hue classification of the Meshy atlas, carried in base-colour alpha.",
     "Meshy compressed the concept ponytail into short tied-back hair; loose locks retain the female silhouette.",
-    "A narrow cheek plate projection and split-normal averaging reduce faceting; a small dark side lock and collar flecks remain."
+    "Clean cheek and chin skin from the concept repairs facial-hair artifacts, including the jaw underside and UV seams; loose side locks and collar flecks remain."
   ]
 }

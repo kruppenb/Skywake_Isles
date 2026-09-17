@@ -575,7 +575,7 @@ export function buildGlider(palette, color = '#eb785d') {
   return { group: glider, grips };
 }
 
-export function buildPirate(palette, color = '#eb785d') {
+export function buildPirate(palette, color = '#eb785d', { character = 'male' } = {}) {
   const group = new THREE.Group(); group.name = 'pirate'; group.userData.kind = 'pirate';
   const figure = new THREE.Group(); figure.name = 'pirate-figure'; group.add(figure);
   const torso = new THREE.Group(); torso.name = 'pirate-upper-body'; torso.position.y = 1.15; figure.add(torso);
@@ -634,7 +634,9 @@ export function buildPirate(palette, color = '#eb785d') {
     hb.add('characterDetail', [side * .113 - .009, .16, -.303], [.010, .012, .006], [0, 0, 0], '#ffffff');
     characterStrap(hb, [side * .058, .238, -.273], [side * .20, .245, -.244], .039, .025, '#553d31');
     hb.add('characterDetail', [side * .194, -.005, -.243], [.068, .050, .034], [0, 0, 0], '#e8a081');
-    hb.add('characterDetail', [side * .044, -.065, -.258], [.060, .023, .025], [0, 0, side * .16], '#6d4936');
+    if (character !== 'female') {
+      hb.add('characterDetail', [side * .044, -.065, -.258], [.060, .023, .025], [0, 0, side * .16], '#6d4936');
+    }
   }
   hb.add('characterDetail', [0, .098, -.281], [.051, .083, .061], [.12, 0, 0], '#df9d74');
   hb.add('characterDetail', [0, .056, -.322], [.078, .058, .072], [0, 0, 0], skin);
