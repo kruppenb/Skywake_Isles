@@ -50,10 +50,10 @@ const frameTimes = [];
 const audio = createAudio();
 
 const ui = createUI({
-  onJoin(name, color) {
+  onJoin(name, color, character) {
     audio.unlock();
     ui.setJoining(true);
-    net.join(name, color);
+    net.join(name, color, character);
   },
   onAction(action) { performAction(action); },
   // The deck button runs the same E interaction the keyboard does, so it can

@@ -2,12 +2,14 @@
 Usage: blender --background --factory-startup --python-exit-code 1 --python render_glb.py -- <file.glb> <out-dir> [frame] [--wide]
   --wide  landscape frames fitted to the longest horizontal axis, for props (weapons) rather than
           standing characters; without it the framing is the portrait character one.
+  --game-facing  character already faces game -Z rather than Meshy's source +Z.
 """
 import bpy, math, os, sys
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 WIDE = '--wide' in argv
+GAME_FACING = '--game-facing' in argv
 argv = [a for a in argv if not a.startswith('--')]
 src, out = argv[0], argv[1]
 frame = int(argv[2]) if len(argv) > 2 else None
@@ -54,9 +56,10 @@ def light(name, kind, loc, energy, size=None, color=(1, 1, 1)):
     ob = bpy.data.objects.new(name, data); scene.collection.objects.link(ob); ob.location = loc
     look = center - Vector(loc); ob.rotation_euler = look.to_track_quat('-Z', 'Y').to_euler()
     return ob
-light('key', 'AREA', (center.x - height * 1.6, center.y - height * 1.9, lo.z + height * 1.7), 900 * height, 2.5, (1, .97, .92))
-light('fill', 'AREA', (center.x + height * 2.0, center.y - height * 1.2, lo.z + height * 1.1), 300 * height, 4, (.9, .95, 1))
-light('rim', 'AREA', (center.x + height * .6, center.y + height * 2.2, lo.z + height * 1.9), 500 * height, 1.5, (1, 1, 1))
+facing = 1 if GAME_FACING else -1
+light('key', 'AREA', (center.x - height * 1.6, center.y + facing * height * 1.9, lo.z + height * 1.7), 900 * height, 2.5, (1, .97, .92))
+light('fill', 'AREA', (center.x + height * 2.0, center.y + facing * height * 1.2, lo.z + height * 1.1), 300 * height, 4, (.9, .95, 1))
+light('rim', 'AREA', (center.x + height * .6, center.y - facing * height * 2.2, lo.z + height * 1.9), 500 * height, 1.5, (1, 1, 1))
 
 scene.render.engine = 'BLENDER_EEVEE_NEXT' if hasattr(bpy.types, 'SceneEEVEE') and 'BLENDER_EEVEE_NEXT' in [i.identifier for i in bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items] else 'BLENDER_EEVEE'
 scene.render.resolution_x, scene.render.resolution_y = (1536, 1024) if WIDE else (1024, 1536)
@@ -71,7 +74,7 @@ cam_data.lens = 65; cam_data.sensor_fit = 'VERTICAL'; cam_data.sensor_height = 2
 # The glTF importer converts +Y-up/-Z-forward (glTF) to Blender Z-up/-Y-forward... a glTF model whose
 # face points +Z (Meshy convention) ends up facing -Y in Blender. Front camera sits on -Y.
 def shot(name, yaw_deg, pitch_deg, dist_mult, target_frac=0.5, lens=65):
-    yaw = math.radians(yaw_deg); pitch = math.radians(pitch_deg)
+    yaw = math.radians(yaw_deg + (180 if GAME_FACING else 0)); pitch = math.radians(pitch_deg)
     target = Vector((center.x, center.y, lo.z + height * target_frac))
     dist = frame_h * dist_mult
     loc = target + Vector((math.sin(yaw) * math.cos(pitch) * dist, -math.cos(yaw) * math.cos(pitch) * dist, math.sin(pitch) * dist))

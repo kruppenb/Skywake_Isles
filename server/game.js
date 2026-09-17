@@ -11,10 +11,11 @@ import { enemyStats } from '../shared/enemies.js';
 import { SIDE_EVENTS, SIDE_EVENT_WAVES, SIDE_EVENT_DURATION, SIDE_EVENT_ARC, SIDE_EVENT_RANK_SPACING, SIDE_EVENT_RANK_STAGGER, SIDE_EVENT_RANK_DELAY, seawardBearing, sideEventWave } from '../shared/side-events.js';
 import { FINALE_STAGES, FINALE_STAGE_DELAY, FINALE_FRONT, FINALE_ELITE_FRONT, FINALE_ARC, FINALE_RANK_SIZE, FINALE_DIRECTION_DELAY, shardBearing, finaleStageRoster } from '../shared/finale.js';
 import { SKY_STAGE_KIND, skyStageCleared } from '../shared/sky-finale.js';
+import { normalizeCharacter } from '../shared/characters.js';
 import { startSkyStage, tickSkyStage, settleSkyStage, skyCounts, skyStageNumber, publicSkyState, cancelSkyActivity, clearSkyStage, livingSkyBosses, damageSkyBoss } from './sky-finale.js';
 export { WEAPONS } from '../shared/weapons.js';
 const ACTIONS = new Set(['ready', 'launch', 'fire', 'melee', 'reload', 'interact', 'heal', 'ping', 'swap', 'restart']);
-const PUBLIC_PLAYER = ['id', 'name', 'color', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'realm', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
+const PUBLIC_PLAYER = ['id', 'name', 'color', 'character', 'online', 'ready', 'x', 'y', 'z', 'yaw', 'pitch', 'vy', 'launchVx', 'launchVz', 'mode', 'realm', 'jumpHeld', 'grounded', 'deckX', 'deckZ', 'gunId', 'shipReturned', 'hp', 'maxHp', 'ammo', 'maxAmmo', 'weapon', 'rarity', 'reloadUntil', 'healUntil', 'knockedUntil', 'invulnerableUntil', 'lastInputSeq', 'kills', 'rescues', 'chests'];
 const PUBLIC_FLYING_TARGET = ['id', 'type', 'x', 'y', 'z', 'yaw', 'radius', 'hp', 'maxHp'];
 const PUBLIC_ENEMY = ['id', 'type', 'x', 'y', 'z', 'yaw', 'hp', 'maxHp', 'radius', 'state', 'attackAt', 'zone', 'realm', 'scale', 'attackRadius'];
 const PUBLIC_SIDE_EVENT = ['id', 'status', 'wave', 'remaining', 'integrity', 'maxIntegrity', 'startedAt', 'endsAt', 'finishedAt'];
@@ -306,11 +307,11 @@ export class Game {
     this.emit({ kind: 'phase', phase: 'lobby' });
   }
 
-  addPlayer(id, name, color) {
+  addPlayer(id, name, color, character = 'male') {
     // A new crew can arrive between the last explicit Leave and the next tick.
     this.resetAbandonedRound();
     if (this.onlineCount >= MAX_PLAYERS) return null;
-    const p = { id, name: sanitizeName(name), color: COLORS.includes(color) ? color : COLORS[this.players.size % COLORS.length], online: true, _expiresAt: 0 };
+    const p = { id, name: sanitizeName(name), color: COLORS.includes(color) ? color : COLORS[this.players.size % COLORS.length], character: normalizeCharacter(character), online: true, _expiresAt: 0 };
     this.players.set(id, p);
     this.resetPlayer(p);
     if (this.phase !== 'lobby') {

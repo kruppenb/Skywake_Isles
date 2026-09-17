@@ -142,15 +142,16 @@ function buildTail(color) {
   deform(0, 0); return { mesh, scales, fluke, deform };
 }
 
-export function buildMermaid(palette, color = '#eb785d', { asset = null } = {}) {
+export function buildMermaid(palette, color = '#eb785d', { character = 'male', url = null, asset = null } = {}) {
   const group = new THREE.Group(); group.name = 'meridian-swimming-pirate'; group.userData.kind = 'mermaid';
   // Pitch around the waist inside the world's yaw, so sprinting leans toward
   // the facing at every heading without dropping the head around a foot pivot.
   const swimPivot = new THREE.Group(); swimPivot.name = 'meridian-swim-pivot'; swimPivot.position.y = 1.35; swimPivot.rotation.x = -.13; group.add(swimPivot);
   const body = new THREE.Group(); body.position.y = -1.35; swimPivot.add(body);
-  const pirate = buildPlayerCharacter(palette, color, { swimming: true, asset }); body.add(pirate.group);
+  const pirate = buildPlayerCharacter(palette, color, { character, url, swimming: true, asset }); body.add(pirate.group);
+  group.userData.character = pirate.character;
   const tailRoot = new THREE.Group(); tailRoot.name = 'meridian-articulated-tail'; body.add(tailRoot);
-  const tail = buildTail(color); tailRoot.add(tail.mesh, tail.scales, tail.fluke);
+  let tail = buildTail(color); tailRoot.add(tail.mesh, tail.scales, tail.fluke);
   let recoil = 0, tailPhase = 0, haveHipRest = false;
   const anchor = new THREE.Vector3(), offset = new THREE.Vector3(), parentInverse = new THREE.Matrix4(), parentQ = new THREE.Quaternion(), hipQ = new THREE.Quaternion(), hipLocal = new THREE.Quaternion(), hipRestInverse = new THREE.Quaternion();
 
@@ -179,8 +180,28 @@ export function buildMermaid(palette, color = '#eb785d', { asset = null } = {}) 
     tailRoot.position.copy(anchor).add(offset.applyQuaternion(tailRoot.quaternion));
   }
 
+  function replaceTail(hex) {
+    const geometries = new Set(), materials = new Set();
+    tailRoot.traverse(node => {
+      if (node.geometry) geometries.add(node.geometry);
+      for (const material of Array.isArray(node.material) ? node.material : [node.material]) if (material) materials.add(material);
+    });
+    tailRoot.clear(); geometries.forEach(geometry => geometry.dispose()); materials.forEach(material => material.dispose());
+    tail = buildTail(hex); tailRoot.add(tail.mesh, tail.scales, tail.fluke);
+  }
+
+  pirate.group.addEventListener('character-ready', event => {
+    const shadow = pirate.group.getObjectByName('pirate-contact-shadow'), glider = pirate.group.getObjectByName('pirate-glider');
+    if (shadow) shadow.visible = false;
+    if (glider) glider.visible = false;
+    attachTailToWaist();
+    group.dispatchEvent({ ...event, type: 'character-ready' });
+  });
+
   return {
     group,
+    get character() { return pirate.character; },
+    get kind() { return `mermaid-${pirate.kind}`; },
     animate(time, speed, player = {}, pose = {}) {
       const motion = player.knockedUntil ? 0 : Math.max(0, Number.isFinite(speed) ? speed : 0);
       const moving = clamp(motion / 8, 0, 1);
@@ -205,6 +226,13 @@ export function buildMermaid(palette, color = '#eb785d', { asset = null } = {}) 
     },
     fire(weapon) { recoil = Math.min(1, recoil + (weapon === 'scatter' ? 1 : .65)); pirate.fire(weapon); },
     getMuzzle(target) { return pirate.getMuzzle(target); },
+    setCrewColor(hex) { pirate.setCrewColor(hex); if (typeof hex === 'string') replaceTail(hex); },
+    get debug() {
+      return pirate.debug ? {
+        ...pirate.debug, kind: 'mermaid', character: pirate.character,
+        tailRoot, tail: tail.mesh, scales: tail.scales, fluke: tail.fluke,
+      } : null;
+    },
     // world.js owns traversal/disposal of tail resources after this returns.
     dispose() { pirate.dispose(); },
   };

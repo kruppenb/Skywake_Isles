@@ -17,8 +17,8 @@
       <h1>Skywake Character Studio</h1>
       <p id="prototype-banner" class="prototype-banner" role="note">Skywake navigator &middot; the live player asset under review</p>
       <p class="prototype-note">
-        Inspection page for <code>client/assets/player-character/navigator-meshy.glb</code>, the Meshy-built pirate that
-        <code>client/player-character.js</code> now renders as every player. Prototype shows the raw asset and its clips;
+        Inspection page for the male and female Meshy navigator assets that
+        <code>client/player-character.js</code> renders from each player's selected character. Prototype shows the raw asset and its clips;
         Game model runs the live renderer beside the old procedural pirate. Known residuals are listed under Honest limits.
       </p>
     </header>
@@ -42,6 +42,10 @@
       <aside class="controls" aria-label="Studio controls">
         <section class="group" aria-labelledby="label-view">
           <h2 id="label-view">View</h2>
+          <div class="button-row" id="character-buttons" role="group" aria-label="Character variant">
+            <button id="character-male" type="button" data-character="male" aria-pressed="true">Male navigator</button>
+            <button id="character-female" type="button" data-character="female" aria-pressed="false">Female navigator</button>
+          </div>
           <div class="button-row" id="mode-buttons" role="group" aria-labelledby="label-view">
             <button id="mode-hero" type="button" data-mode="hero" aria-pressed="true">Prototype</button>
             <button id="mode-current" type="button" data-mode="current" aria-pressed="false">Current player</button>
@@ -55,6 +59,10 @@
 
         <section class="group" aria-labelledby="label-pose">
           <h2 id="label-pose">Pose (game model)</h2>
+          <div class="button-row" id="preview-buttons" role="group" aria-label="Game preview environment">
+            <button type="button" data-preview="land" aria-pressed="true">Land body</button>
+            <button type="button" data-preview="mermaid" aria-pressed="false">Mermaid swim</button>
+          </div>
           <div class="button-row" id="weapon-buttons" role="group" aria-label="Weapon">
             <button type="button" data-weapon="flintlock" aria-pressed="true">Flintlock</button>
             <button type="button" data-weapon="scatter" aria-pressed="false">Scatter</button>

@@ -35,8 +35,8 @@ export class GameNet {
     this.callbacks.onStatus?.({ status, message, attempt: this.attempt });
   }
 
-  join(name, color) {
-    this.credentials = { name, color };
+  join(name, color, character = 'male') {
+    this.credentials = { name, color, character };
     this.intentionalClose = false;
     this.attempt = 0;
     this.connect();

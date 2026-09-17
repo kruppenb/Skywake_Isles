@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 2,
+  "id": "skywake-navigator-female",
+  "generator": "imagegen multiview concept plates; Meshy 7 multi-image-to-3D and auto-rig; tools/meshy/albedo.py and build_navigator.py (Blender 5.2.1)",
+  "glb": "navigator-female.glb",
+  "sha256": "d4baf840534e4ebd11615720f31be4ca6bfc7878bef5b36bcc98f863e8caf06e",
+  "bytes": 7636076,
+  "units": "meters",
+  "forward": "-Z",
+  "up": "+Y",
+  "rootNode": "SkywakeNavigator",
+  "rootScale": 1.4452,
+  "triangles": 40918,
+  "meshPrimitives": 1,
+  "materialNames": [
+    "navigator"
+  ],
+  "crewTint": {
+    "convention": "baseColorAlpha",
+    "reference": [
+      0.7635,
+      0.4342,
+      0.3665
+    ],
+    "material": "navigator"
+  },
+  "images": [
+    {
+      "name": "navigator-female-albedo",
+      "mimeType": "image/png",
+      "width": 2048,
+      "height": 2048,
+      "channels": 4,
+      "embeddedBytes": 4590577,
+      "decodedBytes": 22369620
+    }
+  ],
+  "decodedTextureBytes": 22369620,
+  "bounds": {
+    "min": [
+      -0.7194,
+      0,
+      -0.4002
+    ],
+    "max": [
+      0.7186,
+      2.75,
+      0.2979
+    ]
+  },
+  "skins": 1,
+  "jointCount": 29,
+  "joints": [
+    "Hips",
+    "LeftUpLeg",
+    "LeftLeg",
+    "LeftFoot",
+    "LeftToeBase",
+    "RightUpLeg",
+    "RightLeg",
+    "RightFoot",
+    "RightToeBase",
+    "Spine02",
+    "Spine01",
+    "Spine",
+    "LeftShoulder",
+    "LeftArm",
+    "LeftForeArm",
+    "LeftHand",
+    "glider_grip.L",
+    "weapon_grip.L",
+    "neck",
+    "Head",
+    "head_end",
+    "headfront",
+    "RightShoulder",
+    "RightArm",
+    "RightForeArm",
+    "RightHand",
+    "glider_grip.R",
+    "weapon_grip.R",
+    "stow_back"
+  ],
+  "animations": [
+    {
+      "name": "idle",
+      "duration": 4.0333,
+      "channels": 87,
+      "samplers": 87
+    },
+    {
+      "name": "walk",
+      "duration": 1.0667,
+      "channels": 87,
+      "samplers": 87
+    },
+    {
+      "name": "run",
+      "duration": 0.6667,
+      "channels": 87,
+      "samplers": 87
+    }
+  ],
+  "sockets": [
+    {
+      "name": "weapon_grip.L",
+      "parent": "LeftHand",
+      "ancestry": [
+        "LeftHand",
+        "LeftForeArm",
+        "LeftArm",
+        "LeftShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "weapon_grip.R",
+      "parent": "RightHand",
+      "ancestry": [
+        "RightHand",
+        "RightForeArm",
+        "RightArm",
+        "RightShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "glider_grip.L",
+      "parent": "LeftHand",
+      "ancestry": [
+        "LeftHand",
+        "LeftForeArm",
+        "LeftArm",
+        "LeftShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "glider_grip.R",
+      "parent": "RightHand",
+      "ancestry": [
+        "RightHand",
+        "RightForeArm",
+        "RightArm",
+        "RightShoulder",
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    },
+    {
+      "name": "stow_back",
+      "parent": "Spine",
+      "ancestry": [
+        "Spine",
+        "Spine01",
+        "Spine02",
+        "Hips",
+        "Armature",
+        "SkywakeNavigator"
+      ]
+    }
+  ],
+  "meshyTasks": {
+    "multiImageTo3d": "01a0ae26-92c7-71de-84f4-7a645862f44e",
+    "rig": "01a0ae2c-d953-7750-ae52-64258e9aaff2",
+    "idleAnimation": "01a0ae2d-e10f-71c9-bc38-439666926122"
+  },
+  "limitations": [
+    "No finger or toe bones: hands are rigid to LeftHand/RightHand, so grips are posed by runtime IK.",
+    "idle/walk/run are Meshy library clips; runtime overrides both arms, head pitch and legs during glide and knockback.",
+    "The crew mask is a hue classification of the Meshy atlas, carried in base-colour alpha.",
+    "Meshy compressed the concept ponytail into short tied-back hair; loose locks retain the female silhouette.",
+    "A narrow cheek plate projection and split-normal averaging reduce faceting; a small dark side lock and collar flecks remain."
+  ]
+}

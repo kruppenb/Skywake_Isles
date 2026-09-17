@@ -85,7 +85,7 @@ export async function createGameServer({ port = Number(process.env.PORT || 3400)
           session.socket = socket;
         } else {
           const id = randomUUID();
-          player = game.addPlayer(id, msg.name, msg.color);
+          player = game.addPlayer(id, msg.name, msg.color, msg.character);
           if (!player) { error('This crew already has five pirates.', 'CREW_FULL'); return socket.close(4003, 'Crew is full'); }
           session = { id, token: randomBytes(24).toString('hex'), socket };
           sessions.set(session.token, session);

@@ -9,6 +9,8 @@ import path from 'node:path';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..');
 const glbPath = process.argv[2] || path.join(ROOT, 'client/assets/player-character/navigator-meshy.glb');
 const outPath = process.argv[3] || path.join(ROOT, 'client/assets/player-character/manifest.json');
+const female = process.argv.includes('--female');
+const femaleTasks = female ? JSON.parse(readFileSync(path.join(ROOT, 'tools/meshy/female-tasks.json'), 'utf8')) : null;
 
 const bytes = readFileSync(glbPath);
 const jsonLength = bytes.readUInt32LE(12);
@@ -56,8 +58,10 @@ const material = json.materials[0];
 
 const manifest = {
   schemaVersion: 2,
-  id: 'skywake-navigator',
-  generator: 'tools/meshy/build_navigator.py (Blender 5.2.1) on Meshy multi-image-to-3D + rig outputs, albedo from tools/meshy/albedo.py',
+  id: female ? 'skywake-navigator-female' : 'skywake-navigator',
+  generator: female
+    ? 'imagegen multiview concept plates; Meshy 7 multi-image-to-3D and auto-rig; tools/meshy/albedo.py and build_navigator.py (Blender 5.2.1)'
+    : 'tools/meshy/build_navigator.py (Blender 5.2.1) on Meshy multi-image-to-3D + rig outputs, albedo from tools/meshy/albedo.py',
   glb: path.basename(glbPath),
   sha256: createHash('sha256').update(bytes).digest('hex'),
   bytes: bytes.length,
@@ -72,11 +76,17 @@ const manifest = {
   jointCount: json.skins[0].joints.length,
   joints: json.skins[0].joints.map(i => json.nodes[i].name),
   animations, sockets,
-  meshyTasks: {
+  meshyTasks: female ? femaleTasks : {
     multiImageTo3d: '01a091b6-5ad1-7534-a2ba-835316a356f2', rig: '01a091b9-9557-77a8-ae76-1d8b84d19345',
     idleAnimation: '01a091ba-b8d6-751d-937c-71b32fb47b5e', retextureTrial: '01a091d8-9461-70d9-a066-73e12508df83',
   },
-  limitations: [
+  limitations: female ? [
+    'No finger or toe bones: hands are rigid to LeftHand/RightHand, so grips are posed by runtime IK.',
+    'idle/walk/run are Meshy library clips; runtime overrides both arms, head pitch and legs during glide and knockback.',
+    'The crew mask is a hue classification of the Meshy atlas, carried in base-colour alpha.',
+    'Meshy compressed the concept ponytail into short tied-back hair; loose locks retain the female silhouette.',
+    'A narrow cheek plate projection and split-normal averaging reduce faceting; a small dark side lock and collar flecks remain.',
+  ] : [
     'No finger or toe bones: hands are rigid to LeftHand/RightHand, so grips are posed by the runtime IK, not by finger curls.',
     'idle/walk/run are Meshy library clips; the runtime overrides both arms, the head pitch and the legs during glide and knockback.',
     'The crew mask is a hue classification of the Meshy atlas; the headband, lips and brass buttons are deliberately excluded.',

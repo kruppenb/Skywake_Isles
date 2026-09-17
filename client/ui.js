@@ -12,6 +12,7 @@ import { skyState } from './sky-finale.js';
 import { createLootReveal } from './loot-reveal.js';
 import { DIVE_ENTRANCE, REEF_EXIT, REEF_CHEST, REEF_BOUNDS, REEF_SOLIDS, reefLineOfSight, realmOf, sameRealm } from '../shared/underwater.js';
 import { REEF_REGIONS, REEF_DISCOVERIES, REEF_CACHES, REEF_EVENTS, REEF_LANDMARK_SOLIDS, reefRegionAt } from '../shared/underwater-content.js';
+import { CHARACTER_VARIANTS, normalizeCharacter } from '../shared/characters.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -934,6 +935,13 @@ export function createUI(callbacks = {}) {
     const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'crew-color'; radio.value = color; radio.checked = color === savedColor || (index === 0 && !COLORS.includes(savedColor)); radio.setAttribute('aria-label', colorNames[index]);
     const swatch = document.createElement('span'); swatch.setAttribute('aria-hidden', 'true'); label.append(radio, swatch); refs['crew-colors'].append(label);
   });
+  const savedCharacter = normalizeCharacter(read('skywake-character', 'male'));
+  for (const character of CHARACTER_VARIANTS) {
+    const label = document.createElement('label'); label.className = 'character-choice';
+    const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'character'; radio.value = character; radio.checked = character === savedCharacter;
+    const textLabel = document.createElement('span'); textLabel.textContent = character === 'female' ? 'Female' : 'Male';
+    label.append(radio, textLabel); refs['character-choices'].append(label);
+  }
   refs['pirate-name'].value = read('skywake-name', 'Sea Explorer').slice(0, 16);
   refs['quality-select'].value = settings.quality === 'low' ? 'low' : 'high';
 
@@ -941,10 +949,11 @@ export function createUI(callbacks = {}) {
     event.preventDefault();
     const name = refs['pirate-name'].value.trim().slice(0, 16) || 'Sea Explorer';
     const color = refs['crew-colors'].querySelector('input:checked')?.value || COLORS[0];
+    const character = normalizeCharacter(refs['character-choices'].querySelector('input:checked')?.value);
     refs['pirate-name'].value = name;
-    write('skywake-name', name); write('skywake-color', color);
+    write('skywake-name', name); write('skywake-color', color); write('skywake-character', character);
     show(refs['join-error'], false);
-    callbacks.onJoin?.(name, color);
+    callbacks.onJoin?.(name, color, character);
   });
   button('launch-button', () => callbacks.onAction?.('launch'));
   button('ready-button', () => callbacks.onAction?.('ready'));

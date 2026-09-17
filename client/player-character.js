@@ -38,11 +38,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { WEAPON_ORDER, WEAPONS } from '../shared/weapons.js';
 import { KNOCK_DURATION } from '../shared/encounters.js';
+import { normalizeCharacter } from '../shared/characters.js';
 import { buildPirate, buildWeapon, buildGlider, WEAPON_HANDLING } from './models.js';
 import { upgradeWeapon } from './weapon-models.js';
 import { sampleReloadAnimation } from './reload-animation.js';
 
 export const NAVIGATOR_URL = '/assets/player-character/navigator-meshy.glb';
+export const FEMALE_NAVIGATOR_URL = '/assets/player-character/navigator-female.glb';
 export const CREW_MASK_CONVENTION = 'baseColorAlpha';
 const DEFAULT_REFERENCE = [0.7, 0.4, 0.35];
 
@@ -96,14 +98,15 @@ export function crewTintHex(material) {
 }
 
 // ------------------------------------------------------------------- loading --
-let assetPromise = null;
+const assetPromises = new Map();
 let warned = false;
 
 // Loads the GLB once per page. Geometry and texture are flagged shared so world.js's disposal of
 // one pirate never frees what the others still draw.
 export function loadNavigatorAsset(url = NAVIGATOR_URL) {
-  if (!assetPromise) {
-    assetPromise = new GLTFLoader().loadAsync(url).then(gltf => {
+  const requestedUrl = typeof url === 'string' && url ? url : NAVIGATOR_URL;
+  if (!assetPromises.has(requestedUrl)) {
+    const promise = new GLTFLoader().loadAsync(requestedUrl).then(gltf => {
       gltf.scene.traverse(node => {
         if (!node.isMesh) return;
         node.geometry.userData.shared = true;
@@ -112,11 +115,14 @@ export function loadNavigatorAsset(url = NAVIGATOR_URL) {
           if (material.map) material.map.userData.shared = true;
         }
       });
-      return { scene: gltf.scene, animations: gltf.animations, url };
+      return { scene: gltf.scene, animations: gltf.animations, url: requestedUrl };
     });
-    assetPromise.catch(() => { assetPromise = null; });
+    // A failed request is specific to this URL.  Retrying it must work, while a
+    // healthy male/female entry remains available to the other variant.
+    promise.catch(() => { if (assetPromises.get(requestedUrl) === promise) assetPromises.delete(requestedUrl); });
+    assetPromises.set(requestedUrl, promise);
   }
-  return assetPromise;
+  return assetPromises.get(requestedUrl);
 }
 
 function canLoadInThisRuntime() {
@@ -264,38 +270,49 @@ function trimNavigatorLegs(mesh) {
 }
 
 // ------------------------------------------------------------------ builder --
-export function buildPlayerCharacter(palette, color = '#eb785d', { url = NAVIGATOR_URL, asset = null, swimming = false } = {}) {
-  const group = new THREE.Group(); group.name = 'pirate'; group.userData.kind = 'pirate';
+export function buildPlayerCharacter(palette, color = '#eb785d', { character = 'male', url = null, asset = null, swimming = false } = {}) {
+  const variant = normalizeCharacter(character);
+  const assetUrl = typeof url === 'string' && url ? url : variant === 'female' ? FEMALE_NAVIGATOR_URL : NAVIGATOR_URL;
+  const group = new THREE.Group(); group.name = 'pirate'; group.userData.kind = 'pirate'; group.userData.character = variant;
   let fallback = buildPirate(palette, color); group.add(fallback.group);
   if (swimming) {
     fallback.group.getObjectByName('left-hip')?.removeFromParent();
     fallback.group.getObjectByName('right-hip')?.removeFromParent();
   }
-  let navigator = null, disposed = false;
-  const ready = asset ? Promise.resolve(asset) : canLoadInThisRuntime() ? loadNavigatorAsset(url) : null;
+  let navigator = null, disposed = false, crewColor = color;
+  const ready = asset ? Promise.resolve(asset) : canLoadInThisRuntime() ? loadNavigatorAsset(assetUrl) : null;
   if (ready) {
     ready.then(loaded => {
       if (disposed) return;
       try {
-        navigator = buildNavigator(loaded, palette, color, group, { swimming });
+        navigator = buildNavigator(loaded, palette, crewColor, group, { swimming });
       } catch (error) {
         if (!warned) { warned = true; console.warn('navigator rig unusable, keeping the procedural pirate', error); }
         return;
       }
       group.remove(fallback.group); disposeProcedural(fallback.group); fallback = null;
+      group.dispatchEvent({ type: 'character-ready', character: variant, url: assetUrl, swimming });
     }, error => {
-      if (!warned) { warned = true; console.warn(`player character ${url} failed to load, keeping the procedural pirate`, error); }
+      if (!warned) { warned = true; console.warn(`player character ${assetUrl} failed to load, keeping the procedural pirate`, error); }
     });
   }
   return {
     group,
+    get character() { return variant; },
     get kind() { return navigator ? 'navigator' : 'procedural'; },
     animate(time, speed, player, pose) { (navigator || fallback).animate(time, speed, player, pose); },
     fire(weapon) { (navigator || fallback).fire(weapon); },
     getMuzzle(target) { return (navigator || fallback).getMuzzle(target); },
-    setCrewColor(hex) { if (navigator) navigator.setCrewColor(hex); },
+    setCrewColor(hex) {
+      if (typeof hex !== 'string') return;
+      crewColor = hex;
+      if (navigator) navigator.setCrewColor(hex);
+    },
     // The rig's innards, for the character studio only: null until the GLB has built a navigator.
-    get debug() { return navigator ? navigator.debug : null; },
+    get debug() {
+      const debug = navigator ? navigator.debug : null;
+      return debug ? { ...debug, character: variant, url: assetUrl, swimming } : null;
+    },
     dispose() { disposed = true; if (navigator) navigator.dispose(); },
   };
 }
@@ -309,9 +326,11 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
   const figure = new THREE.Group(); figure.name = 'navigator-figure'; group.add(figure);
   const root = cloneSkeleton(asset.scene); root.name = 'SkywakeNavigator'; figure.add(root);
   const materials = [];
+  const skeletons = new Set(), skeletonNodes = [];
   root.traverse(node => {
     if (!node.isMesh) return;
     node.frustumCulled = false; node.castShadow = true; node.receiveShadow = true;
+    if (node.isSkinnedMesh && node.skeleton) { skeletons.add(node.skeleton); skeletonNodes.push(node); }
     const clone = material => { const copy = material.clone(); copy.userData.shared = false; installCrewTint(copy, color); materials.push(copy); return copy; };
     node.material = Array.isArray(node.material) ? node.material.map(clone) : clone(node.material);
   });
@@ -751,6 +770,7 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
     shadow.scale.set(1 + downed.shadowStretch * topple, 1 - .3 * downed.shadowStretch * topple, 1);
   }
   animate(0, 0, { mode: 'aboard', weapon: 'flintlock' });
+  let disposedNavigator = false;
   return {
     animate,
     fire(weapon = equipped) { recoil = Math.min(1.4, recoil + ({ flintlock: .82, scatter: 1.15, repeater: .38, burst: .48, longshot: 1.3 }[weapon] || .82)); },
@@ -760,7 +780,13 @@ function buildNavigator(asset, palette, color, group, { swimming = false } = {})
       return targetVector3.setFromMatrixPosition(socket.matrixWorld);
     },
     setCrewColor(hex) { for (const material of materials) setCrewTint(material, hex); },
-    dispose() { mixer.stopAllAction(); mixer.uncacheRoot(root); },
+    dispose() {
+      if (disposedNavigator) return;
+      disposedNavigator = true;
+      mixer.stopAllAction(); mixer.uncacheRoot(root);
+      for (const skeleton of skeletons) skeleton.dispose();
+      for (const node of skeletonNodes) node.userData.navigatorSkeletonDisposed = true;
+    },
     debug: { root, bones, arms, legs, torso, weaponRig, stowRig, weapons, mixer, actions, reachScale, shoulderHeight },
   };
 }

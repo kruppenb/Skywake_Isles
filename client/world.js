@@ -4,6 +4,7 @@ import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, trailDistance, build
 import { makePalette, GeoBatch, buildGalleon, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { buildPlayerCharacter } from './player-character.js';
 import { buildMermaid } from './mermaid.js';
+import { normalizeCharacter } from '../shared/characters.js';
 import { createUnderwaterPresentation } from './underwater.js';
 import { realmOf, sameRealm } from '../shared/underwater.js';
 import { reefRegionAt } from '../shared/underwater-content.js';
@@ -910,8 +911,17 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       const player = isLocal ? localPlayer : sample?.player || source;
       seen.add(player.id);
       let model = players.get(player.id);
+      const realm = realmOf(player), character = normalizeCharacter(player.character);
+      // A lobby selection can change while this player remains in the same
+      // realm. Tear down the old rig before its async GLB callback can attach,
+      // then build the selected body in the active scene.
+      if (model && (model.character !== character || model.realm !== realm)) {
+        model.dispose?.(); disposeObject(model.group, preserve); players.delete(player.id);
+        model = null;
+      }
       if (!model) {
-        model = { ...(realmOf(player) === 'reef' ? buildMermaid(palette, player.color) : buildPlayerCharacter(palette, player.color)), flashUntil: 0 };
+        const options = { character };
+        model = { ...(realm === 'reef' ? buildMermaid(palette, player.color, options) : buildPlayerCharacter(palette, player.color, options)), flashUntil: 0, character, realm };
         model.group.userData.playerId = player.id;
         model.group.position.set(player.x, player.y, player.z); model.group.rotation.y = player.yaw || 0;
         activeScene().add(model.group); players.set(player.id, model);

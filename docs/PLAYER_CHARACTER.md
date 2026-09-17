@@ -1,10 +1,51 @@
 # Skywake navigator — the player character
 
 Status: **live player asset, under review.** `client/assets/player-character/navigator-meshy.glb`
-is what `client/player-character.js` renders for every pirate on screen, local and remote. The
+is the male asset rendered by `client/player-character.js`. The female choice uses
+`client/assets/player-character/navigator-female.glb` with the same rig and animation contract. The
 procedural `buildPirate` in `client/models.js` is still in the tree as the fallback that shows
 while the GLB loads (or forever if it cannot load) and as the comparison model in the studio.
 This document describes what is built, what is verified and how, and what still looks wrong.
+
+## Female navigator variant
+
+The female navigator has her own Meshy 7 mesh and 2K atlas, generated from four imagegen concept
+plates of one female captain. She keeps the navy and coral crew uniform but has a clean-shaven
+feminine face, tailored coat, and short wavy hair tied back under the tricorn with loose cheek
+locks. Meshy did not retain the concept's long ponytail. Her body and
+the female mermaid's upper body use the same `navigator-female.glb`; the existing legs are trimmed
+by the mermaid renderer. The male GLB and its original manifest remain independent.
+
+The lobby offers male and female choices. The selected character travels in game snapshots so
+other players see the same variant, and reconnecting with the saved session keeps the authorized
+choice. The character studio can open the female pirate directly at
+`/character-studio.html?character=female` or her mermaid form at
+`/character-studio.html?character=female&preview=mermaid`.
+
+`tools/meshy/female-tasks.json` records the Meshy mesh, rig, and idle task IDs. Once those task
+downloads are available, `tools/meshy/build_female.ps1` rebuilds the shipped GLB and measured
+`female-manifest.json` through the same `albedo.py` and `build_navigator.py` used by the male.
+The tracked `tools/meshy/plates/navigator-female-front.png` is the imagegen source plate used by a
+small cheek projection that cleans Meshy's dark face artifact while leaving eyes, nose and lips
+aligned to the geometry. Its back/side source plates and the visual review renders are ignored QA
+artifacts in `.qa/female-character/`; the task IDs identify Meshy's generated inputs.
+The build also averages split normals at duplicate coordinates on forward facial skin only,
+keeping the coat and hat creases intact.
+The crew's coral accent is stored in the embedded RGBA albedo's alpha channel and marked with
+`crewMask: "baseColorAlpha"` and `crewReference` on the opaque material, matching the male shader.
+`test/female-character.test.js` checks the binary rig, sockets, clips, skinned mesh, dimensions,
+embedded texture, and real crew-mask coverage. The final GLB has 40,918 triangles, 29 joints,
+one 2048² RGBA atlas, three clips, and a 7.28 MiB file (7,636,076 bytes). The visual residuals
+are a small dark side lock patch at the cheek, softly baked collar flecks, and the shorter tied
+hair silhouette. The concept's long ponytail was deliberately not added as lower-detail geometry.
+Browser acceptance covered the female lobby choice, another player's snapshot, reconnect
+preservation, mermaid preview, and a live shore-to-reef dive/swim/sprint/scatter/return route.
+Glider grips and all five weapon rigs were inspected; the browser run reported no console or page
+errors. To repeat the selection and studio capture against an isolated server on port 3401:
+
+```powershell
+node tools/qa/characters/capture.mjs --origin http://127.0.0.1:3401 --out .qa/female-character/browser-acceptance
+```
 
 ## What this is
 

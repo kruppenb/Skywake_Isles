@@ -3,8 +3,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // Use the shipped mesh, skin and clips in Node. Only textures are omitted;
 // no DOM/image decoder is needed to measure the actual animated skeleton.
-export async function navigatorAsset() {
-  const bytes = await readFile(new URL('../../client/assets/player-character/navigator-meshy.glb', import.meta.url));
+export async function navigatorAsset(filename = 'navigator-meshy.glb') {
+  if (typeof filename !== 'string' || !/^[\w.-]+\.glb$/.test(filename)) throw new TypeError('navigator asset must be a GLB filename');
+  const bytes = await readFile(new URL(`../../client/assets/player-character/${filename}`, import.meta.url));
   const length = bytes.readUInt32LE(12), json = JSON.parse(bytes.toString('utf8', 20, 20 + length));
   for (const material of json.materials) {
     delete material.pbrMetallicRoughness.baseColorTexture;

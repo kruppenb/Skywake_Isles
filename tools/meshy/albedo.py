@@ -169,6 +169,55 @@ def plate_silhouette(plate):
     return distance > 22, background
 
 
+def project_female_face(albedo, geometry, coverage, plate_path, debug_dir=None):
+    """Use the female front concept to soften Meshy's cheek colour and dark artifact.
+
+    The projection is deliberately restricted to the central, forward-facing skin surface. Its
+    metre-to-pixel mapping was measured against this concept plate's eye and chin landmarks; hair,
+    hat, collar and ears keep Meshy's own atlas and geometry.
+    """
+    plate = np.asarray(Image.open(plate_path).convert('RGB')).astype(np.float32)
+    ph, pw = plate.shape[:2]
+    pos, nrm, head = geometry[..., :3], geometry[..., 3:6], geometry[..., 6]
+    scale_x = pw / 1024
+    scale_y = ph / 1536
+    px = (512 + pos[..., 0] * 650) * scale_x
+    py = (100 + (1.70 - pos[..., 1]) * 875) * scale_y
+    fx = np.clip(px, 0, pw - 1.001); fy = np.clip(py, 0, ph - 1.001)
+    ix = np.floor(fx).astype(int); iy = np.floor(fy).astype(int)
+    tx = (fx - ix)[..., None]; ty = (fy - iy)[..., None]
+    sample = ((plate[iy, ix] * (1 - tx) + plate[iy, ix + 1] * tx) * (1 - ty)
+              + (plate[iy + 1, ix] * (1 - tx) + plate[iy + 1, ix + 1] * tx) * ty)
+    # Preserve Meshy's eye, brow, nose and lip charts: the plate's facial landmarks do not land
+    # exactly on the generated geometry and would otherwise create doubled features. This pass
+    # treats the cheek skin, especially the dark patch left by the generator, only.
+    cheek = (smoothstep(1.57, 1.59, pos[..., 1])
+             * (1 - smoothstep(1.64, 1.655, pos[..., 1]))
+             * smoothstep(0.045, 0.07, np.abs(pos[..., 0]))
+             * (1 - smoothstep(0.105, 0.125, np.abs(pos[..., 0]))))
+    chin = (smoothstep(1.53, 1.55, pos[..., 1])
+            * (1 - smoothstep(1.575, 1.59, pos[..., 1]))
+            * (1 - smoothstep(0.095, 0.12, np.abs(pos[..., 0]))))
+    weight = (smoothstep(0.55, 0.85, head) * smoothstep(0.2, 0.55, nrm[..., 2])
+              * np.maximum(cheek, chin) * smoothstep(0.025, 0.055, pos[..., 2]) * coverage)
+    # The plate is a softly lit painting. Keep its warm skin detail while aligning its median
+    # brightness to Meshy's surrounding skin so the face does not become an unlit patch.
+    central = weight > 0.9
+    if central.any():
+        source_lum = np.median(luminance(sample[central]))
+        target_lum = np.median(luminance(albedo[central]))
+        gain = np.clip(target_lum / max(source_lum, 1), 0.85, 1.07)
+    else:
+        gain = 1.0
+    sample = np.clip(sample * gain, 0, 255)
+    result = albedo * (1 - weight[..., None]) + sample * weight[..., None]
+    print(f'female face plate: {int(central.sum())} central texels, brightness gain {gain:.3f}')
+    if debug_dir:
+        Image.fromarray((weight * 255).astype(np.uint8)).save(os.path.join(debug_dir, 'face-weight.png'))
+        Image.fromarray(np.clip(result, 0, 255).astype(np.uint8)).save(os.path.join(debug_dir, 'face-atlas.png'))
+    return result
+
+
 def project_back(albedo, geometry, coverage, plate_path, debug_dir=None):
     """Paint the back plate onto the back-facing coat texels. Returns the new albedo and the blend weight."""
     plate = np.asarray(Image.open(plate_path).convert('RGB')).astype(np.float32)
@@ -291,6 +340,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--glb', required=True); ap.add_argument('--albedo', required=True)
     ap.add_argument('--back'); ap.add_argument('--out', required=True)
+    ap.add_argument('--face-front', help='female front concept plate for a bounded face repair')
     ap.add_argument('--debug'); ap.add_argument('--sidecar'); ap.add_argument('--no-project', action='store_true')
     args = ap.parse_args()
     if args.debug:
@@ -307,6 +357,8 @@ def main():
     result = albedo
     if args.back and not args.no_project:
         result, _ = project_back(albedo, geometry, coverage, args.back, args.debug)
+    if args.face_front:
+        result = project_female_face(result, geometry, coverage, args.face_front, args.debug)
     mask, reference = accent_mask(result, geometry[..., 6], coverage, args.debug)
     rgba = np.concatenate([np.clip(result, 0, 255), mask[..., None] * 255], axis=-1).astype(np.uint8)
     Image.fromarray(rgba, 'RGBA').save(args.out, optimize=True)

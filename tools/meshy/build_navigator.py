@@ -194,6 +194,33 @@ if any(abs(f - 1) > 1e-6 for f in PROPORTIONS.values()):
     mesh.data.vertices.foreach_set('co', verts.reshape(-1))
     mesh.data.update()
 
+# Meshy's female face retains polygon-flat split normals around the cheeks and chin. Keep the
+# coat's authored creases and hat edges, averaging only central forward-facing skin normals at
+# coincident coordinates (including duplicated vertices at UV seams).
+if opts.get('smooth-face') == '1':
+    face_polygons = []
+    normal_sums = {}
+    def normal_key(vertex):
+        c = mesh.data.vertices[vertex].co
+        return tuple(round(float(v), 5) for v in c)
+    for poly in mesh.data.polygons:
+        c = poly.center
+        if (1.53 < c.z < 1.70 and c.y < -0.045 and abs(c.x) < 0.135
+                and poly.normal.y < -0.2):
+            face_polygons.append(poly)
+            poly.use_smooth = True
+            for vertex in poly.vertices:
+                key = normal_key(vertex)
+                normal_sums[key] = normal_sums.get(key, Vector((0, 0, 0))) + poly.normal * poly.area
+    split_normals = [n.vector[:] for n in mesh.data.corner_normals]
+    for poly in face_polygons:
+        for loop_index in poly.loop_indices:
+            key = normal_key(mesh.data.loops[loop_index].vertex_index)
+            split_normals[loop_index] = normal_sums[key].normalized()[:]
+    mesh.data.normals_split_custom_set(split_normals)
+    mesh.data.update()
+    print(f'averaged split normals on {len(face_polygons)} forward skin polygons at {len(normal_sums)} coordinates')
+
 # Measure height in metres from the mesh (rest pose), then scale to the game height.
 bpy.context.view_layer.update()  # matrix_world is stale until the depsgraph re-evaluates
 lo = Vector((1e9,) * 3); hi = Vector((-1e9,) * 3)

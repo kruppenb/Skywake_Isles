@@ -12,20 +12,36 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { makePalette, buildPirate } from './models.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { KNOCK_DURATION } from '../shared/encounters.js';
-import { isCrewMaskMaterial, installCrewTint, setCrewTint, crewTintHex, buildPlayerCharacter, NAVIGATOR_URL } from './player-character.js';
+import { normalizeCharacter } from '../shared/characters.js';
+import { isCrewMaskMaterial, installCrewTint, setCrewTint, crewTintHex, buildPlayerCharacter, NAVIGATOR_URL, FEMALE_NAVIGATOR_URL } from './player-character.js';
+import { buildMermaid } from './mermaid.js';
 
-const DEFAULT_HERO_URL = NAVIGATOR_URL;
+const defaultHeroUrl = character => normalizeCharacter(character) === 'female' ? FEMALE_NAVIGATOR_URL : NAVIGATOR_URL;
 // `?glb=/assets/…/other.glb` points the studio at another served asset (an alternate build under
 // review) without touching the shipped asset. Only same-origin /assets paths are accepted;
 // anything else falls back to the shipped navigator.
-function heroUrlFromQuery() {
+function characterFromQuery() {
+  try { return normalizeCharacter(new URLSearchParams(window.location.search).get('character')); }
+  catch (error) { return 'male'; }
+}
+function previewFromQuery() {
+  try { return new URLSearchParams(window.location.search).get('preview') === 'mermaid' ? 'mermaid' : 'land'; }
+  catch (error) { return 'land'; }
+}
+function modeFromQuery() {
+  try {
+    const query = new URLSearchParams(window.location.search);
+    return query.get('mode') === 'game' || query.get('preview') === 'mermaid' ? 'game' : 'hero';
+  }
+  catch (error) { return 'hero'; }
+}
+const glbOverride = (() => {
   try {
     const requested = new URLSearchParams(window.location.search).get('glb');
-    if (requested && /^\/assets\/[\w./-]+\.glb$/.test(requested) && !requested.includes('..')) return requested;
-  } catch (error) { /* no query available: use the default */ }
-  return DEFAULT_HERO_URL;
-}
-const HERO_URL = heroUrlFromQuery();
+    return requested && /^\/assets\/[\w./-]+\.glb$/.test(requested) && !requested.includes('..') ? requested : null;
+  } catch (error) { return null; }
+})();
+const heroUrl = () => glbOverride || defaultHeroUrl(state.character);
 const DEFAULT_CLIPS = ['idle', 'walk', 'run'];
 // Replaced by the loaded file's own clip names once a GLB with animations arrives.
 let CLIPS = DEFAULT_CLIPS.slice();
@@ -67,8 +83,9 @@ const playButton = element('play-toggle');
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const state = {
-  mode: 'hero', camera: 'threeQuarter', lighting: 'studio', clip: 'idle', surface: 'textured',
+  mode: modeFromQuery(), camera: 'threeQuarter', lighting: 'studio', clip: 'idle', surface: 'textured',
   crew: AUTHORED_CREW, playing: !reducedMotion.matches, yaw: CAMERAS.threeQuarter.yaw,
+  character: characterFromQuery(), preview: previewFromQuery(),
   cameraYawSource: null, ready: false, loading: true, error: null, attempts: 0,
 };
 
@@ -139,6 +156,9 @@ const tintColor = new THREE.Color();
 const measured = new THREE.Box3();
 const meshBounds = new THREE.Box3();
 const measuredSize = new THREE.Vector3();
+const liveBounds = new THREE.Box3();
+const liveMeshBounds = new THREE.Box3();
+const liveSize = new THREE.Vector3();
 
 // ---------------------------------------------------------------- baseline --
 const palette = makePalette();
@@ -164,8 +184,9 @@ function gamePlayerState(elapsedNow) {
   // A pinned reloadProgress holds the stroke at one instant for screenshots; a plain
   // Reload toggle starts one real stroke from the moment it is pressed.
   if (pose.reloadProgress !== null) reloadUntil = elapsedNow + duration * (1 - pose.reloadProgress);
-  gamePlayer.mode = pose.state === 'aboard' ? 'aboard' : pose.state;
-  gamePlayer.gunId = pose.state === 'aboard' ? 'studio-gun' : null;
+  const swimming = state.preview === 'mermaid';
+  gamePlayer.mode = swimming ? 'swimming' : pose.state === 'aboard' ? 'aboard' : pose.state;
+  gamePlayer.gunId = !swimming && pose.state === 'aboard' ? 'studio-gun' : null;
   gamePlayer.weapon = pose.weapon; gamePlayer.pitch = pose.pitch;
   // Knocked keeps the deadline it was pressed with, so the collapse plays once and settles.
   gamePlayer.knockedUntil = pose.knocked ? knockedUntil : 0;
@@ -175,10 +196,28 @@ function gamePlayerState(elapsedNow) {
 
 function ensureGameModel() {
   if (gameModel || !renderer) return;
-  gameModel = buildPlayerCharacter(palette, state.crew, { url: HERO_URL });
+  const options = { character: state.character, url: heroUrl() };
+  gameModel = state.preview === 'mermaid'
+    ? buildMermaid(palette, state.crew, options)
+    : buildPlayerCharacter(palette, state.crew, options);
   gameModel.group.name = 'game-model';
+  const model = gameModel;
+  model.group.addEventListener('character-ready', () => {
+    if (gameModel !== model) return;
+    // The fallback is shorter than a mermaid and has no GLB bounds. Refit once
+    // the selected live rig has attached, and apply any chosen studio surface.
+    applySurface(); applyCamera(state.camera);
+  });
   gameSlot.add(gameModel.group);
   applySurface();
+}
+
+function disposeGameModel() {
+  if (!gameModel) return;
+  gameModel.dispose();
+  gameSlot.remove(gameModel.group);
+  gameModel.group.traverse(node => { if (node.isMesh || node.isLine || node.isLineSegments) disposeMeshResources(node); });
+  gameModel = null;
 }
 
 function materialsOf(mesh) {
@@ -188,7 +227,7 @@ function materialsOf(mesh) {
 function disposeMaterial(material) {
   if (!material) return;
   for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap']) {
-    if (material[key] && material[key].dispose) material[key].dispose();
+    if (material[key] && material[key].dispose && !material[key].userData.shared) material[key].dispose();
   }
   material.dispose();
 }
@@ -235,16 +274,51 @@ function measure(object) {
   };
 }
 
+// Reports deliberately retain the raw GLB's rest-pose bounds. Camera fitting
+// cannot: an idle clip may lift a hat above those bounds, and the mermaid tail
+// exists only in the live renderer. Recompute skinned bounds only when a camera
+// is fitted, never each animation frame.
+function liveFrame() {
+  liveBounds.makeEmpty();
+  const subjects = [];
+  if (heroSlot.visible && heroRoot) subjects.push(heroRoot);
+  if (gameSlot.visible && gameModel) subjects.push(gameModel.group);
+  if (baselineSlot.visible && baseline) subjects.push(baseline.group);
+  for (const subject of subjects) {
+    subject.updateMatrixWorld(true);
+    const visit = node => {
+      if (node.visible === false) return;
+      if ((node.isMesh || node.isLine || node.isLineSegments) && node.geometry) {
+      if (node.isSkinnedMesh) {
+        node.computeBoundingBox(); liveMeshBounds.copy(node.boundingBox);
+      } else {
+        if (node.geometry.boundingBox === null) node.geometry.computeBoundingBox();
+        liveMeshBounds.copy(node.geometry.boundingBox);
+      }
+      liveBounds.union(liveMeshBounds.applyMatrix4(node.matrixWorld));
+      }
+      for (const child of node.children) visit(child);
+    };
+    visit(subject);
+  }
+  if (liveBounds.isEmpty()) return { height: FALLBACK_HEIGHT, centerY: FALLBACK_HEIGHT * .5 };
+  liveBounds.getSize(liveSize);
+  return { height: Math.max(.01, liveSize.y), centerY: (liveBounds.min.y + liveBounds.max.y) * .5 };
+}
+
 // Frees a mesh's own resources. The shared palette, clay and wireframe
 // materials outlive every subject and must never be disposed here, and a mesh
 // currently wearing a preview material still owns the material it came with.
 function disposeMeshResources(node) {
-  if (node.geometry) node.geometry.dispose();
+  if (node.geometry && !node.geometry.userData.shared) node.geometry.dispose();
   const original = node.userData.studioBaseMaterial;
-  const list = original ? (Array.isArray(original) ? original : [original]) : materialsOf(node);
+  const list = new Set([...(original ? (Array.isArray(original) ? original : [original]) : []), ...materialsOf(node)]);
   for (const material of list) {
-    if (!material || material === clayMaterial || material === wireMaterial || sharedMaterials.has(material)) continue;
+    if (!material || material.userData.shared || material === clayMaterial || material === wireMaterial || sharedMaterials.has(material)) continue;
     disposeMaterial(material);
+  }
+  if (node.isSkinnedMesh && node.skeleton && !node.userData.navigatorSkeletonDisposed) {
+    node.skeleton.dispose(); node.userData.navigatorSkeletonDisposed = true;
   }
 }
 
@@ -276,6 +350,7 @@ let mixer = null;
 let actions = Object.create(null);
 let heroStats = null;
 let crewMaterial = null;
+let heroLoad = 0;
 
 function disposeHero() {
   if (mixer) {
@@ -298,6 +373,15 @@ function disposeHero() {
   heroStats = null;
 }
 
+function disposeStaleHero(root) {
+  if (!root) return;
+  root.traverse(node => {
+    if (!node.isMesh) return;
+    disposeMeshResources(node);
+    if (node.isSkinnedMesh && node.skeleton?.dispose) node.skeleton.dispose();
+  });
+}
+
 function setStatus(kind, message, showRetry = false) {
   statusPanel.dataset.state = kind;
   statusText.textContent = message;
@@ -306,14 +390,18 @@ function setStatus(kind, message, showRetry = false) {
 
 function loadHero() {
   if (!renderer) return;
+  const load = ++heroLoad;
   disposeHero();
   state.loading = true; state.ready = false; state.error = null;
   setStatus('loading', 'Loading the player character…');
   applyMode();
   sync();
   // A retry must not be answered from a cached failure.
-  const url = state.attempts ? `${HERO_URL}?attempt=${state.attempts}` : HERO_URL;
-  loader.load(url, onHeroLoaded, undefined, onHeroError);
+  const url = state.attempts ? `${heroUrl()}?attempt=${state.attempts}` : heroUrl();
+  loader.load(url,
+    gltf => { if (load === heroLoad) onHeroLoaded(gltf); else disposeStaleHero(gltf.scene); },
+    undefined,
+    error => { if (load === heroLoad) onHeroError(error); });
 }
 
 function onHeroLoaded(gltf) {
@@ -336,7 +424,7 @@ function onHeroLoaded(gltf) {
       }
     });
     heroStats = measure(heroRoot);
-    heroStats.url = HERO_URL;
+    heroStats.url = heroUrl();
     heroStats.animations = (gltf.animations || []).map(clip => ({
       name: clip.name, duration: Number(clip.duration.toFixed(4)), tracks: clip.tracks.length,
     }));
@@ -360,7 +448,7 @@ function onHeroLoaded(gltf) {
     applyClip(state.clip);
     state.ready = true; state.loading = false; state.error = null;
     applyMode();
-    setStatus('ready', `Loaded ${HERO_URL} — ${heroStats.triangles.toLocaleString('en-US')} triangles, `
+    setStatus('ready', `Loaded ${heroUrl()} — ${heroStats.triangles.toLocaleString('en-US')} triangles, `
       + `${heroStats.materials} materials, ${heroStats.joints} joints.`);
     renderReport();
     sync();
@@ -371,7 +459,7 @@ function onHeroLoaded(gltf) {
 
 function onHeroError(error) {
   const detail = error && error.message ? error.message : String(error || 'unknown error');
-  state.error = `Could not load ${HERO_URL}: ${detail}`;
+  state.error = `Could not load ${heroUrl()}: ${detail}`;
   state.ready = false; state.loading = false;
   // The current player stays available so the page is still useful.
   if (state.mode !== 'current') applyMode('current');
@@ -420,6 +508,28 @@ function applyMode(next = state.mode) {
   sync();
 }
 
+function applyCharacter(value = state.character) {
+  const next = normalizeCharacter(value);
+  if (next === state.character && state.ready) return;
+  state.character = next;
+  disposeGameModel();
+  press('character-buttons', 'character', next);
+  loadHero();
+  if (state.mode === 'game') ensureGameModel();
+  sync();
+}
+
+function applyPreview(value = state.preview) {
+  const next = value === 'mermaid' ? 'mermaid' : 'land';
+  if (next === state.preview && gameModel) return;
+  state.preview = next;
+  ground.position.y = next === 'mermaid' ? -2.2 : 0;
+  disposeGameModel();
+  press('preview-buttons', 'preview', next);
+  if (state.mode === 'game') ensureGameModel();
+  sync();
+}
+
 function applyPose(partial = {}) {
   if (partial.weapon && WEAPONS[partial.weapon]) pose.weapon = partial.weapon;
   if (['ground', 'gliding', 'aboard'].includes(partial.state)) pose.state = partial.state;
@@ -444,13 +554,6 @@ function applyPose(partial = {}) {
   sync();
 }
 
-// Height of what the fitted cameras must frame, from the measured bounds.
-function subjectHeight() {
-  const hero = heroStats && (heroSlot.visible || gameSlot.visible) ? heroStats.bounds.max[1] : 0;
-  const current = baselineStats && baselineSlot.visible ? baselineStats.bounds.max[1] : 0;
-  return Math.max(hero, current) || FALLBACK_HEIGHT;
-}
-
 function applyCamera(next = state.camera) {
   const preset = CAMERAS[next];
   if (!preset) return;
@@ -468,12 +571,15 @@ function applyCamera(next = state.camera) {
     // Frame whatever is on stage: the loaded asset, the procedural player, or
     // the taller of the two side by side. Widen for two subjects, and again for
     // tall narrow phone viewports so the figure is never cropped sideways.
-    const height = subjectHeight();
+    const frame = liveFrame(), height = frame.height;
     let scale = state.mode === 'side' ? 1.25 : 1;
     const aspect = camera.aspect || 1;
     if (aspect < 1.2) scale *= Math.min(2.1, 1.2 / aspect);
-    camera.position.set(0, preset.eye * height, -preset.distance * height * scale);
-    camera.lookAt(0, preset.target * height, 0);
+    const mermaid = state.mode === 'game' && state.preview === 'mermaid' && gameModel;
+    const targetY = mermaid ? frame.centerY : preset.target * height;
+    const eyeY = mermaid ? targetY + (preset.eye - preset.target) * height : preset.eye * height;
+    camera.position.set(0, eyeY, -preset.distance * height * scale);
+    camera.lookAt(0, targetY, 0);
   } else {
     camera.position.set(preset.position[0], preset.position[1], preset.position[2]);
     camera.rotation.set(preset.pitch, 0, 0);
@@ -507,6 +613,7 @@ function applyClip(next = state.clip) {
     mixer.setTime(0);
   }
   press('clip-buttons', 'clip', next);
+  applyCamera(state.camera);
   sync();
 }
 
@@ -537,16 +644,32 @@ function applySurface(next = state.surface) {
   if (next !== 'textured' && next !== 'clay' && next !== 'wireframe') return;
   state.surface = next;
   const override = next === 'clay' ? clayMaterial : next === 'wireframe' ? wireMaterial : null;
+  reconcileSurfaceMaterials(override, true);
+  press('surface-buttons', 'surface', next);
+  sync();
+}
+
+// A weapon upgrade swaps its procedural MeshToonMaterial after the GLB arrives.
+// Keep the selected surface live across that asynchronous replacement; when the
+// reviewer returns to Textured, the newly arrived atlas is the material shown.
+function reconcileSurfaceMaterials(override = state.surface === 'clay' ? clayMaterial : state.surface === 'wireframe' ? wireMaterial : null, includeAll = false) {
   for (const subject of [heroRoot, baseline && baseline.group, gameModel && gameModel.group]) {
     if (!subject) continue;
     subject.traverse(node => {
       if (!node.isMesh || node.name === 'pirate-contact-shadow') return;
-      if (node.userData.studioBaseMaterial === undefined) node.userData.studioBaseMaterial = node.material;
-      node.material = override || node.userData.studioBaseMaterial;
+      const replaced = node.userData.studioAppliedMaterial !== undefined && node.material !== node.userData.studioAppliedMaterial;
+      const untracked = node.userData.studioBaseMaterial === undefined;
+      if (!includeAll && !replaced && !untracked) return;
+      // Weapon bodies upgrade asynchronously in place. Adopt their replacement
+      // instead of restoring the retired procedural palette material.
+      if (untracked || replaced) {
+        node.userData.studioBaseMaterial = node.material;
+      }
+      const selected = override || node.userData.studioBaseMaterial;
+      node.material = selected;
+      node.userData.studioAppliedMaterial = selected;
     });
   }
-  press('surface-buttons', 'surface', next);
-  sync();
 }
 
 function rotate(delta) {
@@ -595,6 +718,8 @@ function bindGroup(containerId, attribute, handler) {
 }
 
 bindGroup('mode-buttons', 'mode', applyMode);
+bindGroup('character-buttons', 'character', applyCharacter);
+bindGroup('preview-buttons', 'preview', applyPreview);
 bindGroup('camera-buttons', 'camera', value => { state.cameraYawSource = null; applyCamera(value); });
 bindGroup('lighting-buttons', 'lighting', applyLighting);
 bindGroup('clip-buttons', 'clip', applyClip);
@@ -678,17 +803,19 @@ function frame() {
     baselinePose.dt = delta;
     baseline.animate(elapsed, 0, BASELINE_PLAYER, baselinePose);
   }
+  reconcileSurfaceMaterials();
   renderer.render(scene, camera);
 }
 
 function dispose() {
+  heroLoad++;
   if (frameHandle) cancelAnimationFrame(frameHandle);
   frameHandle = 0;
   if (observer) observer.disconnect();
   window.removeEventListener('resize', resize);
   disposeHero();
   disposeBaseline();
-  if (gameModel) { gameModel.dispose(); gameSlot.remove(gameModel.group); gameModel.group.traverse(node => { if (node.isMesh) disposeMeshResources(node); }); gameModel = null; }
+  disposeGameModel();
   ground.geometry.dispose();
   ground.material.dispose();
   clayMaterial.dispose();
@@ -705,15 +832,19 @@ function dispose() {
 // the game; the studio page is the only consumer.
 const api = {
   version: 1,
-  url: HERO_URL,
+  url: heroUrl(),
   ready: false, loading: true, error: null,
   mode: state.mode, camera: state.camera, lighting: state.lighting, clip: state.clip,
   surface: state.surface, crewColor: state.crew, playing: state.playing, yaw: state.yaw,
+  character: state.character, preview: state.preview,
   clips: CLIPS.slice(), modes: ['hero', 'current', 'side', 'game'], cameras: Object.keys(CAMERAS),
   lightings: Object.keys(LIGHTING), surfaces: ['textured', 'clay', 'wireframe'],
+  characters: ['male', 'female'], previews: ['land', 'mermaid'],
   layout: { heroX: SPREAD, baselineX: -SPREAD, note: 'Side by side only; both slots sit at x=0 otherwise.' },
   hero: null, baseline: null,
   setMode: applyMode,
+  setCharacter: applyCharacter,
+  setPreview: applyPreview,
   setCamera: value => { state.cameraYawSource = null; applyCamera(value); },
   setLighting: applyLighting,
   setClip: applyClip,
@@ -721,7 +852,7 @@ const api = {
   setCrewColor: applyCrew,
   setPlaying: applyPlaying,
   setPose: applyPose,
-  getPose: () => ({ ...pose, gameKind: gameModel ? gameModel.kind : null }),
+  getPose: () => ({ ...pose, gameKind: gameModel ? gameModel.kind : null, character: state.character, preview: state.preview }),
   fire: () => { if (gameModel) gameModel.fire(pose.weapon); if (baseline) baseline.fire(pose.weapon); },
   rotate,
   reset: resetView,
@@ -732,6 +863,7 @@ const api = {
     ready: state.ready, loading: state.loading, error: state.error, attempts: state.attempts,
     mode: state.mode, camera: state.camera, lighting: state.lighting, clip: state.clip,
     surface: state.surface, crewColor: state.crew, playing: state.playing, yaw: state.yaw,
+    character: state.character, preview: state.preview, url: heroUrl(), glbOverride,
     exposure: renderer ? renderer.toneMappingExposure : null,
     cameraPosition: camera.position.toArray(), fov: camera.fov, near: camera.near,
     heroVisible: heroSlot.visible, baselineVisible: baselineSlot.visible, gameVisible: gameSlot.visible,
@@ -755,11 +887,12 @@ function sync() {
   api.ready = state.ready; api.loading = state.loading; api.error = state.error;
   api.mode = state.mode; api.camera = state.camera; api.lighting = state.lighting;
   api.clip = state.clip; api.surface = state.surface; api.crewColor = state.crew;
+  api.character = state.character; api.preview = state.preview; api.url = heroUrl();
   api.playing = state.playing; api.yaw = state.yaw; api.attempts = state.attempts;
   api.hero = heroStats; api.baseline = baselineStats;
   const data = root.dataset;
   data.mode = state.mode; data.camera = state.camera; data.lighting = state.lighting;
-  data.clip = state.clip; data.surface = state.surface;
+  data.clip = state.clip; data.surface = state.surface; data.character = state.character; data.preview = state.preview;
   data.playing = String(state.playing); data.ready = String(state.ready);
   data.error = state.error ? 'true' : 'false';
 }
@@ -769,7 +902,10 @@ window.characterStudio = api;
 applyCrew(state.crew);
 applyLighting(state.lighting);
 applyPlaying(state.playing);
+ground.position.y = state.preview === 'mermaid' ? -2.2 : 0;
 applyMode(state.mode);
+press('character-buttons', 'character', state.character);
+press('preview-buttons', 'preview', state.preview);
 press('clip-buttons', 'clip', state.clip);
 renderReport();
 if (renderer) {
