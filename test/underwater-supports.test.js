@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { REEF_LANDMARK_SUPPORTS, REEF_LANDMARK_SOLIDS } from '../shared/underwater-content.js';
 import { REEF_SOLIDS, resolveReefSwimmerCollision, reefLineOfSight } from '../shared/underwater.js';
+import { SUNKEN_MANOR_SOLIDS } from '../shared/sunken-manor.js';
 
 test('reef landmark supports are frozen and included as physical solids', () => {
   assert.equal(REEF_LANDMARK_SUPPORTS.length, 6);
@@ -11,7 +12,7 @@ test('reef landmark supports are frozen and included as physical solids', () => 
     assert.ok(REEF_SOLIDS.includes(support));
     assert.equal(support.region, support.id.startsWith('ember-') ? 'ember-vents' : 'crown-graveyard');
   }
-  assert.equal(REEF_SOLIDS.length, 8 + REEF_LANDMARK_SOLIDS.length + REEF_LANDMARK_SUPPORTS.length);
+  assert.equal(REEF_SOLIDS.length, 8 + REEF_LANDMARK_SOLIDS.length + REEF_LANDMARK_SUPPORTS.length + SUNKEN_MANOR_SOLIDS.length);
 });
 
 test('support columns block swimmer collision and line of sight at their authored centres', () => {

@@ -8,7 +8,7 @@ import { REEF_DISCOVERIES, REEF_EVENTS, REEF_REGIONS } from '../shared/underwate
 const key = point => `${point.x}:${point.y}:${point.z}`;
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
-test('reef wayfinding keeps all six regions connected from the return current and clear for the full swimmer body', () => {
+test('reef wayfinding keeps every region connected from the return current and clear for the full swimmer body', () => {
   const main = REEF_WAYFINDING_ROUTES.filter(route => route.kind === 'main'), graph = new Map();
   for (const route of main) {
     const a = key(route.nodes[0]), b = key(route.nodes.at(-1));

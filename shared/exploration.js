@@ -1,5 +1,6 @@
 // Shared island places and solid footprints. Keep this data independent of world.js
 // so terrain, authority, scenery and the map can all consume the same layout.
+import { CAPTAINS_HOUSE } from './captains-house.js';
 export const POINTS_OF_INTEREST = [
   { id: 'saltwind-harbor', name: 'Saltwind Harbor', x: -15, z: 96, radius: 17, kind: 'harbor', color: '#e8ba72', description: 'Fishers mend their nets beneath the tavern chimney; a salt-stained chest waits beside the landing.' },
   { id: 'tideglass-market', name: 'Tideglass Market', x: -29, z: 39, radius: 16, kind: 'market', color: '#e6b088', description: 'Canvas stalls shelter the island’s harvest, and the merchants keep an old sea chest behind the square.' },
@@ -9,6 +10,8 @@ export const POINTS_OF_INTEREST = [
   { id: 'cinderworks', name: 'The Cinderworks', x: 77, z: -43, radius: 13, kind: 'forge', color: '#e8a16e', description: 'The island smith shapes salvaged iron under an amber chimney, beside a chest dusted with caldera ash.' },
   { id: 'moonwatch', name: 'Moonwatch Observatory', x: 96, z: 42, radius: 14, kind: 'observatory', color: '#b7c6eb', description: 'A patient scholar charts the night sky above the glowing grove; an expedition chest rests below the dome.' },
   { id: 'driftwood-yard', name: 'Driftwood Yard', x: 30, z: 96, radius: 16, kind: 'boatyard', color: '#d9bd8c', description: 'Shipwrights fit fresh ribs into a rescued hull, with a tide-worn chest among the timber stacks.' },
+  { id: CAPTAINS_HOUSE.id, name: CAPTAINS_HOUSE.name, x: CAPTAINS_HOUSE.x, z: CAPTAINS_HOUSE.z,
+    radius: 15, kind: 'house', color: '#d6b987', description: 'The captain\'s seaward house holds a chart room, an upstairs balcony, and an attic lookout.' },
 ];
 
 const structure = (id, poiId, kind, x, z, radius, height, color, roofColor) => {
@@ -98,6 +101,11 @@ export const EXPLORATION_TRAILS = [
   { id: 'moonwatch', points: [{ x: 76, z: 32 }, { x: 89, z: 36 }, { x: 96, z: 42 }] },
   // The original dock palm at (27,93) borders the square; enter from the south.
   { id: 'driftwood-yard', points: [{ x: 0, z: 94 }, { x: 12, z: 107 }, { x: 24, z: 106 }, { x: 30, z: 99 }] },
+  { id: CAPTAINS_HOUSE.id, points: [
+    { x: -15, z: 96 }, { x: -28, z: 95 }, { x: -31, z: 88 },
+    { x: -45, z: 91 },
+    { x: -62, z: 83 }, { x: -69, z: 77 },
+  ] },
 ];
 
 export const RESIDENTS = [

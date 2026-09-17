@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { OBSTACLES, SHRINES, SPAWN, BEACON, CHESTS, heightAt, regionAt, seededRandom, SEED } from '../shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, trailDistance } from '../shared/exploration.js';
+import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS } from '../shared/exploration.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 import { oldWatchWeight } from '../shared/old-watch.js';
 import { windwardFarmWeight } from '../shared/windward-farm.js';
 import { palmheartWeight } from '../shared/palmheart-camp.js';
@@ -25,6 +26,7 @@ import { createEnvironmentAssets, disposeOwnedResources } from '../client/enviro
 import { renderedHeightAt } from '../client/environment-geometry.js';
 import { buildSettlements } from '../client/settlement.js';
 import { makePalette } from '../client/models.js';
+import { inCaptainsHouseClearing, outsideCaptainsHouseClearing } from '../client/world.js';
 
 const TAU = Math.PI * 2, GROUND_CELL = 16;
 const SHARED_URL = '/assets/old-watch/kit.glb', ISLAND_URL = '/assets/island/kit.glb';
@@ -46,10 +48,13 @@ function segmentDistance(x, z, a, b) {
   const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
   return Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
 }
-const routeDistance = (x, z) => Math.min(trailDistance(x, z), ...WAYPOINTS.map(point => segmentDistance(x, z, BEACON, point)));
+const routeDistance = (x, z) => Math.min(
+  ...EXPLORATION_TRAILS.filter(trail => trail.id !== CAPTAINS_HOUSE.id)
+    .flatMap(trail => trail.points.slice(1).map((point, index) => segmentDistance(x, z, trail.points[index], point))),
+  ...WAYPOINTS.map(point => segmentDistance(x, z, BEACON, point)));
 function reserved(x, z, padding = 0) {
   if (routeDistance(x, z) < 6 + padding) return true;
-  if (POINTS_OF_INTEREST.some(place => Math.hypot(x - place.x, z - place.z) < place.radius + padding)) return true;
+  if (POINTS_OF_INTEREST.some(place => place.id !== CAPTAINS_HOUSE.id && Math.hypot(x - place.x, z - place.z) < place.radius + padding)) return true;
   if (BUILDINGS.some(building => Math.hypot(x - building.x, z - building.z) < building.radius + 2 + padding)) return true;
   if ([SPAWN, BEACON, ...SHRINES].some(place => Math.hypot(x - place.x, z - place.z) < 11 + padding)) return true;
   return CHESTS.some(chest => Math.hypot(x - chest.x, z - chest.z) < 3.2 + padding);
@@ -434,9 +439,9 @@ test('buildScenery records one ground descriptor per island clump, shore spray a
   // carries nothing else: a small clump reached its own draw size horizontally,
   // a shore stem .32 along and .18 across, and a perimeter cylinder .55.
   const reachOf = site => site.kind === 'shoreFlowers' ? 1.1 : site.kind === 'beaconStones' ? .6 : site.size * 1.35 + .3;
-  const reach = built.sites.map(site => ({ site, radius: reachOf(site) }));
+  const reach = outsideCaptainsHouseClearing(built.sites).map(site => ({ site, radius: reachOf(site) }));
   const positions = built.fallback.geometry.attributes.position;
-  const hits = new Map(built.sites.map(site => [site.id, 0]));
+  const hits = new Map(reach.map(({ site }) => [site.id, 0]));
   let strays = 0;
   for (let index = 0; index < positions.count; index++) {
     const x = positions.getX(index), z = positions.getZ(index);
@@ -449,6 +454,20 @@ test('buildScenery records one ground descriptor per island clump, shore spray a
   }
   for (const [id, count] of hits) assert.ok(count > 0, id + ' has original geometry standing on it');
   assert.equal(strays, 0, 'nothing but the recorded ground draws is routed into the ground fallback');
+  const cleared = built.sites.filter(site => inCaptainsHouseClearing(site.x, site.z));
+  assert.deepEqual(cleared.map(site => site.id), [
+    'ground-jungle-plant-332', 'ground-jungle-plant-341', 'ground-jungle-plant-447',
+    'ground-jungle-plant-507', 'ground-jungle-plant-588',
+  ]);
+  const hidden = built.built.houseHiddenFallback;
+  assert.equal(hidden.visible, false);
+  const hiddenPositions = hidden.geometry.attributes.position;
+  for (const site of cleared) {
+    let found = false;
+    for (let index = 0; index < hiddenPositions.count && !found; index++)
+      found = Math.hypot(hiddenPositions.getX(index) - site.x, hiddenPositions.getZ(index) - site.z) <= reachOf(site);
+    assert.ok(found, site.id + ' has its original geometry in the hidden house fallback');
+  }
 });
 
 test('the ground palette and every fit are measured on the shipping clump vertices', async () => {

@@ -1,6 +1,7 @@
 import { BUILDINGS, EXPLORATION_CHESTS, buildingLocalPoint } from './exploration.js';
 import { OLD_WATCH_PROPS } from './old-watch.js';
 import { SHIP_SCALE, SHIP_GUNS } from './airship.js';
+import { CAPTAINS_HOUSE } from './captains-house.js';
 
 // Original designed island. These values are shared by rendering and authority.
 export const MAX_PLAYERS = 5;
@@ -76,7 +77,8 @@ function terrainHeightAt(x, z) {
   return edge * (base + routeEase * hills) - (1 - edge) * 0.8;
 }
 
-const foundations = BUILDINGS.filter(b => b.enterable).map(building => ({ building, y: terrainHeightAt(building.x, building.z) }));
+const foundations = BUILDINGS.filter(b => b.enterable).map(building => ({ building, y: terrainHeightAt(building.x, building.z) }))
+  .concat([{ building: CAPTAINS_HOUSE, y: terrainHeightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z) }]);
 
 export function heightAt(x, z) {
   let height = terrainHeightAt(x, z);

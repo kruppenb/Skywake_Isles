@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
 import { MAX_PLAYERS, COLORS, SPAWN, SHRINES, CHESTS, BEACON, heightAt } from '../shared/world.js';
 import { POINTS_OF_INTEREST } from '../shared/exploration.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 import { resolveWorldCollision } from '../shared/collision.js';
 import { ENCOUNTER_GROUPS, encounterSpawns, inSafeLanding, SAFE_LANDING_RADIUS } from '../shared/encounters.js';
 
@@ -15,7 +16,10 @@ function ticks(game, seconds) { for (let i = 0; i < Math.ceil(seconds / .05); i+
 function locate(p, point) { Object.assign(p, { x: point.x, z: point.z, y: heightAt(point.x, point.z), mode: 'ground', grounded: true, vy: 0 }); }
 
 test('finite launch populations scale 24–56 with one extra melee crab per pirate at every destination and clear spawns', () => {
-  assert.deepEqual(new Set(ENCOUNTER_GROUPS.map(g => g.id)), new Set(POINTS_OF_INTEREST.map(p => p.id)));
+  assert.deepEqual(new Set(ENCOUNTER_GROUPS.map(g => g.id)),
+    new Set(POINTS_OF_INTEREST.filter(p => p.id !== CAPTAINS_HOUSE.id).map(p => p.id)));
+  assert.ok(POINTS_OF_INTEREST.some(p => p.id === CAPTAINS_HOUSE.id));
+  assert.ok(ENCOUNTER_GROUPS.every(group => group.id !== CAPTAINS_HOUSE.id), 'the captain’s house has no automatic camp');
   const expectedTotals = [24, 32, 40, 48, 56];
   for (let count = 1; count <= MAX_PLAYERS; count++) {
     const { game } = setup(count), spawns = encounterSpawns(count);

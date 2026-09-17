@@ -168,19 +168,33 @@ test('registered island payload and texture costs match the committed kit manife
 test('routing scenery into area batches preserves all original geometry and the procedural RNG stream', async () => {
   const { buildScenery } = await import('../client/world.js');
   const random = seededRandom(SEED); for (let i = 0; i < 800; i++) random(); // preceding ocean construction
-  const palette = makePalette(), scenery = buildScenery(palette, random), triangles = [];
+  const palette = makePalette(), scenery = buildScenery(palette, random), triangles = [], outsideHouse = [];
   scenery.group.traverse(mesh => {
     if (!mesh.isMesh) return;
     const attributes = ['position', 'normal', 'color'].map(key => mesh.geometry.attributes[key].array);
     for (let i = 0; i < attributes[0].length; i += 9) {
       const hash = createHash('sha256');
       for (const array of attributes) hash.update(Buffer.from(array.buffer, array.byteOffset + i * 4, 36));
-      triangles.push(hash.digest('hex'));
+      const digest = hash.digest('hex'); triangles.push(digest);
+      // Baseline and new builds both contain these exact outside triangles.
+      // Every difference caused by the new level foundation lies in this
+      // deliberately generous 25m box around (-69,65).
+      const position = attributes[0];
+      const nearHouse = [0, 3, 6].some(offset =>
+        Math.abs(position[i + offset] + 69) < 25 && Math.abs(position[i + offset + 2] - 65) < 25);
+      if (!nearHouse) outsideHouse.push(digest);
     }
   });
   // Recorded from approved 2c2d3fe. Multiset ignores the new batch boundaries.
   assert.equal(triangles.length, 141650);
-  assert.equal(createHash('sha256').update(triangles.sort().join('')).digest('hex'), 'e736a67408d0084a776ac3764d157715b251f4f7be410279181fefa9c562080c');
+  assert.equal(createHash('sha256').update(triangles.sort().join('')).digest('hex'), '101a8c1ce7ae10258366997a75e9b3830300a5b72178706b6d6743d08313bdcf');
+  assert.equal(outsideHouse.length, 131906);
+  assert.equal(createHash('sha256').update(outsideHouse.sort().join('')).digest('hex'),
+    'b9f4b5fe56aa4936222255a88226aa3e2512536b6787d78e50078149fdcd92bf',
+    'every original triangle outside the house vicinity remains byte-identical');
+  assert.equal(scenery.houseHiddenFallback.visible, false);
+  assert.ok(scenery.houseHiddenFallback.geometry.attributes.position.count > 0,
+    'original vegetation within the house clearing is retained but hidden when authored assets fail');
   assert.equal(random(), .017430383479222655);
   assert.deepEqual(scenery.tideglassHutSites.map(({ id, x, z, radius, height, yaw }) => ({ id, x, z, radius, height, yaw })), [
     { id: 'prop-16', x: -20, z: 15, radius: 3.2, height: 5, yaw: .19684114179108292 },

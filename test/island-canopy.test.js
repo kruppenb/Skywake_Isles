@@ -5,7 +5,9 @@ import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBSTACLES, SHRINES, SPAWN, BEACON, CHESTS, heightAt, regionAt, seededRandom, SEED } from '../shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, trailDistance } from '../shared/exploration.js';
+import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS } from '../shared/exploration.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
+import { inCaptainsHouseClearing, outsideCaptainsHouseClearing } from '../client/world.js';
 import { palmheartWeight } from '../shared/palmheart-camp.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { cinderworksWeight } from '../shared/cinderworks.js';
@@ -80,10 +82,13 @@ function segmentDistance(x, z, a, b) {
   const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
   return Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
 }
-const routeDistance = (x, z) => Math.min(trailDistance(x, z), ...WAYPOINTS.map(point => segmentDistance(x, z, BEACON, point)));
+const routeDistance = (x, z) => Math.min(
+  ...EXPLORATION_TRAILS.filter(trail => trail.id !== CAPTAINS_HOUSE.id)
+    .flatMap(trail => trail.points.slice(1).map((point, index) => segmentDistance(x, z, trail.points[index], point))),
+  ...WAYPOINTS.map(point => segmentDistance(x, z, BEACON, point)));
 function reserved(x, z, padding = 0) {
   if (routeDistance(x, z) < 6 + padding) return true;
-  if (POINTS_OF_INTEREST.some(place => Math.hypot(x - place.x, z - place.z) < place.radius + padding)) return true;
+  if (POINTS_OF_INTEREST.some(place => place.id !== CAPTAINS_HOUSE.id && Math.hypot(x - place.x, z - place.z) < place.radius + padding)) return true;
   if (BUILDINGS.some(building => Math.hypot(x - building.x, z - building.z) < building.radius + 2 + padding)) return true;
   if ([SPAWN, BEACON, ...SHRINES].some(place => Math.hypot(x - place.x, z - place.z) < 11 + padding)) return true;
   return CHESTS.some(chest => Math.hypot(x - chest.x, z - chest.z) < 3.2 + padding);
@@ -368,9 +373,10 @@ test('buildScenery records one canopy descriptor per wild jungle, moon and volca
     if (site.kind === 'volcanoCrystals') return 1.15 * site.size;
     return site.radius * 1.02;
   };
-  const reach = built.sites.map(site => ({ site, radius: reachOf(site) }));
+  const reach = built.sites.filter(site => !inCaptainsHouseClearing(site.x, site.z))
+    .map(site => ({ site, radius: reachOf(site) }));
   const positions = built.fallback.geometry.attributes.position;
-  const hits = new Map(built.sites.map(site => [site.id, 0]));
+  const hits = new Map(reach.map(({ site }) => [site.id, 0]));
   let strays = 0;
   for (let index = 0; index < positions.count; index++) {
     const x = positions.getX(index), z = positions.getZ(index);
@@ -383,6 +389,36 @@ test('buildScenery records one canopy descriptor per wild jungle, moon and volca
   }
   for (const [id, count] of hits) assert.ok(count > 0, id + ' has original geometry standing on it');
   assert.equal(strays, 0, 'nothing but the recorded wild draws is routed into the canopy fallback');
+  const hiddenPositions = built.built.houseHiddenFallback.geometry.attributes.position;
+  for (const site of built.sites.filter(site => inCaptainsHouseClearing(site.x, site.z))) {
+    let found = false;
+    for (let index = 0; index < hiddenPositions.count && !found; index++)
+      found = Math.hypot(hiddenPositions.getX(index) - site.x, hiddenPositions.getZ(index) - site.z) <= reachOf(site);
+    assert.ok(found, site.id + ' has original geometry in the hidden house fallback');
+  }
+});
+
+test('captain clearing hides only noncollidable house vegetation in both authored and fallback scenery', async () => {
+  const { built } = await recorded();
+  const removedCanopy = built.canopySites.filter(site => inCaptainsHouseClearing(site.x, site.z));
+  const removedGround = built.groundSites.filter(site => inCaptainsHouseClearing(site.x, site.z));
+  assert.deepEqual(removedCanopy.map(site => site.id), [
+    'canopy-jungle-tree-83', 'canopy-jungle-palm-144', 'canopy-jungle-palm-162',
+    'canopy-jungle-tree-187', 'canopy-jungle-palm-195',
+  ]);
+  assert.deepEqual(removedGround.map(site => site.id), [
+    'ground-jungle-plant-332', 'ground-jungle-plant-341', 'ground-jungle-plant-447',
+    'ground-jungle-plant-507', 'ground-jungle-plant-588',
+  ]);
+  assert.ok(removedCanopy.every(site => !site.collidable), 'no authoritative tree collider is removed');
+  assert.equal(built.houseHiddenFallback.visible, false, 'failed asset loads cannot restore trees through house rooms');
+  assert.ok(built.houseHiddenFallback.geometry.attributes.position.count > 0);
+  const keptCanopy = outsideCaptainsHouseClearing(built.canopySites);
+  const keptGround = outsideCaptainsHouseClearing(built.groundSites);
+  assert.deepEqual(keptCanopy.map(site => site.id), built.canopySites.filter(site => !removedCanopy.includes(site)).map(site => site.id));
+  assert.deepEqual(keptGround.map(site => site.id), built.groundSites.filter(site => !removedGround.includes(site)).map(site => site.id));
+  assert.ok(keptCanopy.every(site => !inCaptainsHouseClearing(site.x, site.z)));
+  assert.ok(keptGround.every(site => !inCaptainsHouseClearing(site.x, site.z)));
 });
 
 test('the canopy membership and dressings restore the colliders they hide, measured on the resident vertices', async () => {

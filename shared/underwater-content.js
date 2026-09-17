@@ -7,6 +7,7 @@ export const REEF_REGIONS = Object.freeze([
   { id: 'bell-sanctuary', name: 'Bell Sanctuary', x: 2, z: -95, radius: 40, color: '#536f99', accent: '#f5d277', description: 'Old sea bells hang in a cool, echoing sanctuary.' },
   { id: 'ember-vents', name: 'Ember Vents', x: 88, z: -65, radius: 43, color: '#9a573f', accent: '#ffb16d', description: 'Warm basalt chimneys and amber vents light the water.' },
   { id: 'crown-graveyard', name: 'Crown Graveyard', x: 84, z: 40, radius: 43, color: '#67577f', accent: '#c9b4ef', description: 'Crowned hulls and stone ribs rise from a violet graveyard.' },
+  { id: 'sunken-manor', name: 'Sunken Manor', x: 42, z: -44, radius: 24, color: '#435a7d', accent: '#b5e5df', description: 'A drowned three-storey home opens around a soaring atrium.' },
 ].map(Object.freeze));
 
 export const REEF_DISCOVERIES = Object.freeze([
@@ -22,6 +23,7 @@ export const REEF_DISCOVERIES = Object.freeze([
   { id: 'ember-stack', region: 'ember-vents', name: 'Sootglass Stack', description: 'A glassy chimney reaches into the high current.', x: 101, y: 31, z: -55, range: 7, pearls: 4 },
   { id: 'crown-keel', region: 'crown-graveyard', name: 'Crowned Keel', description: 'A gilded keel lies tilted among the graveyard stones.', x: 80, y: 8, z: 31, range: 7, pearls: 4 },
   { id: 'crown-mast', region: 'crown-graveyard', name: 'Moon Mast', description: 'A snapped mast points into the violet upper water.', x: 100, y: 32, z: 49, range: 7, pearls: 4 },
+  { id: 'manor-chandelier', region: 'sunken-manor', name: 'Drowned Chandelier', description: 'Bronze arms still hang over the flooded grand hall.', x: 42, y: 15, z: -44, range: 6, pearls: 4 },
 ].map(Object.freeze));
 
 export const REEF_ENCOUNTERS = Object.freeze([
@@ -39,6 +41,7 @@ export const REEF_CACHES = Object.freeze([
   { id: 'ember-vent-cache', region: 'ember-vents', name: 'Ventwalker Cache', x: 96, y: 12, z: -71, pearls: 12 },
   { id: 'crown-keel-cache', region: 'crown-graveyard', name: 'Keel Cache', x: 73, y: 13, z: 50, pearls: 12, encounterId: 'graveyard-watch' },
   { id: 'crown-mast-cache', region: 'crown-graveyard', name: 'Mast Cache', x: 106, y: 25, z: 47, pearls: 12 },
+  { id: 'manor-gallery-cache', region: 'sunken-manor', name: 'Gallery Reliquary', x: 50, y: 13.4, z: -37, pearls: 12 },
 ].map(Object.freeze));
 
 export const REEF_EVENTS = Object.freeze([

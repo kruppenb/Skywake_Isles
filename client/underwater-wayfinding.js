@@ -14,8 +14,9 @@ const BEACON_SITES = Object.freeze({
   'bell-sanctuary': { x: 14, y: 27, z: -100 },
   'ember-vents': { x: 95, y: 31, z: -55 },
   'crown-graveyard': { x: 94, y: 32, z: 47 },
+  'sunken-manor': { x: 42, y: 22.4, z: -44 },
 });
-const PATH_TONES = Object.freeze({ 'sunken-reach': '#e6dfb5', 'coral-gardens': '#efd5b2', 'kelp-hollows': '#b3b48e', 'bell-sanctuary': '#bdc9cc', 'ember-vents': '#b9926b', 'crown-graveyard': '#a4a49b' });
+const PATH_TONES = Object.freeze({ 'sunken-reach': '#e6dfb5', 'coral-gardens': '#efd5b2', 'kelp-hollows': '#b3b48e', 'bell-sanctuary': '#bdc9cc', 'ember-vents': '#b9926b', 'crown-graveyard': '#a4a49b', 'sunken-manor': '#c4c8bc' });
 
 const route = (id, region, nodes, kind = 'main') => Object.freeze({ id, region, kind, nodes: Object.freeze(nodes.map(point => Object.freeze({ ...point }))) });
 
@@ -46,6 +47,8 @@ export const REEF_WAYFINDING_ROUTES = Object.freeze([
   route('ember-stack', 'ember-vents', [{ x: 72, y: 15, z: -62 }, { x: 86, y: 20, z: -57 }, { x: 92, y: 26, z: -55 }, { x: 95, y: 31, z: -55 }], 'vertical'),
   route('crown-keel', 'crown-graveyard', [{ x: 84, y: 16, z: 38 }, { x: 81, y: 11, z: 31 }], 'branch'),
   route('crown-mast', 'crown-graveyard', [{ x: 84, y: 16, z: 38 }, { x: 92, y: 27, z: 38 }, { x: 94, y: 31, z: 43 }, { x: 94, y: 32, z: 47 }], 'vertical'),
+  route('exit-to-manor', 'sunken-manor', [{ x: -18, y: 6, z: 20 }, { x: 0, y: 8, z: 25 }, { x: 34, y: 8, z: 25 }, { x: 42, y: 7, z: 8 }, { x: 42, y: 4, z: -19 }, { x: 42, y: 2.1, z: -29 }, { x: 42, y: 2.1, z: -36 }, { x: 42, y: 2.1, z: -44 }]),
+  route('manor-atrium-gallery', 'sunken-manor', [{ x: 42, y: 2.1, z: -44 }, { x: 42, y: 8.5, z: -44 }, { x: 42, y: 14.9, z: -44 }, { x: 50, y: 14.9, z: -44 }, { x: 50, y: 14.8, z: -37 }], 'vertical'),
 ]);
 
 function between(a, b, distance) {
@@ -109,7 +112,7 @@ function makeSeaweed(resources, samples) {
   const group = new THREE.Group(); group.name = 'sunken-reach-wayfinding-seaweed-clusters';
   for (const region of REEF_REGIONS) {
     const batch = resources.batch('kelp'); let count = 0;
-    samples.filter((sample, index) => sample.route.region === region.id && sample.y < 17 && index % 3 === 0).forEach((sample, index) => {
+    samples.filter((sample, index) => sample.route.region === region.id && region.id !== 'sunken-manor' && sample.y < 17 && index % 3 === 0).forEach((sample, index) => {
       const baseY = floorY(sample.x, sample.z) + .08, offset = (index % 2 ? .34 : -.34);
       batch.line([sample.x + offset, baseY, sample.z - offset], [sample.x + offset * .32, baseY + 1.25 + index % 3 * .18, sample.z - offset * .2], .045, region.accent, .55);
       batch.add('cone', [sample.x - offset, baseY + .52, sample.z + offset * .4], [.16, .9, .06], [0, index * .4, index % 2 ? -.42 : .42], region.accent); count++;

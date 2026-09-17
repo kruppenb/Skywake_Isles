@@ -63,7 +63,7 @@ test('Sunken Reach renders all authored exploration content across its expanded 
   const stats = reef.getStats();
   assert.deepEqual({ wreckSolids: stats.wreckSolids, landmarkSolids: stats.landmarkSolids, landmarkSupports: stats.landmarkSupports, regions: stats.regions, discoveries: stats.discoveries, caches: stats.caches, encounters: stats.encounters, events: stats.events }, { wreckSolids: REEF_WRECK_SOLIDS.length, landmarkSolids: REEF_LANDMARK_SOLIDS.length, landmarkSupports: REEF_LANDMARK_SUPPORTS.length, regions: REEF_REGIONS.length, discoveries: REEF_DISCOVERIES.length, caches: REEF_CACHES.length, encounters: REEF_ENCOUNTERS.length, events: REEF_EVENTS.length });
   assert.ok(stats.bubbles >= 50 && stats.fish >= 20, 'atmosphere is rich but batched'); assert.equal(stats.chest, REEF_CHEST.id);
-  assert.equal(stats.resources.materials, 8, 'reef-owned textured materials are accounted for'); assert.equal(stats.habitat.regions, REEF_REGIONS.length, 'habitat accounts for all six regions');
+  assert.equal(stats.resources.materials, 8, 'reef-owned textured materials are accounted for'); assert.equal(stats.habitat.regions, REEF_REGIONS.length, 'habitat accounts for every region');
   reef.update(2, {}, { lowQuality: true, reducedMotion: true });
   assert.equal(reef.getStats().lowQuality, true, 'low graphics state is retained'); assert.equal(current.position.y, REEF_EXIT.y - 1.45, 'reduced motion holds the return beacon steady');
   assert.doesNotThrow(() => reef.update(0, null), 'initial renderer frame accepts a null network snapshot');
@@ -93,11 +93,11 @@ test('reef light shaft alpha textures are released exactly once', () => {
   const shafts = reef.group.getObjectByName('sunken-reach-regional-light-shafts');
   const alphaMaps = [];
   shafts.traverse(object => { const map = object.material?.alphaMap; if (map && !alphaMaps.includes(map)) alphaMaps.push(map); });
-  assert.equal(alphaMaps.length, 6, 'one owned alpha texture per regional shaft');
+  assert.equal(alphaMaps.length, REEF_REGIONS.length, 'one owned alpha texture per regional shaft');
   const calls = new Map(alphaMaps.map(map => [map, 0]));
   for (const map of alphaMaps) { const dispose = map.dispose.bind(map); map.dispose = () => { calls.set(map, calls.get(map) + 1); dispose(); }; }
   reef.dispose(); reef.dispose();
-  assert.deepEqual([...calls.values()], Array(6).fill(1));
+  assert.deepEqual([...calls.values()], Array(REEF_REGIONS.length).fill(1));
   disposePalette(palette);
 });
 

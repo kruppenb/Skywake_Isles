@@ -114,7 +114,10 @@ test('harbor installs atomically with three furnished cutaways, all six doors, a
   const detail = []; live.scene.traverse(object => { if (object.isInstancedMesh && object.userData.detailKind === 'grass') detail.push(object); });
   assert.ok(detail.length > 0 && detail.some(mesh => mesh.count < mesh.userData.fullCount), 'low quality thins dune grass');
   const shader = { uniforms: {}, vertexShader: '#include <begin_vertex>' }; detail[0].material.onBeforeCompile(shader); assert.equal(shader.uniforms.saltwindWind.value, 0);
-  live.harbor.animate(40, { player: { x: 90, z: 40 } }); assert.ok(detail.every(mesh => !mesh.visible), 'distant grass cells hide');
+  const distant = { x: 90, z: -40 };
+  assert.ok(detail.every(mesh => Math.hypot(distant.x - mesh.userData.cellCenter.x, distant.z - mesh.userData.cellCenter.z) > 105),
+    'the hide probe is beyond every grass cell, including any cell near the new house trail');
+  live.harbor.animate(40, { player: distant }); assert.ok(detail.every(mesh => !mesh.visible), 'distant grass cells hide');
   assert.equal(live.scene.getObjectByName('saltwind-tavern-authored-cutaway-roof').parent.visible, true, 'distant architecture remains present');
   live.harbor.dispose(); live.harbor.dispose();
   assert.equal(fallback.visible, true); assert.equal(live.legacyVegetation.visible, true);

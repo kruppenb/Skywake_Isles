@@ -3,7 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import { createReefResources } from '../client/underwater-materials.js';
 import { createReefHabitat, floorY } from '../client/underwater-habitat.js';
-import { REEF_CACHES, REEF_DISCOVERIES, REEF_ENCOUNTERS, REEF_EVENTS } from '../shared/underwater-content.js';
+import { REEF_CACHES, REEF_DISCOVERIES, REEF_ENCOUNTERS, REEF_EVENTS, REEF_REGIONS } from '../shared/underwater-content.js';
 import { REEF_CHEST, REEF_EXIT, REEF_SPAWN } from '../shared/underwater.js';
 
 test('reef material batches retain metric UVs, vertex wear, and generated maps without canvas access', () => {
@@ -49,14 +49,14 @@ test('reef material batches retain metric UVs, vertex wear, and generated maps w
   custom.dispose(); mesh.geometry.dispose(); resources.dispose();
 });
 
-test('six-biome habitat stays finite, muted, clear, and within the draw and triangle budget', () => {
+test('reef habitat stays finite, muted, clear, and within the draw and triangle budget', () => {
   const resources = createReefResources(), habitat = createReefHabitat(resources);
   for (let x = -145; x <= 145; x += 7) for (let z = -145; z <= 145; z += 7) assert.ok(Number.isFinite(floorY(x, z)) && floorY(x, z) <= .42 && floorY(x, z) >= -.32);
   const bed = habitat.group.getObjectByName('sunken-reach-six-biome-seabed'), compositions = habitat.group.getObjectByName('sunken-reach-biome-compositions');
   assert.ok(bed && compositions, 'the integration contract keeps both named roots');
   const colors = bed.geometry.attributes.color.array;
   assert.ok([...colors].every(value => Number.isFinite(value) && value >= 0 && value <= 1), 'regional ground tint remains LDR rather than accumulating from white');
-  assert.ok(Math.max(...colors) - Math.min(...colors) > .1, 'six regional palette blends stay visible across the seabed');
+  assert.ok(Math.max(...colors) - Math.min(...colors) > .1, 'regional palette blends stay visible across the seabed');
   habitat.group.traverse(node => {
     if (!node.isMesh) return;
     for (const name of ['position', 'normal', 'uv']) {
@@ -68,7 +68,7 @@ test('six-biome habitat stays finite, muted, clear, and within the draw and tria
   });
   const stats = habitat.getStats();
   const interactionPoints = [REEF_EXIT, REEF_CHEST, REEF_SPAWN, ...REEF_CACHES, ...REEF_DISCOVERIES, ...REEF_EVENTS, ...REEF_EVENTS.flatMap(event => event.nodes), ...REEF_EVENTS.flatMap(event => event.guards || []), ...REEF_ENCOUNTERS.flatMap(entry => entry.guards)];
-  assert.equal(stats.regions, 6); assert.ok(stats.plantSites > 100 && stats.clearancePoints === interactionPoints.length, 'the full shared interaction set feeds the planted-corridor filter');
+  assert.equal(stats.regions, REEF_REGIONS.length); assert.ok(stats.plantSites > 100 && stats.clearancePoints === interactionPoints.length, 'the full shared interaction set feeds the planted-corridor filter');
   for (const site of habitat.group.userData.plantCenters) for (const point of interactionPoints) assert.ok(Math.hypot(site.x - point.x, site.z - point.z) >= site.clearance - 1e-8, 'actual planted footprint leaves its declared interaction approach clear');
   assert.ok(stats.triangles < 150000, `habitat triangles ${stats.triangles}; the authored reef stays under its 150k geometry ceiling`); assert.ok(stats.drawCalls < 70, `habitat draws ${stats.drawCalls}`);
   habitat.group.traverse(node => node.geometry?.dispose());

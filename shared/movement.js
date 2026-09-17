@@ -1,5 +1,5 @@
 import { WORLD_RADIUS, SPAWN, SHIP_OBSTACLES, heightAt, shipAt } from './world.js';
-import { resolveWorldCollision } from './collision.js';
+import { resolveWorldCollision, houseSupportAt, houseCeilingAt } from './collision.js';
 import { SHIP_DECK, SHIP_GUNS, LAUNCH_CARRY_DECAY, gunAim, gunOperator } from './airship.js';
 import { REEF_SPAWN, resolveReefSwimmerCollision } from './underwater.js';
 
@@ -117,7 +117,9 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
   p.z = finite(p.z, SPAWN.z) + (dz * speed + carryZ) * dt;
   p.y = finite(p.y, heightAt(p.x, p.z));
   resolveWorldCollision(p);
-  const ground = heightAt(p.x, p.z);
+  const terrain = heightAt(p.x, p.z);
+  const houseSupport = houseSupportAt(p.x, p.z, p.y, p.grounded ? .65 : .08);
+  const ground = Math.max(terrain, houseSupport ?? -Infinity);
   if (Math.hypot(p.x, p.z) > WORLD_RADIUS || (ground < 0.3 && p.y < 2.5) || p.y < -4) {
     p.x = SPAWN.x; p.z = SPAWN.z; p.y = heightAt(SPAWN.x, SPAWN.z);
     p.mode = 'ground'; p.vy = 0; p.grounded = true; p.launchVx = 0; p.launchVz = 0;
@@ -126,6 +128,7 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
   if (p.mode === 'gliding') {
     p.vy = -6; p.y -= 6 * dt; p.grounded = false;
   } else {
+    if (p.grounded && p.y > ground + .65) { p.grounded = false; p.vy = 0; }
     if (p.grounded) {
       p.y = ground; p.vy = 0;
       if (jump) { p.vy = 8; p.grounded = false; }
@@ -133,9 +136,14 @@ export function movePlayer(p, input = {}, dt, elapsed = 0) {
     if (!p.grounded) {
       p.vy = finite(p.vy) - 22 * dt;
       if (p.vy < -6 && p.y - ground > 3) { p.mode = 'gliding'; p.vy = -6; }
+      const previousY = p.y;
       p.y += p.vy * dt;
+      if (p.vy > 0) {
+        const ceiling = houseCeilingAt(p.x, p.z, previousY);
+        if (p.y + 3.1 > ceiling) { p.y = ceiling - 3.1; p.vy = 0; }
+      }
     }
   }
-  if (p.y <= ground) { p.y = ground; p.vy = 0; p.mode = 'ground'; p.grounded = true; p.launchVx = 0; p.launchVz = 0; }
+  if (p.y <= ground && p.vy <= 0) { p.y = ground; p.vy = 0; p.mode = 'ground'; p.grounded = true; p.launchVx = 0; p.launchVz = 0; }
   return p;
 }

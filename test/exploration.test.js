@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, RESIDENTS, EXPLORATION_CHESTS, pointOfInterestAt, trailDistance } from '../shared/exploration.js';
 import { BEACON, SPAWN, SHRINES, CHESTS, OBSTACLES, heightAt } from '../shared/world.js';
 import { makePlayerPosition, movePlayer } from '../shared/movement.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 function segmentDistance(p, a, b) {
@@ -48,11 +49,20 @@ function connectedRoute(trail, visited = new Set()) {
   return [...connectedRoute(parent, visited), ...trail.points.slice(1)];
 }
 
-test('eight places and append-only loot/obstacle IDs preserve the original island', () => {
-  assert.equal(POINTS_OF_INTEREST.length, 8);
+test('original eight places remain, with the captain’s house and append-only loot/obstacle IDs', () => {
+  assert.equal(POINTS_OF_INTEREST.length, 9);
+  assert.deepEqual(POINTS_OF_INTEREST.slice(0, 8).map(p => p.id), [
+    'saltwind-harbor', 'tideglass-market', 'windward-farm', 'old-watch',
+    'palmheart-camp', 'cinderworks', 'moonwatch', 'driftwood-yard',
+  ]);
+  assert.deepEqual(POINTS_OF_INTEREST[8], {
+    id: CAPTAINS_HOUSE.id, name: CAPTAINS_HOUSE.name, x: CAPTAINS_HOUSE.x, z: CAPTAINS_HOUSE.z,
+    radius: 15, kind: 'house', color: '#d6b987',
+    description: 'The captain\'s seaward house holds a chart room, an upstairs balcony, and an attic lookout.',
+  });
   assert.ok(BUILDINGS.length >= 14);
   assert.equal(RESIDENTS.length, 10);
-  assert.equal(new Set(POINTS_OF_INTEREST.map(p => p.id)).size, 8);
+  assert.equal(new Set(POINTS_OF_INTEREST.map(p => p.id)).size, 9);
   assert.equal(new Set(BUILDINGS.map(p => p.id)).size, BUILDINGS.length);
   assert.equal(new Set(RESIDENTS.map(p => p.id)).size, RESIDENTS.length);
   const originalChests = [[0, 88], [-8, 97], [9, 100], [-16, 66], [18, 52], [-32, 36], [-56, 26], [-83, -1], [-93, 31], [-25, -26], [17, -38], [39, -52], [61, -83], [79, -49], [87, 18], [64, 50], [97, 53], [13, 15]];
@@ -64,7 +74,7 @@ test('eight places and append-only loot/obstacle IDs preserve the original islan
   assert.equal(OBSTACLES[33].type, 'landmark');
   assert.equal(OBSTACLES.length, 34 + BUILDINGS.length + 16);
   assert.deepEqual(OBSTACLES.slice(34 + BUILDINGS.length).map(o => o.id), Array.from({ length: 16 }, (_, i) => `old-watch-prop-${i + 1}`));
-  for (const place of POINTS_OF_INTEREST) {
+  for (const place of POINTS_OF_INTEREST.slice(0, 8)) {
     assert.ok(BUILDINGS.some(b => b.poiId === place.id), `${place.id} has architecture`);
     assert.ok(RESIDENTS.some(r => r.poiId === place.id), `${place.id} has a resident`);
     assert.equal(EXPLORATION_CHESTS.filter(c => !c.buildingId && pointOfInterestAt(c.x, c.z)?.id === place.id).length, 1, `${place.id} keeps its exterior chest`);
@@ -97,8 +107,11 @@ test('every place and its chest can be walked to from the beacon and back', () =
     walk([...route, place], `${place.name} approach`);
     walk([place, ...route.toReversed()], `${place.name} return`);
     const chest = EXPLORATION_CHESTS.find(c => pointOfInterestAt(c.x, c.z)?.id === place.id);
-    walk([...route, chest], `${chest.id} approach`);
-    walk([chest, ...route.toReversed()], `${chest.id} return`);
+    if (place.id !== CAPTAINS_HOUSE.id) {
+      assert.ok(chest, `${place.id} keeps its chest`);
+      walk([...route, chest], `${chest.id} approach`);
+      walk([chest, ...route.toReversed()], `${chest.id} return`);
+    }
   }
 });
 

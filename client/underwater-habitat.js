@@ -7,6 +7,7 @@ const GROUNDS = Object.freeze({
   'sunken-reach': ['#d8d3a9', '#82b9af'], 'coral-gardens': ['#ead0a3', '#d88b82'],
   'kelp-hollows': ['#89966c', '#405f51'], 'bell-sanctuary': ['#b3c3c1', '#6b849c'],
   'ember-vents': ['#9b7558', '#77534a'], 'crown-graveyard': ['#777787', '#615c79'],
+  'sunken-manor': ['#a9b5ae', '#6d8495'],
 });
 
 function noise(x, z, seed = 1) { const n = Math.sin(x * 127.1 + z * 311.7 + seed * 19.19) * 43758.5453; return n - Math.floor(n); }
@@ -49,7 +50,12 @@ const pointOf = entry => [entry.x, entry.z];
 function clearPoints() {
   return [REEF_EXIT, REEF_CHEST, REEF_SPAWN, ...REEF_CACHES, ...REEF_DISCOVERIES, ...REEF_EVENTS, ...REEF_EVENTS.flatMap(event => event.nodes), ...REEF_EVENTS.flatMap(event => event.guards || []), ...REEF_ENCOUNTERS.flatMap(entry => entry.guards)].map(pointOf);
 }
-function clearOfInteraction(x, z, radius = 4.8) { return clearPoints().every(([px, pz]) => Math.hypot(x - px, z - pz) >= radius); }
+function clearOfInteraction(x, z, radius = 4.8) {
+  // Keep the occupied shell and its south approach free of procedural rocks,
+  // seaweed and coral. Authored growth on the structure is placed separately.
+  if (x > 24 - radius && x < 60 + radius && z > -61 - radius && z < -18 + radius) return false;
+  return clearPoints().every(([px, pz]) => Math.hypot(x - px, z - pz) >= radius);
+}
 function addRock(batch, x, z, size, color) { batch.add('pebble', [x, floorY(x, z) + size * .28, z], [size * (1 + noise(x, z) * .4), size * .55, size * (.78 + noise(z, x) * .35)], [.12, noise(x, z, 5) * TAU, .1], color); }
 function coralShelf() {
   // A genuinely thick plate has a top, shaded underside and irregular rim.
@@ -182,6 +188,7 @@ export function createReefHabitat(resources) {
   const plantCenters = [];
   let plants = 0, shells = 0;
   for (const region of REEF_REGIONS) {
+    if (region.id === 'sunken-manor') continue; // the structure owns its growth
     const isKelp = region.id === 'kelp-hollows', isGarden = region.id === 'coral-gardens', isVent = region.id === 'ember-vents';
     const primary = isVent ? basalt : stone, rockColor = isVent ? '#3b4548' : region.id === 'bell-sanctuary' ? '#9cb2b4' : region.id === 'crown-graveyard' ? '#70857d' : '#7e9e94';
     const count = isKelp ? 58 : isGarden ? 25 : region.id === 'sunken-reach' ? 18 : 27;

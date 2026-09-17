@@ -1,11 +1,64 @@
 import { OBSTACLES, heightAt } from './world.js';
 import { BUILDINGS, buildingLocalPoint, buildingWorldPoint, buildingWalls, buildingFurnishings } from './exploration.js';
+import { CAPTAINS_HOUSE, CAPTAINS_HOUSE_SOLIDS, CAPTAINS_HOUSE_STAIRS,
+  CAPTAINS_HOUSE_ROOF, captainsHouseRoofHeight } from './captains-house.js';
 
 const enterableIds = new Set(BUILDINGS.filter(b => b.enterable).map(b => b.id));
 const props = OBSTACLES.filter(o => !enterableIds.has(o.buildingId));
 const rooms = BUILDINGS.filter(b => b.enterable).map(building => ({
   building, boxes: [...buildingWalls(building), ...buildingFurnishings(building)],
-}));
+})).concat([{ building: CAPTAINS_HOUSE, boxes: CAPTAINS_HOUSE_SOLIDS
+  .filter(solid => solid.kind !== 'floor' && solid.kind !== 'stair')
+  .map(solid => ({ ...solid, bottom: solid.y - solid.height / 2, top: solid.y + solid.height / 2 })) }]);
+const houseSightBoxes = CAPTAINS_HOUSE_SOLIDS.map(solid => ({ ...solid,
+  bottom: solid.y - solid.height / 2, top: solid.y + solid.height / 2 }));
+
+export function houseSupportAt(x, z, footY, maxRise = .65) {
+  if (!Number.isFinite(x) || !Number.isFinite(z) ||
+      Math.abs(x - CAPTAINS_HOUSE.x) > 14 || Math.abs(z - CAPTAINS_HOUSE.z) > 14) return null;
+  const local = buildingLocalPoint(CAPTAINS_HOUSE, x, z);
+  const base = heightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z);
+  let support = null;
+  for (const solid of CAPTAINS_HOUSE_SOLIDS) {
+    if (solid.kind !== 'floor' || Math.abs(local.x - solid.x) > solid.width / 2 - .05 ||
+        Math.abs(local.z - solid.z) > solid.depth / 2 - .05) continue;
+    const top = base + solid.y + solid.height / 2;
+    if (top <= footY + maxRise && (support === null || top > support)) support = top;
+  }
+  for (const stair of CAPTAINS_HOUSE_STAIRS) {
+    const run = stair.zEnd - stair.zStart;
+    const t = (local.z - stair.zStart) / run;
+    if (Math.abs(local.x - stair.x) > stair.width / 2 - .1 || t < 0 || t > 1) continue;
+    const top = base + stair.bottom + t * (stair.top - stair.bottom);
+    if (top <= footY + maxRise && (support === null || top > support)) support = top;
+  }
+  const roof = CAPTAINS_HOUSE_ROOF;
+  if (Math.abs(local.x) <= roof.halfWidth && Math.abs(local.z) <= roof.halfDepth) {
+    const top = base + captainsHouseRoofHeight(local.x);
+    if (top <= footY + maxRise && (support === null || top > support)) support = top;
+  }
+  return support;
+}
+
+// Ceiling/floor underside along the player's vertical motion. A jumping
+// pirate reaches the slab only if the target footprint is actually floored.
+export function houseCeilingAt(x, z, footY, bodyHeight = 3.1) {
+  const local = buildingLocalPoint(CAPTAINS_HOUSE, x, z);
+  const base = heightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z);
+  let ceiling = Infinity;
+  for (const solid of CAPTAINS_HOUSE_SOLIDS) {
+    if (solid.kind !== 'floor' || Math.abs(local.x - solid.x) > solid.width / 2 ||
+        Math.abs(local.z - solid.z) > solid.depth / 2) continue;
+    const underside = base + solid.y - solid.height / 2;
+    if (underside >= footY + bodyHeight - .001) ceiling = Math.min(ceiling, underside);
+  }
+  const roof = CAPTAINS_HOUSE_ROOF;
+  if (Math.abs(local.x) <= roof.halfWidth && Math.abs(local.z) <= roof.halfDepth) {
+    const underside = base + captainsHouseRoofHeight(local.x) - roof.thickness;
+    if (underside >= footY + bodyHeight - .001) ceiling = Math.min(ceiling, underside);
+  }
+  return ceiling;
+}
 
 function pushFromBox(point, box, radius) {
   const minX = box.x - box.width / 2, maxX = box.x + box.width / 2;
@@ -48,7 +101,8 @@ export function resolveWorldCollision(entity, radius = .6) {
   for (const { building, boxes } of rooms) {
     if (Math.abs(entity.x - building.x) > building.radius + radius || Math.abs(entity.z - building.z) > building.radius + radius) continue;
     const local = buildingLocalPoint(building, entity.x, entity.z), floor = heightAt(building.x, building.z);
-    const original = { ...local }, active = boxes.filter(box => y < floor + box.top && y + bodyHeight > floor + box.bottom);
+    const houseBodyHeight = building.id === CAPTAINS_HOUSE.id ? Math.max(bodyHeight, 3.1) : bodyHeight;
+    const original = { ...local }, active = boxes.filter(box => y < floor + box.top && y + houseBodyHeight > floor + box.bottom);
     // Repeating handles adjoining segments and furniture at a corner without
     // leaving the player embedded in the wall that was resolved first.
     for (let pass = 0; pass < 3; pass++) for (const box of active) pushFromBox(local, box, radius);
@@ -62,6 +116,29 @@ export function resolveWorldCollision(entity, radius = .6) {
       }
     }
     const result = buildingWorldPoint(building, local.x, local.z);
+    entity.x = result.x; entity.z = result.z;
+  }
+  if (Math.abs(entity.x - CAPTAINS_HOUSE.x) < 12 && Math.abs(entity.z - CAPTAINS_HOUSE.z) < 12) {
+    const local = buildingLocalPoint(CAPTAINS_HOUSE, entity.x, entity.z);
+    const base = heightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z);
+    // The lip of a floor is solid below its walking surface. The last .65m
+    // remains open to a player stepping from the matching stair landing.
+    for (const solid of CAPTAINS_HOUSE_SOLIDS) {
+      if (solid.kind !== 'floor') continue;
+      const bottom = base + solid.y - solid.height / 2, top = bottom + solid.height;
+      if (y < top - .65 && y + Math.max(bodyHeight, 3.1) > bottom + .001) pushFromBox(local, solid, radius);
+    }
+    // The stair volume blocks a side approach from below its slope, but the
+    // continuous ramp stays traversable at sprint speed from its foot.
+    for (const stair of CAPTAINS_HOUSE_STAIRS) {
+      const t = (local.z - stair.zStart) / (stair.zEnd - stair.zStart);
+      if (t < 0 || t > 1 || y + Math.max(bodyHeight, 3.1) <= base + stair.bottom || y >= base + stair.top) continue;
+      const surface = base + stair.bottom + t * (stair.top - stair.bottom);
+      if (surface <= y + .65) continue;
+      pushFromBox(local, { x: stair.x, z: (stair.zStart + stair.zEnd) / 2,
+        width: stair.width, depth: Math.abs(stair.zEnd - stair.zStart) }, radius);
+    }
+    const result = buildingWorldPoint(CAPTAINS_HOUSE, local.x, local.z);
     entity.x = result.x; entity.z = result.z;
   }
   return entity;
@@ -81,6 +158,27 @@ function segmentBox(a, b, box, padding, floor) {
     if (enter > exit) return false;
   }
   return exit >= 0 && enter <= 1;
+}
+
+function segmentHouseRoof(a, b, padding, base) {
+  const roof = CAPTAINS_HOUSE_ROOF;
+  for (const side of [-1, 1]) {
+    const roofAt = x => base + roof.ridge - side * x * (roof.ridge - roof.eave) / roof.halfWidth;
+    const da = a.y - roofAt(a.x), db = b.y - roofAt(b.x);
+    const candidates = [0, 1];
+    for (const boundary of [-roof.thickness - padding, padding]) {
+      if (Math.abs(db - da) > 1e-9) candidates.push((boundary - da) / (db - da));
+    }
+    for (const t of candidates) {
+      if (t < 0 || t > 1) continue;
+      const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
+      const d = da + (db - da) * t;
+      if (side * x >= -padding && side * x <= roof.halfWidth + padding &&
+          Math.abs(z) <= roof.halfDepth + padding &&
+          d >= -roof.thickness - padding - 1e-7 && d <= padding + 1e-7) return true;
+    }
+  }
+  return false;
 }
 
 export function hasWorldLineOfSight(from, to, padding = 0) {
@@ -109,5 +207,10 @@ export function hasWorldLineOfSight(from, to, padding = 0) {
     const floor = heightAt(building.x, building.z);
     if (boxes.some(box => segmentBox(start, end, box, padding, floor))) return false;
   }
+  const houseStart = { ...buildingLocalPoint(CAPTAINS_HOUSE, a.x, a.z), y: a.y };
+  const houseEnd = { ...buildingLocalPoint(CAPTAINS_HOUSE, b.x, b.z), y: b.y };
+  const houseBase = heightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z);
+  if (houseSightBoxes.some(box => segmentBox(houseStart, houseEnd, box, padding, houseBase))) return false;
+  if (segmentHouseRoof(houseStart, houseEnd, padding, houseBase)) return false;
   return true;
 }

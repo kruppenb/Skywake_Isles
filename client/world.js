@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { heightAt, regionAt, shipAt, seededRandom, REGIONS, SHRINES, CHESTS, OBSTACLES, BEACON, SPAWN, SEED } from '../shared/world.js';
-import { POINTS_OF_INTEREST, BUILDINGS, trailDistance, buildingAt } from '../shared/exploration.js';
+import { POINTS_OF_INTEREST, BUILDINGS, EXPLORATION_TRAILS, trailDistance, buildingAt } from '../shared/exploration.js';
 import { makePalette, GeoBatch, buildGalleon, buildWeapon, buildCrab, buildChest, buildShrine, addPalm, addBroadTree, addMushroom, addCrystal, addHut, addLighthouse } from './models.js';
 import { buildPlayerCharacter } from './player-character.js';
 import { buildMermaid } from './mermaid.js';
@@ -38,6 +38,8 @@ import { cinderworksWeight } from '../shared/cinderworks.js';
 import { createCinderworks } from './cinderworks.js';
 import { moonwatchWeight } from '../shared/moonwatch.js';
 import { createMoonwatch } from './moonwatch.js';
+import { createCaptainsHouse } from './captains-house.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 import { isCoastRegion, isCanopyRegion, ISLAND_LANDMARK_NOMINALS, canopyTreeDressing, canopyRockDressing, canopyPlantDressing,
   groundPlantDressing, shoreFlowerDressing, beaconStoneDressing } from '../shared/island.js';
 import { createIsland } from './island.js';
@@ -59,13 +61,34 @@ function segmentDistance(x, z, a, b) {
   return Math.hypot(x - a.x - t * dx, z - a.z - t * dz);
 }
 function routeDistance(x, z) {
-  let d = trailDistance(x, z);
+  let d = Infinity;
+  // Preserve the approved procedural placements. The captain's new spur is
+  // cleared by its own site treatment instead of changing the old RNG stream.
+  for (const trail of EXPLORATION_TRAILS) {
+    if (trail.id === CAPTAINS_HOUSE.id) continue;
+    for (let i = 1; i < trail.points.length; i++) d = Math.min(d, segmentDistance(x, z, trail.points[i - 1], trail.points[i]));
+  }
   for (const point of WAYPOINTS) d = Math.min(d, segmentDistance(x, z, BEACON, point));
   return d;
 }
+export function inCaptainsHouseClearing(x, z) {
+  return Math.abs(x - CAPTAINS_HOUSE.x) < CAPTAINS_HOUSE.width / 2 + 3 &&
+    Math.abs(z - CAPTAINS_HOUSE.z) < CAPTAINS_HOUSE.depth / 2 + 5;
+}
+export const outsideCaptainsHouseClearing = sites => sites.filter(site => !inCaptainsHouseClearing(site.x, site.z));
+function insideCaptainsHouse(player) {
+  if (player.mode !== 'ground') return false;
+  const x = player.x - CAPTAINS_HOUSE.x, z = player.z - CAPTAINS_HOUSE.z;
+  const y = player.y - heightAt(CAPTAINS_HOUSE.x, CAPTAINS_HOUSE.z);
+  return y >= -.25 && y < CAPTAINS_HOUSE.height &&
+    ((Math.abs(x) < CAPTAINS_HOUSE.width / 2 - .3 && Math.abs(z) < CAPTAINS_HOUSE.depth / 2 - .3) ||
+     (Math.abs(x) < CAPTAINS_HOUSE.balcony.width / 2 && z >= 8.7 && z < 12.7 && y >= 4.4 && y < 6.2));
+}
 function reserved(x, z, padding = 0) {
   if (routeDistance(x, z) < 6 + padding) return true;
-  if (POINTS_OF_INTEREST.some(p => Math.hypot(x - p.x, z - p.z) < p.radius + padding)) return true;
+  // Keep the original procedural placement stream stable. The added house has
+  // its own hidden scenery parent below, so it need not change old rejections.
+  if (POINTS_OF_INTEREST.some(p => p.id !== CAPTAINS_HOUSE.id && Math.hypot(x - p.x, z - p.z) < p.radius + padding)) return true;
   if (BUILDINGS.some(b => Math.hypot(x - b.x, z - b.z) < b.radius + 2 + padding)) return true;
   if ([SPAWN, BEACON, ...SHRINES].some(p => Math.hypot(x - p.x, z - p.z) < 11 + padding)) return true;
   return CHESTS.some(p => Math.hypot(x - p.x, z - p.z) < 3.2 + padding);
@@ -126,7 +149,8 @@ function buildTerrain(palette) {
     const grain = Math.sin(x * .51 + z * .34) * .016 + Math.sin(x * .22 - z * .67) * .014;
     if (y < 2.6) base.copy(sand).lerp(darkSand, clamp((2.6 - y) / 5, 0, .5));
     else if (region?.id === 'volcano') base.lerp(rock, clamp((y - 5.5) / 12, 0, .65));
-    if (y > 2.0 && routeDistance(x, z) < 5.0) base.lerp(path, .72 * (1 - clamp((routeDistance(x, z) - 2.5) / 2.5, 0, 1)));
+    const visibleRoute = Math.min(routeDistance(x, z), trailDistance(x, z));
+    if (y > 2.0 && visibleRoute < 5.0) base.lerp(path, .72 * (1 - clamp((visibleRoute - 2.5) / 2.5, 0, 1)));
     if (Math.hypot(x - SPAWN.x, z - SPAWN.z) < 22) base.lerp(sand, .55);
     base.offsetHSL(0, 0, grain);
     colors.push(base.r, base.g, base.b);
@@ -188,6 +212,9 @@ export function buildScenery(palette, random) {
   const driftwoodDecoration = new GeoBatch(palette), sunwakeLanding = new GeoBatch(palette), palmheartDecoration = new GeoBatch(palette);
   const cinderworksDecoration = new GeoBatch(palette), moonwatchDecoration = new GeoBatch(palette);
   const coastDecoration = new GeoBatch(palette), coastPalmSites = [], coastRockSites = [];
+  // Procedural draws retain their original RNG and geometry, but decorations
+  // rooted inside the new foundation live in a permanently hidden fallback.
+  const houseHiddenDecoration = new GeoBatch(palette);
   // Every original shrine draw moves into this batch, and the sites it stands on
   // are recorded as the authored kit installs them. The glow draws stay in the
   // luminous batch above - all of them are shrine items already.
@@ -262,7 +289,8 @@ export function buildScenery(palette, random) {
     const decoration = oldWatchWeight(x, z) > 0 ? oldWatchDecoration : windwardFarmWeight(x, z) > 0 ? farmDecoration : palmheartWeight(x, z) > 0 ? palmheartDecoration : cinderworksWeight(x, z) > 0 ? cinderworksDecoration : moonwatchWeight(x, z) > 0 ? moonwatchDecoration : land;
     // A plant joins the canopy only when every finished area has passed on it,
     // which is decided after the original rejection and both RNG draws above.
-    const wild = decoration === land && isCanopyRegion(region), target = wild ? canopyDecoration : decoration;
+    const wild = decoration === land && isCanopyRegion(region);
+    const target = inCaptainsHouseClearing(x, z) ? houseHiddenDecoration : wild ? canopyDecoration : decoration;
     if (region === 'moon') {
       const plant = i % 3 === 0 ? size : size * (i % 4 === 0 ? 1.55 : 1);
       if (i % 3 === 0) addBroadTree(target, x, y, z, plant, true, a);
@@ -298,7 +326,8 @@ export function buildScenery(palette, random) {
     // on it, which is decided after the original rejection and both RNG draws. The
     // clump and its bud cluster move into one batch, so a site is never half
     // replaced; the yaw is only lifted into a name, never moved or redrawn.
-    const wild = decoration === land, target = wild ? groundDecoration : decoration;
+    const wild = decoration === land;
+    const target = inCaptainsHouseClearing(x, z) ? houseHiddenDecoration : wild ? groundDecoration : decoration;
     if (region === 'volcano') {
       const yaw = random() * TAU;
       target.add('pebble', [x, y + .18 * s, z], [s, .45 * s, .65 * s], [0, yaw, 0], '#bb9876');
@@ -450,6 +479,8 @@ export function buildScenery(palette, random) {
   // One mesh holds every ground draw - clumps, buds, shore stalks and the four
   // perimeter stones - so the authored kit hides and restores them together.
   const groundFallback = groundDecoration.mesh(); groundFallback.name = 'island-ground-original-scenery'; group.add(groundFallback);
+  const houseHiddenFallback = houseHiddenDecoration.mesh(); houseHiddenFallback.name = 'captains-house-cleared-original-scenery';
+  houseHiddenFallback.visible = false; group.add(houseHiddenFallback);
   // The shrines' solid and glow draws are one fallback: the luminous batch holds
   // nothing but shrine items, so it moves here whole instead of being split or
   // duplicated, and both meshes are hidden and restored together.
@@ -462,10 +493,11 @@ export function buildScenery(palette, random) {
   group.userData.landmarkSites = landmarkSites;
   group.userData.canopySites = canopySites; group.userData.canopyFallback = canopyFallback;
   group.userData.groundSites = groundSites; group.userData.groundFallback = groundFallback;
+  group.userData.houseHiddenFallback = houseHiddenFallback;
   return { group, legacyVegetation, farmLegacyVegetation, tideglassLegacyVegetation, tideglassHutFallback, tideglassHutSites, saltwindLegacyVegetation,
     driftwoodLegacyVegetation, sunwakeLandingFallback, palmheartLegacyVegetation, cinderworksLegacyScenery, moonwatchLegacyScenery,
     coastLegacyScenery, coastPalmSites, coastRockSites, landmarkFallback, landmarkLegacyScenery, landmarkLegacyGlow, landmarkSites,
-    canopyFallback, canopySites, groundFallback, groundSites, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
+    canopyFallback, canopySites, groundFallback, groundSites, houseHiddenFallback, volcano: { x: coreX, y: coreY + 3, z: coreZ }, moon };
 }
 
 function buildSky(palette, random) {
@@ -546,9 +578,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
   const palmheartCamp = createPalmheartCamp({ scene, settlements, assets: environmentAssets, legacyVegetation: scenery.palmheartLegacyVegetation });
   const cinderworks = createCinderworks({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.cinderworksLegacyScenery });
   const moonwatch = createMoonwatch({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.moonwatchLegacyScenery });
+  const captainsHouse = createCaptainsHouse({ scene });
   const island = createIsland({ scene, settlements, assets: environmentAssets, legacyScenery: scenery.coastLegacyScenery, landmarkFallback: scenery.landmarkFallback,
     canopyFallback: scenery.canopyFallback, groundFallback: scenery.groundFallback, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites,
-    landmarkSites: scenery.landmarkSites, canopySites: scenery.canopySites, groundSites: scenery.groundSites });
+    landmarkSites: scenery.landmarkSites,
+    canopySites: outsideCaptainsHouseClearing(scenery.canopySites),
+    groundSites: outsideCaptainsHouseClearing(scenery.groundSites) });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const skyFinale = createSkyFinalePresentation({ scene, palette });
@@ -886,7 +921,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       model.group.userData.movementSpeed = model.speed;
       model.animate(time, model.speed, player, { dt, aiming: isLocal && !!view.aiming, elapsed });
       model.lastPose = { ...player }; model.generation = sample?.generation;
-      model.group.visible = !(isLocal && (view.scoped || player.gunId)) && (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
+      const nearIndoorAvatar = isLocal && insideCaptainsHouse(player) &&
+        Math.hypot(camera.position.x - player.x, camera.position.y - player.y - 1.8, camera.position.z - player.z) < 2.2;
+      model.group.visible = !(isLocal && (view.scoped || player.gunId || nearIndoorAvatar)) &&
+        (!player.invulnerableUntil || player.invulnerableUntil <= state.elapsed || Math.floor(time * 12) % 4 !== 0);
     }
     for (const [id, model] of players) if (!seen.has(id)) { model.dispose?.(); disposeObject(model.group, preserve); players.delete(id); discharges.delete(id); }
   }
@@ -1045,9 +1083,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       const yaw = Number.isFinite(view.yaw) ? view.yaw : player.yaw || 0, pitch = clamp(Number.isFinite(view.pitch) ? view.pitch : player.pitch || -.15, -1.25, 1.1);
       direction.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
       right.set(Math.cos(yaw), 0, -Math.sin(yaw));
-      const back = player.mode === 'gliding' ? 10.2 : view.aiming && player.mode === 'ground' ? AIM_CAMERA_BACK : GROUND_CAMERA_BACK;
-      const anchor = new THREE.Vector3(player.x, player.y + (player.mode === 'ground' ? GROUND_CAMERA_HEIGHT : 2.7), player.z);
-      desiredCamera.copy(anchor).addScaledVector(direction, -back).addScaledVector(right, player.mode === 'ground' ? GROUND_SHOULDER_OFFSET : .92);
+      const inHouse = insideCaptainsHouse(player);
+      const back = inHouse ? 4.5 : player.mode === 'gliding' ? 10.2 : view.aiming && player.mode === 'ground' ? AIM_CAMERA_BACK : GROUND_CAMERA_BACK;
+      const anchor = new THREE.Vector3(player.x, player.y + (inHouse ? 2.65 : player.mode === 'ground' ? GROUND_CAMERA_HEIGHT : 2.7), player.z);
+      desiredCamera.copy(anchor).addScaledVector(direction, -back).addScaledVector(right, inHouse ? .8 : player.mode === 'ground' ? GROUND_SHOULDER_OFFSET : .92);
       let safeFraction = 1;
       // A gate departure starts metres from the hull, so a full glide chase can
       // sit back inside the deck and look out through the jump sign. Pull it in
@@ -1065,14 +1104,14 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
         }
         // Inside roofs and tall walls cut away. Outside, real wall segments
         // replace the old solid building circles so open doors remain usable.
-        if (!buildingAt(player.x, player.z) && !hasWorldLineOfSight(anchor, desiredCamera, .22)) {
+        if ((!buildingAt(player.x, player.z) || inHouse) && !hasWorldLineOfSight(anchor, desiredCamera, .22)) {
           let low = 0, high = 1;
           for (let pass = 0; pass < 7; pass++) {
             const middle = (low + high) / 2;
             const probe = { x: lerp(anchor.x, desiredCamera.x, middle), y: lerp(anchor.y, desiredCamera.y, middle), z: lerp(anchor.z, desiredCamera.z, middle) };
             if (hasWorldLineOfSight(anchor, probe, .22)) low = middle; else high = middle;
           }
-          safeFraction = Math.min(safeFraction, Math.max(.20, low));
+          safeFraction = Math.min(safeFraction, inHouse ? Math.max(.015, low) : Math.max(.20, low));
         }
       }
       if (safeFraction < 1) desiredCamera.lerpVectors(anchor, desiredCamera, safeFraction);
@@ -1080,6 +1119,18 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
       if (player.mode === 'aboard') desiredCamera.y = Math.max(desiredCamera.y, player.y + 1.6);
       const snap = !cameraReady || gunChanged || travel.reset || camera.position.distanceTo(desiredCamera) > 45 || latestView.menu || latestView.scoped;
       camera.position.lerp(desiredCamera, snap ? 1 : 1 - Math.exp(-dt * 18));
+      // A fast turn or floor transition can sweep the smoothed camera through
+      // a real house wall even when the desired pose is clear. Clamp the pose
+      // actually rendered, and allow a near-first-person arm when needed.
+      if (inHouse && !hasWorldLineOfSight(anchor, camera.position, .22)) {
+        let low = 0, high = 1;
+        for (let pass = 0; pass < 9; pass++) {
+          const middle = (low + high) / 2;
+          const probe = { x: lerp(anchor.x, camera.position.x, middle), y: lerp(anchor.y, camera.position.y, middle), z: lerp(anchor.z, camera.position.z, middle) };
+          if (hasWorldLineOfSight(anchor, probe, .22)) low = middle; else high = middle;
+        }
+        camera.position.lerpVectors(anchor, camera.position, Math.max(.015, low));
+      }
       // Center ray is exactly input direction, including after collision.
       cameraTarget.copy(camera.position).addScaledVector(direction, 100); camera.lookAt(cameraTarget);
       const targetFov = view.aiming ? AIM_GAMEPLAY_FOV : player.mode === 'gliding' ? GLIDING_FOV : NORMAL_GAMEPLAY_FOV;
@@ -1197,12 +1248,12 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     return { origin: { x: raycaster.ray.origin.x, y: raycaster.ray.origin.y, z: raycaster.ray.origin.z }, direction: { x: raycaster.ray.direction.x, y: raycaster.ray.direction.y, z: raycaster.ray.direction.z } };
   }
-  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', realm: activeRealm(), players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, underwater: underwater.getStats(), airship: airship.getStats(), sky: skyFinale.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
+  function getStats() { return { render: { ...renderer.info.render }, memory: { ...renderer.info.memory }, programs: renderer.info.programs?.length || 0, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, fps, quality: lowQuality ? 'low' : 'high', realm: activeRealm(), players: players.size, enemies: enemies.size, drops: dropModels.size, effects: effects.length, underwater: underwater.getStats(), airship: airship.getStats(), sky: skyFinale.getStats(), settlements: { ...settlements.stats }, oldWatch: oldWatch.getStats(), windwardFarm: windwardFarm.getStats(), tideglassMarket: tideglassMarket.getStats(), saltwindHarbor: saltwindHarbor.getStats(), driftwoodYard: driftwoodYard.getStats(), palmheartCamp: palmheartCamp.getStats(), cinderworks: cinderworks.getStats(), moonwatch: moonwatch.getStats(), captainsHouse: captainsHouse.getStats(), island: island.getStats(), environmentAssets: environmentAssets.getStats() }; }
   function dispose() {
     if (disposed) return; disposed = true;
     for (const model of players.values()) model.dispose?.();
     oldWatch.dispose(); airship.dispose();
-    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
+    windwardFarm.dispose(); tideglassMarket.dispose(); saltwindHarbor.dispose(); driftwoodYard.dispose(); palmheartCamp.dispose(); cinderworks.dispose(); moonwatch.dispose(); captainsHouse.dispose(); island.dispose(); environmentLighting.dispose(); environmentAssets.dispose();
     underwater.dispose();
     disposeObject(scene, preserve); disposeObject(reefScene, preserve); Object.values(palette.geometry).forEach(g => g.dispose()); palette.ramp.dispose(); palette.solid.dispose(); palette.glow.dispose();
     skyFinale.dispose();

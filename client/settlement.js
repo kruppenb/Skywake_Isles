@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GeoBatch } from './models.js';
 import { heightAt, OBSTACLES, CHESTS, SHRINES, SPAWN, BEACON } from '../shared/world.js';
 import { POINTS_OF_INTEREST, BUILDINGS, RESIDENTS, trailDistance, buildingLocalPoint, buildingWalls, buildingFurnishings } from '../shared/exploration.js';
+import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 import { WINDWARD_FARM_FENCE_CANDIDATES } from '../shared/windward-farm.js';
 
 const TAU = Math.PI * 2;
@@ -89,7 +90,7 @@ function distanceToSegment(x, z, a, b) {
 export function buildSettlements(palette) {
   const group = new THREE.Group(); group.name = 'island-settlements';
   const rotors = [], pennants = [], chimneys = [], boats = [], occupied = [], propSites = [], buildingBounds = [], interiors = [];
-  const batches = new Map(POINTS_OF_INTEREST.map(p => [p.id, new GeoBatch(palette)]));
+  const batches = new Map(POINTS_OF_INTEREST.filter(p => p.id !== CAPTAINS_HOUSE.id).map(p => [p.id, new GeoBatch(palette)]));
   const oldWatchFallback = new THREE.Group(); oldWatchFallback.name = 'old-watch-original-exterior'; group.add(oldWatchFallback);
   const oldWatchTower = new GeoBatch(palette);
   const farmFallback = new THREE.Group(); farmFallback.name = 'windward-farm-original-exterior'; group.add(farmFallback);
@@ -380,6 +381,9 @@ export function buildSettlements(palette) {
   }
 
   for (const place of POINTS_OF_INTEREST) {
+    // Its three-storey renderer owns the site, so the generic work-site lantern
+    // would overlap the front approach and change all historical prop indexes.
+    if (place.id === CAPTAINS_HOUSE.id) continue;
     if (place.kind === 'harbor') {
       // The harbor's work sites keep their original positions and radii; the
       // authored kit replaces their geometry and hides this batch when ready.
@@ -514,6 +518,7 @@ export function buildSettlements(palette) {
   const moonwatchWorkMesh = moonwatchWork.mesh(); moonwatchWorkMesh.name = 'moonwatch-original-work-sites'; moonwatchFallback.add(moonwatchWorkMesh);
 
   for (const place of POINTS_OF_INTEREST) {
+    if (place.id === CAPTAINS_HOUSE.id) continue;
     const mesh = batches.get(place.id).mesh(); mesh.name = place.id + '-architecture-and-work-sites'; group.add(mesh);
   }
   const towerFallbackMesh = oldWatchTower.mesh(); towerFallbackMesh.name = 'signal-tower-original'; oldWatchFallback.add(towerFallbackMesh);

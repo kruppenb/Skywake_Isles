@@ -129,12 +129,13 @@ test('expanded reef guidance prioritizes an active event node, then nearby cache
   assert.equal(underwaterHud(state, player).stage, 'discovery');
 });
 
-test('the expanded chart retains all six named areas and local-only markers', () => {
+test('the expanded chart retains the six original areas, the manor, and local-only markers', () => {
   const player = reefPlayer({ x: REEF_REGIONS[4].x, z: REEF_REGIONS[4].z });
   const state = fixture(player);
   state.underwater = { ...state.underwater, discoveries: [], caches: [], encounters: [], events: [] };
   const entries = mapEntries(state, player);
-  assert.equal(REEF_REGIONS.length, 6);
+  assert.equal(REEF_REGIONS.length, 7);
+  assert.ok(REEF_REGIONS.some(region => region.id === 'sunken-manor'));
   assert.equal(entries.landmarks.filter(entry => entry.kind === 'reef-cache').length, REEF_CACHES.length);
   assert.equal(entries.landmarks.filter(entry => entry.kind === 'reef-event').length, REEF_EVENTS.length);
   assert.equal(underwaterHud(state, player).region.id, 'ember-vents');
