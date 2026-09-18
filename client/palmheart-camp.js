@@ -187,7 +187,7 @@ export function buildPalmheartKit(camp, shared, { propSites = [] } = {}) {
     // the guarded approach, the chest or an original work site.
     const random = seededRandom(512023), reserved = [...propSites], trees = [];
     let hardwoods = 0;
-    for (let index = 0; index < 2600 && trees.length < 34; index++) {
+    for (let index = 0; index < 3400 && trees.length < 44; index++) {
       const x = -112 + random() * 56, z = -18 + random() * 56;
       if (random() > palmheartWeight(x, z) || !palmheartPlantClearance(x, z, reserved, 1.4)) continue;
       if (trees.some(tree => Math.hypot(x - tree.x, z - tree.z) < 4)) continue;
@@ -212,7 +212,7 @@ export function buildPalmheartKit(camp, shared, { propSites = [] } = {}) {
       }
       return points;
     };
-    const ears = scatter(90, 900, .8, .45), ferns = scatter(140, 1400, .7, .5), grass = scatter(110, 1100, .55, .5);
+    const ears = scatter(120, 1200, .8, .45), ferns = scatter(200, 2000, .7, .5), grass = scatter(170, 1700, .55, .5);
     const detail = [
       ...batches(bound.elephant_ear_clump, ears, group, { kind: 'elephant-ear', wind }),
       ...batches(library.fern_clump, ferns, group, { kind: 'fern', wind, tint: new THREE.Color(.9, 1.15, .8) }),

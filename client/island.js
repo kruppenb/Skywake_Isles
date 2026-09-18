@@ -114,7 +114,11 @@ const GROUND_STATIC = new Set(['beacon_stone']);
 // both bell tints lift hard toward pale coral and lilac.
 export const ISLAND_GROUND_BINDINGS = Object.freeze({
   haven_grass:  Object.freeze({ source: 'needle_foliage', color: [1.12, 1.18, .82] }),
+  // The understory's Haven ferns cool the source a shade further than the lawn
+  // tufts, and its volcanic grass takes the Cinderworks' own scorched straw.
+  haven_fern:   Object.freeze({ source: 'needle_foliage', color: [1.00, 1.14, .84] }),
   beach_grass:  Object.freeze({ source: 'needle_foliage', color: [1.70, 1.55, 1.00] }),
+  volcano_grass: Object.freeze({ source: 'needle_foliage', color: [1.45, 1.15, .62] }),
   jungle_fern:  Object.freeze({ source: 'needle_foliage', color: [.90, 1.15, .80] }),
   jungle_grass: Object.freeze({ source: 'needle_foliage', color: [.85, 1.30, .70] }),
   moon_fern:    Object.freeze({ source: 'needle_foliage', color: [3.00, 1.40, 7.00] }),
@@ -132,6 +136,7 @@ const GROUND_BINDINGS = Object.freeze({ ...CANOPY_BINDINGS, ground: ISLAND_GROUN
 // an already-tinted clone a second time.
 export const ISLAND_GROUND_SOURCES = Object.freeze({
   haven_grass:    Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'haven_grass' }),
+  haven_fern:     Object.freeze({ kit: 'shared',  source: 'fern_clump',     slot: 'needle_foliage', palette: 'ground',  binding: 'haven_fern' }),
   beach_grass:    Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'beach_grass' }),
   jungle_fern:    Object.freeze({ kit: 'shared',  source: 'fern_clump',     slot: 'needle_foliage', palette: 'ground',  binding: 'jungle_fern' }),
   jungle_grass:   Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'jungle_grass' }),
@@ -139,6 +144,7 @@ export const ISLAND_GROUND_SOURCES = Object.freeze({
   moon_grass:     Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'moon_grass' }),
   moon_bell:      Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'moon',    binding: 'moonbell' }),
   volcano_cinder: Object.freeze({ kit: 'volcano', source: 'cinder_clump',   slot: 'scoria',         palette: 'volcano', binding: 'scoria' }),
+  volcano_grass:  Object.freeze({ kit: 'shared',  source: 'grass_clump',    slot: 'needle_foliage', palette: 'ground',  binding: 'volcano_grass' }),
   shore_coral:    Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'ground',  binding: 'shore_coral' }),
   shore_lilac:    Object.freeze({ kit: 'moon',    source: 'moonbell_clump', slot: 'moonbell',       palette: 'ground',  binding: 'shore_lilac' }),
   // The bound clone carries its slot's own name, so the stone validates the same
@@ -469,7 +475,24 @@ function groundBatches(prefab, name, sites, parent, { lift = .015, castShadow = 
   return result;
 }
 
-export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [], landmarkSites = [], canopySites = [], canopyKits = {}, groundSites = [] } = {}) {
+// An understory descriptor joins one of three families by the prefab it names:
+// a coast palm carries the strand's site fields, a resident canopy root the
+// full transform the wild canopy takes whole, and a ground alias the transform
+// the ground cover reseats. A descriptor naming nothing the kit installs, or a
+// palm with an unusable seat, fails the whole build like any malformed site.
+function understoryFamilies(understorySites) {
+  const families = { palms: [], canopy: [], ground: [] }, counts = {};
+  for (const site of understorySites) {
+    const family = site.prefab === 'coast_palm_a' || site.prefab === 'coast_palm_b' ? 'palms'
+      : ISLAND_CANOPY_SOURCES[site.prefab] ? 'canopy' : ISLAND_GROUND_SOURCES[site.prefab] ? 'ground' : null;
+    if (!family) throw new Error('Island understory prefab is missing: ' + site.prefab);
+    if (family === 'palms' && (![site.x, site.z, site.yaw, site.size].every(Number.isFinite) || site.size <= 0)) throw new Error('Island understory palm is malformed: ' + site.id);
+    families[family].push(site); counts[site.kind] = (counts[site.kind] ?? 0) + 1;
+  }
+  return { ...families, counts };
+}
+
+export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], skiffs = [], landmarkSites = [], canopySites = [], canopyKits = {}, groundSites = [], understorySites = [] } = {}) {
   const prefabs = prefabRoots(kit.scene, ISLAND_PREFABS);
   const materials = sourceMaterials(shared.scene), slots = sourceMaterials(kit.scene);
   for (const name of slots.keys()) {
@@ -493,10 +516,15 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
       boundLibrary.add(copy); return [name, copy];
     }));
     const wind = { value: 0 };
+    // The understory's own seeded pass, planted between the finished areas.
+    // Each descriptor joins its family's batches on the very same cells and
+    // bound clones, so the density costs no extra material, lease or program.
+    const understory = understoryFamilies(understorySites);
     // The five collidable palms take the fuller crown; the decorative ones
     // alternate so the strand never reads as one repeated silhouette.
     const palms = palmSites.map((site, index) => ({ ...site, prefab: site.id ? 'coast_palm_a' : index % 2 ? 'coast_palm_b' : 'coast_palm_a' }));
-    const canopy = ['coast_palm_a', 'coast_palm_b'].flatMap(name => batches(bound[name], palms.filter(palm => palm.prefab === name), group, wind));
+    const canopy = ['coast_palm_a', 'coast_palm_b'].flatMap(name => batches(bound[name],
+      [...palms, ...understory.palms].filter(palm => palm.prefab === name), group, wind));
     // Each surf rock keeps its recorded radius and height, so its dressing
     // carries a non-uniform scale onto the nominal boulder.
     const rocks = rockSites.map(site => {
@@ -536,15 +564,15 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
     // transform buildScenery recorded for the original draw it replaces. A build
     // with no canopy sites - a focused coast or shrine build - stages nothing
     // here and reports the coast counts it always did.
-    const wildCanopy = [], canopyCounts = {};
-    if (canopySites.length) {
-      const canopyBound = canopyPrefabs(canopySites, canopyKits, prefabs, materials, boundLibrary, wind);
+    const wildCanopy = [], canopyCounts = {}, allCanopySites = [...canopySites, ...understory.canopy];
+    if (allCanopySites.length) {
+      const canopyBound = canopyPrefabs(allCanopySites, canopyKits, prefabs, materials, boundLibrary, wind);
       const byCanopyPrefab = new Map();
-      for (const site of canopySites) {
+      for (const site of allCanopySites) {
         if (!byCanopyPrefab.has(site.prefab)) byCanopyPrefab.set(site.prefab, []);
         byCanopyPrefab.get(site.prefab).push(site);
-        canopyCounts[site.kind] = (canopyCounts[site.kind] ?? 0) + 1;
       }
+      for (const site of canopySites) canopyCounts[site.kind] = (canopyCounts[site.kind] ?? 0) + 1;
       for (const name of ISLAND_CANOPY_PREFABS) {
         const sites = byCanopyPrefab.get(name);
         if (sites?.length) wildCanopy.push(...canopyBatches(canopyBound.get(name), name, sites, group, ISLAND_CANOPY_SOURCES[name].cell));
@@ -553,15 +581,15 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
     // The ground cover: small plants, shore flower clumps and the beacon's
     // perimeter stones. A build with no ground sites stages nothing here and
     // reports exactly the stat keys, roots and leases it always did.
-    const groundDetail = [], groundStones = [], groundCounts = {};
-    if (groundSites.length) {
-      const groundBound = groundPrefabs(groundSites, canopyKits, shared, bound, materials, boundLibrary, wind);
+    const groundDetail = [], groundStones = [], groundCounts = {}, allGroundSites = [...groundSites, ...understory.ground];
+    if (allGroundSites.length) {
+      const groundBound = groundPrefabs(allGroundSites, canopyKits, shared, bound, materials, boundLibrary, wind);
       const byGroundPrefab = new Map();
-      for (const site of groundSites) {
+      for (const site of allGroundSites) {
         if (!byGroundPrefab.has(site.prefab)) byGroundPrefab.set(site.prefab, []);
         byGroundPrefab.get(site.prefab).push(site);
-        groundCounts[site.kind] = (groundCounts[site.kind] ?? 0) + 1;
       }
+      for (const site of groundSites) groundCounts[site.kind] = (groundCounts[site.kind] ?? 0) + 1;
       for (const name of ISLAND_GROUND_PREFABS) {
         const sites = byGroundPrefab.get(name);
         if (!sites?.length) continue;
@@ -576,24 +604,28 @@ export function buildIslandKit(kit, shared, { palmSites = [], rockSites = [], sk
       counts: { prefabs: ISLAND_PREFABS.length, palms: palmSites.length, collidablePalms: palmSites.filter(site => site.id).length,
         rocks: rocks.length, skiffs: authored.length, canopyMeshes: canopy.length, cellSize: PALM_CELL,
         landmarks: landmarkSites.length, landmarkMeshes: landmarkMeshes.length, landmarkCounts, landmarkCellSize: LANDMARK_CELL,
-        ...(canopySites.length ? { canopyPlacements: canopySites.length, canopyCounts, wildCanopyMeshes: wildCanopy.length,
+        ...(allCanopySites.length ? { canopyPlacements: canopySites.length, canopyCounts, wildCanopyMeshes: wildCanopy.length,
           canopyCellSize: CANOPY_CELL, rockDetailCellSize: ROCK_DETAIL_CELL } : {}),
-        ...(groundSites.length ? { groundPlacements: groundSites.length, groundCounts, groundDetailMeshes: groundDetail.length,
-          groundStoneMeshes: groundStones.length, groundCellSize: GROUND_CELL } : {}) } };
+        ...(allGroundSites.length ? { groundPlacements: groundSites.length, groundCounts, groundDetailMeshes: groundDetail.length,
+          groundStoneMeshes: groundStones.length, groundCellSize: GROUND_CELL } : {}),
+        ...(understorySites.length ? { understoryPlacements: understorySites.length, understoryCounts: understory.counts,
+          understoryPalms: understory.palms.length, understoryCanopy: understory.canopy.length, understoryGround: understory.ground.length } : {}) } };
   } catch (error) { disposeOwnedResources([group, boundLibrary], borrowed); throw error; }
 }
 
 export function createIsland({ scene, settlements, assets = null, legacyScenery = null, landmarkFallback = null, canopyFallback = null,
-  groundFallback = null, palmSites = [], rockSites = [], landmarkSites = [], canopySites = [], groundSites = [], load } = {}) {
+  groundFallback = null, palmSites = [], rockSites = [], landmarkSites = [], canopySites = [], groundSites = [], understorySites = [], load } = {}) {
   const cache = assets ?? createEnvironmentAssets(load ? { load } : {}), ownsCache = !assets;
   // The canopy and the ground cover borrow Palmheart's, Moonwatch's and the
   // Cinderworks' kits from the same environment cache the settlements themselves
   // lease, so the island downloads no new payload. Each resident kit is leased
   // once however many slices want it, and only when a staged descriptor names it:
   // a build with neither canopy nor resident-backed ground sites still leases
-  // exactly the shared library and the island kit, in that order.
-  const groundKeys = new Set(islandGroundKits(groundSites));
-  const canopyKeys = canopySites.length ? Object.keys(ISLAND_CANOPY_KIT_URLS)
+  // exactly the shared library and the island kit, in that order. The
+  // understory's descriptors count toward the same decision by family.
+  const understoryCanopy = understorySites.some(site => ISLAND_CANOPY_SOURCES[site.prefab]);
+  const groundKeys = new Set(islandGroundKits([...groundSites, ...understorySites.filter(site => ISLAND_GROUND_SOURCES[site.prefab])]));
+  const canopyKeys = canopySites.length || understoryCanopy ? Object.keys(ISLAND_CANOPY_KIT_URLS)
     : Object.keys(ISLAND_CANOPY_KIT_URLS).filter(key => groundKeys.has(key));
   const leases = [cache.acquire(SHARED_URL), cache.acquire(ISLAND_URL), ...canopyKeys.map(key => cache.acquire(ISLAND_CANOPY_KIT_URLS[key]))];
   let disposed = false, kit = null, sources = [], status = 'loading', error = null;
@@ -612,7 +644,7 @@ export function createIsland({ scene, settlements, assets = null, legacyScenery 
     if (disposed) return false;
     const canopyKits = Object.fromEntries(canopyKeys.map((key, index) => [key, residents[index]]));
     sources = [island.scene, shared.scene, ...residents.map(asset => asset?.scene).filter(Boolean)];
-    kit = buildIslandKit(island, shared, { palmSites, rockSites, landmarkSites, canopySites, canopyKits, groundSites, skiffs: settlements.group.userData.skiffs ?? [] });
+    kit = buildIslandKit(island, shared, { palmSites, rockSites, landmarkSites, canopySites, canopyKits, groundSites, understorySites, skiffs: settlements.group.userData.skiffs ?? [] });
     // Nothing is hidden until every coast palm, surf rock, skiff, shrine
     // landmark, canopy batch and ground clump is installed and the settlement has
     // taken the kit: a kit that fails anywhere leaves all four originals standing.

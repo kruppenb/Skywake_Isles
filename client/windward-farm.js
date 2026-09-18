@@ -205,14 +205,14 @@ export function buildWindwardFarmKit(farm, shared, { propSites = [], fenceSites 
     detail.push(...batches(bound.fence_section, fencePoints, group, { kind: 'fences' }));
     const grass = [], ferns = [], scatter = [], random = seededRandom(693201);
     const fieldClear = (x, z) => fields.every(field => Math.abs(x - field.x) > (field.rows - 1) * field.rowSpacing / 2 + .85 || Math.abs(z - field.z) > (field.columns - 1) * field.spacing / 2 + .8);
-    for (let i = 0; i < 1700; i++) {
+    for (let i = 0; i < 2400; i++) {
       const x = -68 + random() * 48, z = -77 + random() * 47;
       if (random() > windwardFarmWeight(x, z) * (1 - oldWatchWeight(x, z)) || !farmPlantClearance(x, z, propSites) || !fieldClear(x, z)) continue;
       if (fences.some(fence => Math.hypot(x - fence.x, z - fence.z) < 1.2)) continue;
       const patch = Math.sin(x * .51 + z * .21) + Math.sin(z * .59 - x * .13);
       if (patch < -.4) continue;
-      const fern = x < -47 && patch > .8 && ferns.length < 24 && random() < .2;
-      if (fern || grass.length < 320) (fern ? ferns : grass).push({ x, z, yaw: random() * TAU, scale: fern ? .65 + random() * .35 : .46 + random() * .65 });
+      const fern = x < -47 && patch > .8 && ferns.length < 36 && random() < .2;
+      if (fern || grass.length < 460) (fern ? ferns : grass).push({ x, z, yaw: random() * TAU, scale: fern ? .65 + random() * .35 : .46 + random() * .65 });
       if (scatter.length < 30 && random() < .12) scatter.push({ x, z, yaw: random() * TAU, scale: [.16 + random() * .23, .04, .14 + random() * .2] });
     }
     detail.push(...batches(library.grass_clump, grass, group, { kind: 'grass', wind, tint: new THREE.Color(1.15, 1.08, .77) }));

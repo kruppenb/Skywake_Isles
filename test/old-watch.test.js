@@ -71,7 +71,7 @@ test('atomic installation preserves furnished cutaways and quality density witho
   assert.equal(pilot.getStats().status, 'loading'); assert.equal(scene.getObjectByName('old-watch-original-exterior').visible, true);
   assert.equal(await pilot.ready, true); assert.equal(loads, 1); assert.equal(legacyVegetation.visible, false);
   const counts = pilot.getStats();
-  assert.deepEqual([counts.grass, counts.ferns, counts.flagstones], [559, 54, 12], 'approved pilot planting density and original prop-site exclusions');
+  assert.deepEqual([counts.grass, counts.ferns, counts.flagstones], [739, 75, 12], 'densified pilot planting and original prop-site exclusions');
   assert.equal(scene.getObjectByName('old-watch-original-exterior').visible, false);
   const b = BUILDINGS.find(p => p.id === 'watch-barracks'), player = { x: b.x, z: b.z, y: heightAt(b.x, b.z), mode: 'ground' };
   const roof = scene.getObjectByName('watch-barracks-authored-cutaway-roof'), walls = scene.getObjectByName('watch-barracks-authored-cutaway-walls');

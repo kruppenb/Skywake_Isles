@@ -44,6 +44,7 @@ import { CAPTAINS_HOUSE } from '../shared/captains-house.js';
 import { isCoastRegion, isCanopyRegion, ISLAND_LANDMARK_NOMINALS, canopyTreeDressing, canopyRockDressing, canopyPlantDressing,
   groundPlantDressing, shoreFlowerDressing, beaconStoneDressing } from '../shared/island.js';
 import { createIsland } from './island.js';
+import { islandUnderstorySites } from '../shared/island-understory.js';
 import { createEnvironmentAssets } from './environment-assets.js';
 import { createEnvironmentLighting } from './environment-lighting.js';
 import { TERRAIN_GRID_STEP, TERRAIN_GRID_COUNT, TERRAIN_GRID_HALF } from './environment-geometry.js';
@@ -584,7 +585,10 @@ export function createWorld(canvas, { quality = 'high' } = {}) {
     canopyFallback: scenery.canopyFallback, groundFallback: scenery.groundFallback, palmSites: scenery.coastPalmSites, rockSites: scenery.coastRockSites,
     landmarkSites: scenery.landmarkSites,
     canopySites: outsideCaptainsHouseClearing(scenery.canopySites),
-    groundSites: outsideCaptainsHouseClearing(scenery.groundSites) });
+    groundSites: outsideCaptainsHouseClearing(scenery.groundSites),
+    // The density pass between the areas draws from its own seed; the recorded
+    // wild canopy and coast palms are handed over so no new trunk stands in one.
+    understorySites: outsideCaptainsHouseClearing(islandUnderstorySites({ avoid: [...scenery.canopySites, ...scenery.coastPalmSites] })) });
   const ship = buildGalleon(palette); scene.add(ship.group);
   const airship = createAirshipPresentation({ scene, palette });
   const skyFinale = createSkyFinalePresentation({ scene, palette });

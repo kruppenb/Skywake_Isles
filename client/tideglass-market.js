@@ -193,13 +193,13 @@ export function buildTideglassMarketKit(market, shared, { propSites = [], hutSit
     for (const hut of hutSites) { const root = footing(bound.haven_hut, hut); root.name = hut.id + '-authored-haven-hut'; group.add(root); }
     group.add(buildTideglassTerrain(materials.get('ground_earth'), hutSites));
     const random = seededRandom(843251), grass = [], shrubs = [], wind = { value: 0 }, detail = [];
-    for (let index = 0; index < 1800; index++) {
+    for (let index = 0; index < 2600; index++) {
       const x = -52 + random() * 85, z = -17 + random() * 79;
       if (random() > tideglassWeight(x, z) || !tideglassPlantClearance(x, z, propSites, .15, hutSites)) continue;
       const patch = Math.sin(x * .45 + z * .18) + Math.sin(z * .51 - x * .16);
       if (patch < -.3) continue;
-      const shrub = patch > .8 && shrubs.length < 52 && random() < .27;
-      if (shrub || grass.length < 190) (shrub ? shrubs : grass).push({ x, z, yaw: random() * TAU, scale: shrub ? .72 + random() * .3 : .45 + random() * .45 });
+      const shrub = patch > .8 && shrubs.length < 70 && random() < .27;
+      if (shrub || grass.length < 300) (shrub ? shrubs : grass).push({ x, z, yaw: random() * TAU, scale: shrub ? .72 + random() * .3 : .45 + random() * .45 });
     }
     detail.push(...batches(library.grass_clump, grass, group, { kind: 'grass', wind, tint: new THREE.Color(1.12, 1.18, .82) }));
     detail.push(...batches(bound.coastal_shrub, shrubs, group, { kind: 'shrubs', wind }));

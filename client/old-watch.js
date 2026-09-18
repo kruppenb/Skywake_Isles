@@ -171,7 +171,7 @@ export function buildOldWatchKit(gltf, { propSites = [] } = {}) {
     group.add(terrainPatch(groundMaterial));
     const flagstones = addFlagstones(prefabs.rock_a, group, propSites);
     const random = seededRandom(80211), grass = [], ferns = [];
-    for (let i = 0; i < 1900; i++) {
+    for (let i = 0; i < 2500; i++) {
       const a = random() * TAU, r = Math.sqrt(random()) * 26, x = OLD_WATCH.x + Math.sin(a) * r, z = OLD_WATCH.z + Math.cos(a) * r;
       if (random() > oldWatchWeight(x, z) || !plantClearance(x, z, propSites)) continue;
       const patch = Math.sin(x * .48 + z * .13) + Math.sin(z * .51 - x * .23);

@@ -329,7 +329,7 @@ test('Tideglass batches stay bounded, planting clears gameplay and low/distant d
   const group = live.scene.getObjectByName('tideglass-market-weathered-environment'), detail = [];
   group.traverse(object => { if (object.isInstancedMesh) detail.push(object); });
   const stats = live.market.getStats(); assert.equal(stats.huts, 2); assert.equal(stats.stalls, 2); assert.equal(stats.cellSize, 16);
-  assert.ok(stats.grass > 20 && stats.grass <= 190); assert.ok(stats.shrubs > 0 && stats.shrubs <= 52); assert.ok(stats.flagstones > 20 && stats.flagstones <= 160);
+  assert.ok(stats.grass > 20 && stats.grass <= 300); assert.ok(stats.shrubs > 0 && stats.shrubs <= 70); assert.ok(stats.flagstones > 20 && stats.flagstones <= 160);
   assert.equal(stats.detailMeshes, detail.length); assert.ok(detail.length < 100, 'spatial batches avoid an object per blade or paver');
   const matrix = new THREE.Matrix4(), position = new THREE.Vector3();
   for (const mesh of detail) {

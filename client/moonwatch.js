@@ -219,14 +219,14 @@ export function buildMoonwatchKit(kit, shared, { propSites = [] } = {}) {
     // Deterministic planting: never on the trail, the shrine ring, Lio's loop,
     // the guarded approach, a chest or an original work site.
     const random = seededRandom(733019), trees = [];
-    for (let index = 0; index < 3600 && trees.length < 22; index++) {
+    for (let index = 0; index < 4800 && trees.length < 30; index++) {
       const x = 70 + random() * 54, z = 16 + random() * 54;
       if (random() > moonwatchWeight(x, z) || !moonwatchPlantClearance(x, z, reserved, 1.4)) continue;
       if (trees.some(tree => Math.hypot(x - tree.x, z - tree.z) < 4.5)) continue;
       trees.push({ prefab: trees.length % 2 ? 'silver_tree_b' : 'silver_tree_a', x, z, yaw: random() * TAU, scale: .8 + random() * .35 });
     }
     const mushrooms = [];
-    for (let index = 0; index < 2200 && mushrooms.length < 24; index++) {
+    for (let index = 0; index < 3000 && mushrooms.length < 32; index++) {
       const x = 70 + random() * 54, z = 16 + random() * 54;
       if (random() > moonwatchWeight(x, z) || !moonwatchPlantClearance(x, z, reserved, .6)) continue;
       if (insideDome(x, z, 5) || mushrooms.some(cap => Math.hypot(x - cap.x, z - cap.z) < 3.5)) continue;
@@ -249,7 +249,7 @@ export function buildMoonwatchKit(kit, shared, { propSites = [] } = {}) {
       }
       return points;
     };
-    const moonbells = scatter(110, 1400, .15, .7, .5), ferns = scatter(90, 1200, .15, .7, .5), grass = scatter(90, 1200, .15, .55, .5);
+    const moonbells = scatter(150, 1900, .15, .7, .5), ferns = scatter(130, 1700, .15, .7, .5), grass = scatter(130, 1700, .15, .55, .5);
     const canopy = [
       ...['silver_tree_a', 'silver_tree_b'].flatMap(name => batches(bound[name], trees.filter(tree => tree.prefab === name), group,
         { kind: 'tree', cell: TREE_CELL, castShadow: true, wind, windKey: CANOPY_WIND.key, windHook: CANOPY_WIND.hook, windMaterials: CANOPY_MATERIALS })),

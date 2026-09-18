@@ -23,6 +23,7 @@ Windward Farm is shipped and validated at `8b66888`, Tideglass Market / central 
 | 7 | Cinderworks and Emberpeak | Complete | `59f9661`; pushed to canonical `main`, Docker deployed and verified; evidence below. |
 | 8 | Moonwatch and Moonbloom | Complete | `35c9a41`; pushed to canonical `main`, Docker deployed and verified; evidence below. |
 | 9 | Island-wide landscape, shoreline, distant detail and performance | Complete — all 4 slices and historical timing | Coast `364e529`, shrine landmarks `5ef1079`, regional canopy `635aa6d`, ground cover `e7f95f7`: pushed to canonical `main`, Docker deployed and verified. Separate matching quiet-host slice-1/2 comparisons completed on 2026-09-09; detailed evidence below. No further zone is planned. |
+| 10 | Island density pass (user request, 2026-09-17) | Complete | Every area's planting cap raised and a new seeded understory of 1,992 walkable plants, trees and palms between the areas (`shared/island-understory.js`, `test/island-understory.test.js`); no gameplay, collider, RNG-stream, GLB or manifest change. See the pipeline's [Island density pass](ENVIRONMENT_PIPELINE.md#island-density-pass--2026-09-17) for the cards, clearance rules and renderer counts. |
 
 ## Milestone 9 plan — inventory of the retained original scenery
 

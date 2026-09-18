@@ -234,7 +234,7 @@ export function buildCinderworksKit(forge, shared, { propSites = [] } = {}) {
     // Deterministic scatter: never on the trail, the shrine ring, Sula's loop,
     // the guarded approach, a chest or an original work site.
     const random = seededRandom(640311), boulders = [];
-    for (let index = 0; index < 1600 && boulders.length < 16; index++) {
+    for (let index = 0; index < 2000 && boulders.length < 20; index++) {
       const x = 52 + random() * 52, z = -70 + random() * 52;
       if (random() > cinderworksWeight(x, z) || !cinderworksPlantClearance(x, z, reserved, 1.2)) continue;
       if (boulders.some(boulder => Math.hypot(x - boulder.x, z - boulder.z) < 3.5)) continue;
@@ -251,7 +251,7 @@ export function buildCinderworksKit(forge, shared, { propSites = [] } = {}) {
       }
       return points;
     };
-    const cinder = scatter(120, 1200, .15, .7, .5), crystals = [];
+    const cinder = scatter(160, 1600, .15, .7, .5), crystals = [];
     // Ember crystals read as a find, so they stay apart and off the forge apron.
     for (let index = 0; index < 600 && crystals.length < 22; index++) {
       const x = 52 + random() * 52, z = -70 + random() * 52;
@@ -259,7 +259,7 @@ export function buildCinderworksKit(forge, shared, { propSites = [] } = {}) {
       if (Math.hypot(x - CINDER_FORGE.x, z - CINDER_FORGE.z) < 7 || crystals.some(shard => Math.hypot(x - shard.x, z - shard.z) < 3)) continue;
       crystals.push({ x, z, yaw: random() * TAU, scale: .8 + random() * .5 });
     }
-    const grass = scatter(90, 900, .15, .55, .5);
+    const grass = scatter(130, 1300, .15, .55, .5);
     const detail = [
       ...batches(bound.cinder_clump, cinder, group, { kind: 'cinder' }),
       ...batches(bound.ember_crystal, crystals, group, { kind: 'crystal' }),

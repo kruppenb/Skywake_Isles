@@ -200,7 +200,7 @@ export function buildSaltwindHarborKit(harbor, shared, { propSites = [] } = {}) 
     group.add(buildSaltwindHarborTerrain(materials.get('ground_earth')));
     // Sparse dune grass, pale straw rather than the island's green lawn tufts.
     const random = seededRandom(661209), grass = [];
-    for (let index = 0; index < 1100 && grass.length < 140; index++) {
+    for (let index = 0; index < 1700 && grass.length < 210; index++) {
       const x = -44 + random() * 42, z = 76 + random() * 46;
       if (random() > saltwindHarborWeight(x, z) || !saltwindPlantClearance(x, z, propSites, .15)) continue;
       if (Math.sin(x * .5 + z * .2) + Math.sin(z * .47 - x * .13) < .1) continue;

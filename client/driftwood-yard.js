@@ -284,7 +284,7 @@ export function buildDriftwoodYardKit(yard, shared, { propSites = [] } = {}) {
     });
     // Sea oats, paler and greener than the harbor's dune straw.
     const grass = [];
-    for (let index = 0; index < 1400 && grass.length < 170; index++) {
+    for (let index = 0; index < 2100 && grass.length < 260; index++) {
       const x = -12 + random() * 66, z = 72 + random() * 50;
       if (random() > driftwoodWeight(x, z) || !driftwoodPlantClearance(x, z, reserved, .15)) continue;
       if (Math.sin(x * .5 + z * .2) + Math.sin(z * .47 - x * .13) < .1) continue;

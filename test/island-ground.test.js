@@ -34,8 +34,11 @@ const JUNGLE_URL = '/assets/palmheart-camp/kit.glb', MOON_URL = '/assets/moonwat
 const KIT_URLS = [SHARED_URL, ISLAND_URL, JUNGLE_URL, MOON_URL, VOLCANO_URL];
 const KIT_FILES = { shared: 'old-watch', island: 'island', jungle: 'palmheart-camp', moon: 'moonwatch', volcano: 'cinderworks' };
 // The nine ground aliases that bend in the wind and the two that never do.
-const SWAYING = ['haven_grass', 'beach_grass', 'jungle_fern', 'jungle_grass', 'moon_fern', 'moon_grass', 'moon_bell', 'shore_coral', 'shore_lilac'];
+const SWAYING = ['haven_grass', 'haven_fern', 'beach_grass', 'jungle_fern', 'jungle_grass', 'moon_fern', 'moon_grass', 'moon_bell', 'volcano_grass', 'shore_coral', 'shore_lilac'];
 const RIGID = ['volcano_cinder', 'beacon_stone'];
+// The two aliases only the understory pass plants: no original ground draw ever
+// dressed a Haven fern or volcanic straw, so the recorded sites stage neither.
+const UNDERSTORY_ONLY = ['haven_fern', 'volcano_grass'];
 
 // --------------------------------------------------------------------------
 // An independent re-derivation of every ground draw. It reads the shared world
@@ -473,8 +476,8 @@ test('buildScenery records one ground descriptor per island clump, shore spray a
 test('the ground palette and every fit are measured on the shipping clump vertices', async () => {
   for (const frozen of [ISLAND_GROUND_NOMINALS, ISLAND_GROUND_COUNTS, ISLAND_GROUND_SOURCES, ISLAND_GROUND_BINDINGS,
     ISLAND_GROUND_PREFABS, BEACON_STONE_ENVELOPE]) assert.ok(Object.isFrozen(frozen));
-  assert.deepEqual([...ISLAND_GROUND_PREFABS], ['haven_grass', 'beach_grass', 'jungle_fern', 'jungle_grass',
-    'moon_fern', 'moon_grass', 'moon_bell', 'volcano_cinder', 'shore_coral', 'shore_lilac', 'beacon_stone']);
+  assert.deepEqual([...ISLAND_GROUND_PREFABS], ['haven_grass', 'haven_fern', 'beach_grass', 'jungle_fern', 'jungle_grass',
+    'moon_fern', 'moon_grass', 'moon_bell', 'volcano_cinder', 'volcano_grass', 'shore_coral', 'shore_lilac', 'beacon_stone']);
   assert.deepEqual([...SWAYING, ...RIGID].sort(), [...ISLAND_GROUND_PREFABS].sort(), 'every alias is either swaying foliage or rigid');
   assert.deepEqual(Object.keys(ISLAND_GROUND_NOMINALS).sort(), [...ISLAND_GROUND_PREFABS].sort(), 'every alias records a nominal');
   // Every alias declares its geometry, the slot that root is authored with and
@@ -623,7 +626,7 @@ test('the ground installs on 16 m cells with the composed source child transform
   let detailMeshes = 0, stoneMeshes = 0;
   for (const alias of ISLAND_GROUND_PREFABS) {
     const own = live.groundSites.filter(site => site.prefab === alias);
-    assert.ok(own.length, alias + ' has recorded sites');
+    if (!own.length) { assert.ok(UNDERSTORY_ONLY.includes(alias), alias + ' has recorded sites'); continue; }
     const cells = cellsOf(own), mine = meshes.filter(mesh => mesh.userData.groundPrefab === alias);
     // One InstancedMesh per source primitive per cell; every shipped clump root
     // is a single primitive, so the mesh count is the independently derived cell
@@ -685,10 +688,12 @@ test('the ground installs on 16 m cells with the composed source child transform
   }
   for (const [alias, materials] of byAlias) assert.equal(materials.size, 1, alias + ' is bound once and shared by every cell');
   const materialOf = alias => [...byAlias.get(alias)][0];
-  const owned = new Set(ISLAND_GROUND_PREFABS.filter(alias => alias !== 'beacon_stone').map(materialOf));
+  const staged = ISLAND_GROUND_PREFABS.filter(alias => !UNDERSTORY_ONLY.includes(alias));
+  assert.deepEqual([...byAlias.keys()].sort(), [...staged].sort(), 'the recorded sites stage every alias but the understory-only two');
+  const owned = new Set(staged.filter(alias => alias !== 'beacon_stone').map(materialOf));
   assert.equal(owned.size, 10, 'every dressed alias owns its own clone, never a shared one');
   const kitOriginals = new Set(fixture.slotMaterials.values()), sharedOriginals = new Set(fixture.materials.values());
-  for (const alias of ISLAND_GROUND_PREFABS) {
+  for (const alias of staged) {
     const material = materialOf(alias), source = ISLAND_GROUND_SOURCES[alias];
     assert.equal(kitOriginals.has(material), false, alias + ' is not a kit original');
     assert.equal(sharedOriginals.has(material), false, alias + ' is not the shared source itself');
@@ -834,9 +839,10 @@ test('the ground counts what it actually staged and sways from the soil, thinnin
   }
   const swaying = new Set(), rigid = new Set();
   for (const mesh of meshes) (shaders.get(mesh.material).uniforms.islandWind ? swaying : rigid).add(mesh.userData.groundPrefab);
-  assert.deepEqual([...swaying].sort(), [...SWAYING].sort(), 'exactly the nine foliage aliases sway');
+  const staged = SWAYING.filter(alias => !UNDERSTORY_ONLY.includes(alias));
+  assert.deepEqual([...swaying].sort(), [...staged].sort(), 'exactly the nine recorded foliage aliases sway');
   assert.deepEqual([...rigid].sort(), [...RIGID].sort(), 'scorched cinder and the beacon stones stay rigid');
-  for (const alias of SWAYING) {
+  for (const alias of staged) {
     const mesh = meshes.find(candidate => candidate.userData.groundPrefab === alias);
     const shader = shaders.get(mesh.material);
     assert.equal(shader.uniforms.islandWind.value, 16, alias + ' reads the shared island wind');

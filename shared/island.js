@@ -220,10 +220,10 @@ const GRASS_CLUMP = Object.freeze({ radius: .37, height: .56 });
 const CINDER_CLUMP = Object.freeze({ radius: .47, height: .26 });
 const MOONBELL_CLUMP = Object.freeze({ radius: .43, height: .49 });
 export const ISLAND_GROUND_NOMINALS = Object.freeze({
-  haven_grass: GRASS_CLUMP, beach_grass: GRASS_CLUMP,
+  haven_grass: GRASS_CLUMP, haven_fern: FERN_CLUMP, beach_grass: GRASS_CLUMP,
   jungle_fern: FERN_CLUMP, jungle_grass: GRASS_CLUMP,
   moon_fern: FERN_CLUMP, moon_grass: GRASS_CLUMP, moon_bell: MOONBELL_CLUMP,
-  volcano_cinder: CINDER_CLUMP,
+  volcano_cinder: CINDER_CLUMP, volcano_grass: GRASS_CLUMP,
   shore_coral: MOONBELL_CLUMP, shore_lilac: MOONBELL_CLUMP,
   beacon_stone: COAST_ROCK_NOMINALS.coast_rock_b,
 });
